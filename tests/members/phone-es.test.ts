@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { NormalizedPhone } from "../../src/modules/members/phone-es";
 import { NORMALIZER_VERSION, normalizeSpanishMobile } from "../../src/modules/members/phone-es";
 
 /**
@@ -52,7 +53,7 @@ const REJECTED: ReadonlyArray<[string, string]> = [
 
 describe("normalizeSpanishMobile", () => {
   it.each(ACCEPTED)("normalizes %j to %s", (input, expected) => {
-    expect(normalizeSpanishMobile(input)).toBe(expected);
+    expect(normalizeSpanishMobile(input)?.e164).toBe(expected);
   });
 
   it.each(REJECTED)("rejects %j (%s)", (input) => {
@@ -64,12 +65,12 @@ describe("normalizeSpanishMobile", () => {
   it.each(ACCEPTED)("is idempotent for %j", (input) => {
     const once = normalizeSpanishMobile(input);
     expect(once).not.toBeNull();
-    expect(normalizeSpanishMobile(once as string)).toBe(once);
+    expect(normalizeSpanishMobile((once as NormalizedPhone).e164)?.e164).toBe(once?.e164);
   });
 
   it("only ever emits the canonical +34 + nine digits form", () => {
     for (const [input] of ACCEPTED) {
-      expect(normalizeSpanishMobile(input)).toMatch(/^\+34[67][0-9]{8}$/);
+      expect(normalizeSpanishMobile(input)?.e164).toMatch(/^\+34[67][0-9]{8}$/);
     }
   });
 });
@@ -78,5 +79,28 @@ describe("NORMALIZER_VERSION", () => {
   // Stored on every Member so a future rule change can find the rows it must backfill.
   it("is the version stamped onto stored numbers", () => {
     expect(NORMALIZER_VERSION).toBe(1);
+  });
+});
+
+describe("regionAssumed", () => {
+  // True whenever Spain was inferred rather than stated. This is the majority of real
+  // submissions, so it is a filter for a later audit, not an alarm on its own: a French
+  // visitor typing a bare national mobile lands on a Spanish number nobody flagged.
+  it("is false when the submission states its country code", () => {
+    for (const input of ["+34612345678", "0034612345678", "34612345678", "(+34) 612 345 678"]) {
+      expect(normalizeSpanishMobile(input)?.regionAssumed, input).toBe(false);
+    }
+  });
+
+  it("is true when a bare national number forced us to assume Spain", () => {
+    for (const input of ["612345678", "612 34 56 78", "712345678"]) {
+      expect(normalizeSpanishMobile(input)?.regionAssumed, input).toBe(true);
+    }
+  });
+});
+
+describe("raw", () => {
+  it("preserves the submission verbatim, so a re-normalization can be a backfill", () => {
+    expect(normalizeSpanishMobile("  (+34) 612-34-56-78 ")?.raw).toBe("  (+34) 612-34-56-78 ");
   });
 });

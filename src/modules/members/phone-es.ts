@@ -1,8 +1,4 @@
-/**
- * Zero-width and bidirectional formatting characters. These arrive constantly from
- * WhatsApp and iOS Contacts pastes and are invisible in every UI, so a length or
- * prefix check that runs before they are stripped silently reads the wrong string.
- */
+/** Zero-width and bidirectional formatting characters. */
 const INVISIBLE = /[\u200B-\u200F\u202A-\u202E\u2060\uFEFF]/g;
 
 const SPAIN_COUNTRY_CODE = "34";
@@ -12,9 +8,23 @@ const ES_MOBILE = /^[67][0-9]{8}$/;
 
 /**
  * Stamped onto every stored number. A future change to the rules below must bump this
- * and backfill the rows still carrying the old version, using Member.phoneRaw.
+ * and backfill the rows still carrying the old version, using their stored `raw`.
  */
 export const NORMALIZER_VERSION = 1;
+
+export interface NormalizedPhone {
+  /** Canonical E.164: "+34" followed by nine digits. The value under the unique index. */
+  e164: string;
+  /** The submission verbatim, so a later rule change is a backfill rather than data loss. */
+  raw: string;
+  /**
+   * True when the submission carried no country code and Spain was inferred. Most real
+   * submissions are bare national numbers, so this is a filter for a later audit rather
+   * than an alarm: it is how you would find the rows where a foreign visitor's national
+   * number may have been read as a Spanish one.
+   */
+  regionAssumed: boolean;
+}
 
 /**
  * Reduces any way a Spanish mobile can be typed to one E.164 string, or null.
@@ -27,7 +37,7 @@ export const NORMALIZER_VERSION = 1;
  * Spain makes that trade cheap — nine-digit subscriber numbers, no variable-length area
  * code, no trunk prefix. Revisit at the second country, together with a backfill.
  */
-export const normalizeSpanishMobile = (input: string): string | null => {
+export const normalizeSpanishMobile = (input: string): NormalizedPhone | null => {
   // NFKC first: fullwidth digits from an IME keyboard are non-digits to \D and would be
   // deleted rather than converted, turning a real number into an empty string.
   const cleaned = input.normalize("NFKC").replace(INVISIBLE, "").trim();
@@ -37,6 +47,7 @@ export const normalizeSpanishMobile = (input: string): string | null => {
   const digits = cleaned.replace(/\D/g, "");
 
   let national: string;
+  let regionAssumed = false;
 
   if (hasPlus) {
     // An explicit country code that is not Spain is a foreign number. Reject it rather
@@ -53,10 +64,15 @@ export const normalizeSpanishMobile = (input: string): string | null => {
     national = digits.slice(2);
   } else {
     national = digits;
+    regionAssumed = true;
   }
 
   // 8xx and 9xx are landlines. They are valid numbers belonging to real people, but they
   // cannot receive the SMS the loyalty programme is built on, so accepting one creates a
   // member who can never be reached.
-  return ES_MOBILE.test(national) ? `+34${national}` : null;
+  if (!ES_MOBILE.test(national)) {
+    return null;
+  }
+
+  return { e164: `+34${national}`, raw: input, regionAssumed };
 };

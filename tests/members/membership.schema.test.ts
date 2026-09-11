@@ -29,17 +29,24 @@ describe("membershipSignupSchema", () => {
     expect(parsed).toEqual({
       fullName: "Verónica Navarro",
       phone: "+34612345678",
+      phoneRaw: "(+34) 612-34-56-78",
+      phoneRegionAssumed: false,
       consentMarketing: true
     });
   });
 
-  it("keeps the raw phone available for a future re-normalization backfill", () => {
+  it("keeps the raw phone, so a future re-normalization is a backfill not data loss", () => {
     const parsed = membershipSignupSchema.parse(VALID);
 
     expect(parsed.phone).toBe("+34612345678");
-    // phoneRaw is carried by the service, not the schema: the schema's output is the
-    // canonical form and nothing downstream should be able to reach the raw string.
-    expect(parsed).not.toHaveProperty("phoneRaw");
+    expect(parsed.phoneRaw).toBe("612 34 56 78");
+  });
+
+  it("records that Spain was assumed, since a bare number states no country", () => {
+    expect(membershipSignupSchema.parse(VALID).phoneRegionAssumed).toBe(true);
+    expect(
+      membershipSignupSchema.parse({ ...VALID, phone: "+34612345678" }).phoneRegionAssumed
+    ).toBe(false);
   });
 
   it("strips unknown keys rather than trusting the client's shape", () => {

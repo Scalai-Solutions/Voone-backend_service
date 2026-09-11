@@ -23,47 +23,57 @@ const NAME_TOO_LONG = "El nombre es demasiado largo";
  * Normalization lives here rather than in the service so that no caller can forget it:
  * the parsed output is already canonical and the raw strings cannot reach the database.
  */
-export const membershipSignupSchema = z.object({
-  fullName: z
-    .string(NAME_INVALID)
-    // Bounded before cleaning so a megabyte of whitespace is rejected, not normalized.
-    .max(200, NAME_TOO_LONG)
-    .transform(cleanMemberName)
-    .superRefine((name, ctx) => {
-      if (name.length > MEMBER_NAME_MAX) {
-        ctx.addIssue({ code: "custom", message: NAME_TOO_LONG });
+export const membershipSignupSchema = z
+  .object({
+    fullName: z
+      .string(NAME_INVALID)
+      // Bounded before cleaning so a megabyte of whitespace is rejected, not normalized.
+      .max(200, NAME_TOO_LONG)
+      .transform(cleanMemberName)
+      .superRefine((name, ctx) => {
+        if (name.length > MEMBER_NAME_MAX) {
+          ctx.addIssue({ code: "custom", message: NAME_TOO_LONG });
 
-        return;
-      }
+          return;
+        }
 
-      if (name.length < MEMBER_NAME_MIN || !isPlausibleName(name)) {
-        ctx.addIssue({ code: "custom", message: NAME_INVALID });
-      }
-    }),
+        if (name.length < MEMBER_NAME_MIN || !isPlausibleName(name)) {
+          ctx.addIssue({ code: "custom", message: NAME_INVALID });
+        }
+      }),
 
-  phone: z
-    .string("Introduce tu número de móvil")
-    .max(32, "El número de teléfono es demasiado largo")
-    .transform((value, ctx) => {
-      const normalized = normalizeSpanishMobile(value);
+    phone: z
+      .string("Introduce tu número de móvil")
+      .max(32, "El número de teléfono es demasiado largo")
+      .transform((value, ctx) => {
+        const normalized = normalizeSpanishMobile(value);
 
-      if (normalized === null) {
-        ctx.addIssue({ code: "custom", message: "Introduce un móvil español válido" });
+        if (normalized === null) {
+          ctx.addIssue({ code: "custom", message: "Introduce un móvil español válido" });
 
-        return z.NEVER;
-      }
+          return z.NEVER;
+        }
 
-      return normalized;
-    }),
+        return normalized;
+      }),
 
-  // Mandatory field, free value. Membership itself rests on performance of a contract,
-  // so requiring `true` here would condition sign-up on marketing consent — which is the
-  // bundling GDPR Art 7(4) forbids. Requiring the field is what proves the member made
-  // an affirmative choice rather than that we assumed one on their behalf.
-  //
-  // Never z.coerce.boolean(): it turns the string "false" into true and fabricates
-  // consent for every member whose form serializes booleans as strings.
-  consentMarketing: z.boolean("Indica si aceptas recibir comunicaciones comerciales")
-});
+    // Mandatory field, free value. Membership itself rests on performance of a contract,
+    // so requiring `true` here would condition sign-up on marketing consent — which is the
+    // bundling GDPR Art 7(4) forbids. Requiring the field is what proves the member made
+    // an affirmative choice rather than that we assumed one on their behalf.
+    //
+    // Never z.coerce.boolean(): it turns the string "false" into true and fabricates
+    // consent for every member whose form serializes booleans as strings.
+    consentMarketing: z.boolean("Indica si aceptas recibir comunicaciones comerciales")
+  })
+  // Flattened here rather than in the service so the parsed value is already shaped like
+  // the row it becomes, and the raw submission cannot be dropped by a forgetful caller.
+  .transform(({ fullName, phone, consentMarketing }) => ({
+    fullName,
+    phone: phone.e164,
+    phoneRaw: phone.raw,
+    phoneRegionAssumed: phone.regionAssumed,
+    consentMarketing
+  }));
 
 export type MembershipSignupInput = z.infer<typeof membershipSignupSchema>;
