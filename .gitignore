@@ -3,3 +3,13 @@ dist
 coverage
 .env
 *.log
+
+# Certificate and key material — never commit signing secrets
+*.p12
+*.pem
+*.key
+*.cer
+*.certSigningRequest
+
+# Generated test fixtures
+tests/.tmp

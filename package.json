@@ -4,19 +4,23 @@
   "private": true,
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "prisma generate && tsc -p tsconfig.json",
+    "build": "prisma generate && tsc -p tsconfig.json && npm run copy:pass-assets",
     "start": "node dist/server.js",
     "lint": "eslint . --max-warnings=0",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "copy:pass-assets": "node scripts/copy-pass-assets.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.12.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.1",
     "express": "^4.19.2",
+    "passkit-generator": "3.6.0",
     "zod": "^4.0.17"
   },
   "devDependencies": {
@@ -26,10 +30,12 @@
     "@types/node": "^24.3.0",
     "eslint": "^9.33.0",
     "eslint-config-prettier": "^10.1.8",
+    "fflate": "^0.8.3",
     "prettier": "^3.6.2",
     "prisma": "6.12.0",
     "tsx": "^4.20.4",
     "typescript": "^5.9.2",
-    "typescript-eslint": "^8.40.0"
+    "typescript-eslint": "^8.40.0",
+    "vitest": "^5.0.0"
   }
 }
