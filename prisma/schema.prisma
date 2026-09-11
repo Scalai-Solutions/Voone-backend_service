@@ -11,3 +11,93 @@ model Health {
   id        String   @id @default(cuid())
   checkedAt DateTime @default(now())
 }
+
+/// Marketing promises five tiers and per-clinic configuration; the wallet pass schema
+/// currently accepts two. All five are defined now because Postgres makes adding an enum
+/// value trivial but reordering or removing one a locking type rewrite. Widening the pass
+/// schema to match is a separate change.
+enum MemberTier {
+  BRONZE
+  SILVER
+  GOLD
+  PLATINUM
+  DIAMOND
+}
+
+model Clinic {
+  id String @id @default(cuid())
+
+  /// The URL key, printed on a QR poster. Lowercase because Postgres unique is
+  /// case-sensitive and a slug can be typed by hand off that poster.
+  slug    String @unique
+  name    String
+  tagline String
+
+  /// Which notice a member is shown at sign-up. The clinic is the data controller, so
+  /// this is per-clinic rather than a global constant.
+  privacyPolicyVersion String @default("v1")
+
+  /// A churned clinic's poster stays in its waiting room for months. Inactive clinics
+  /// 404 rather than 403, so the endpoint does not confirm they ever existed.
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+
+  members Member[]
+
+}
+
+model Member {
+  id       String @id @default(cuid())
+  clinicId String
+
+  /// NFC-normalized, at most 64 characters to match LoyaltyPassData.member.fullName.
+  fullName String
+
+  /// Canonical E.164. Written only by normalizeSpanishMobile — a database CHECK enforces
+  /// the shape, because @@unique below is only a duplicate check if every writer agrees
+  /// on the canonical form.
+  phone String
+
+  /// The submission verbatim. Without it, changing the normalization rules is data loss
+  /// rather than a backfill.
+  phoneRaw          String?
+  normalizerVersion Int     @default(1)
+
+  /// True when no country code was supplied and Spain was inferred, which is most rows.
+  /// An audit filter, not an alarm — see phone-es.ts.
+  phoneRegionAssumed Boolean @default(false)
+
+  /// Europe/Madrid year, frozen at sign-up. Not derived from createdAt at render time:
+  /// the container runs UTC, so a December 31st evening sign-up would print the wrong
+  /// year on something that reads as a physical card.
+  memberSince Int
+  tier        MemberTier @default(BRONZE)
+  locale      String     @default("es-ES")
+
+  /// Membership rests on performance of a contract, so it needs no consent. Marketing
+  /// does. The value may be false; what is recorded is that a choice was made.
+  consentMarketing   Boolean
+  consentMarketingAt DateTime?
+
+  /// Snapshot of the notice actually shown, not a foreign key: the point is to record
+  /// what the member read, and a reference to an editable row destroys that evidence.
+  privacyPolicyVersion String
+  consentSource        String @default("qr_signup")
+
+  /// A re-scan at reception bumps these instead of rewriting the name, which would let
+  /// anyone who knows a phone number rename a real member.
+  signupCount  Int      @default(1)
+  lastSignupAt DateTime @default(now())
+
+  createdAt DateTime @default(now())
+
+  /// Erasure overwrites the row in place rather than deleting it, so a future points
+  /// ledger keeps its references. phone becomes a random tombstone, which keeps the
+  /// unique index satisfiable and lets the person register again later.
+  erasedAt DateTime?
+
+  clinic Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  @@unique([clinicId, phone])
+}
