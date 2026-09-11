@@ -11,8 +11,12 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prisma:migrate": "prisma migrate dev",
+    "prisma:seed": "prisma db seed",
     "test": "vitest run",
     "test:watch": "vitest"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "6.12.0",
