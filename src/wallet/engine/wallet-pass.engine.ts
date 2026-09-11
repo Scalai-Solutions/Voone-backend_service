@@ -1,5 +1,6 @@
 import { WalletProviderType } from "@prisma/client";
 
+import { WalletPassDataError } from "../../common/errors/wallet.errors";
 import { config } from "../../config/env";
 import { getGoogleWalletIssuerId } from "../providers/google/client";
 import { createOrUpdateClass } from "../providers/google";
@@ -8,7 +9,18 @@ import type {
   ClinicTemplateWithRelations,
   WalletClassSyncResult
 } from "../../modules/templates/templates.repository";
+import { WalletPlatform, getPassBuilder } from "../wallet.factory";
+import { loyaltyPassDataSchema } from "./wallet-pass.schema";
+import { BuiltPass } from "./wallet-pass.types";
 
+/**
+ * Provider-independent orchestration.
+ *
+ * The two halves here are deliberately different shapes, because the providers are:
+ * Google's classes live on Google's servers and are created once per clinic template,
+ * while an Apple pass is a signed file built per member. Both sit behind this engine so
+ * callers do not reach for a vendor SDK directly.
+ */
 export class WalletPassEngine {
   async createClassForTemplate(
     template: ClinicTemplateWithRelations
@@ -57,8 +69,19 @@ export class WalletPassEngine {
     return results;
   }
 
-  createPass(): never {
-    throw new Error("Not implemented");
+  /** Validate the data, then delegate to the platform's builder. */
+  async createPass(platform: WalletPlatform, data: unknown): Promise<BuiltPass> {
+    const parsed = loyaltyPassDataSchema.safeParse(data);
+
+    if (!parsed.success) {
+      const details = parsed.error.issues
+        .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+        .join("; ");
+
+      throw new WalletPassDataError(`Invalid loyalty pass data: ${details}`);
+    }
+
+    return getPassBuilder(platform).build(parsed.data);
   }
 
   updatePass(): never {
