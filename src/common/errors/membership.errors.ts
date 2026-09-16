@@ -28,3 +28,27 @@ export class MembershipValidationError extends AppError {
     });
   }
 }
+
+/** The slug is already taken. Slugs are printed on posters, so they cannot be reassigned. */
+export class ClinicSlugTakenError extends AppError {
+  constructor(slug: string) {
+    super(`Clinic slug "${slug}" is already in use`, {
+      statusCode: 409,
+      code: "CLINIC_SLUG_TAKEN",
+      // Safe: it echoes only the slug the caller sent, and the sign-up endpoint already
+      // reveals whether a slug resolves.
+      expose: true
+    });
+  }
+}
+
+/** The chosen template preset does not exist. */
+export class TemplatePresetNotFoundError extends AppError {
+  constructor(presetId: string) {
+    super(`Template preset "${presetId}" not found`, {
+      statusCode: 422,
+      code: "TEMPLATE_PRESET_NOT_FOUND",
+      expose: true
+    });
+  }
+}

@@ -39,7 +39,7 @@ export default defineRailway(() => {
       FRONTEND_URL: preserve(),
       // Not a secret and not environment-specific: src/config/env.ts requires it at import,
       // so a missing value is a boot failure rather than a degraded feature.
-      PORT: "4000",
+      PORT: "4000"
     },
 
     // Migrations run before the new version takes traffic, so the code and the schema can

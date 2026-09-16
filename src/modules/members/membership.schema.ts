@@ -11,7 +11,13 @@ import { normalizeSpanishMobile } from "./phone-es";
 export const clinicSlugSchema = z
   .string()
   .max(64)
-  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+  .regex(
+    /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+    // Surfaces to an operator in the provisioning form. Zod's default dumps the pattern,
+    // which is noise to someone typing a clinic name; when this schema only ever saw slugs
+    // from a URL the message was never read by anyone.
+    "Usa minúsculas, números y guiones (por ejemplo: clinica-nova)"
+  );
 
 /** Kept in step with SignupSource in membership.service.ts. */
 export const signupSourceSchema = z.enum(
