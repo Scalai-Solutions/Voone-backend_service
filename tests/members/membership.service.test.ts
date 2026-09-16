@@ -17,6 +17,7 @@ const AUREA = {
 
 const INPUT = {
   name: "Verónica Navarro",
+  email: undefined,
   phone: "+34612345678",
   phoneRaw: "612 34 56 78",
   phoneRegionAssumed: true,
@@ -49,6 +50,7 @@ describe("signUpMember", () => {
       data: {
         clinicId: "c1",
         name: "Verónica Navarro",
+        email: undefined,
         phone: "+34612345678",
         phoneRaw: "612 34 56 78",
         phoneRegionAssumed: true,

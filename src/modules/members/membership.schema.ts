@@ -67,6 +67,20 @@ export const membershipSignupSchema = z
     //
     // Never z.coerce.boolean(): it turns the string "false" into true and fabricates
     // consent for every member whose form serializes booleans as strings.
+    /**
+     * Optional additional contact. The phone is the identity — it is what the unique index
+     * and the programme's SMS depend on — so an email never replaces it, only supplements
+     * it. Lowercased because addresses are case-insensitive in practice and storing two
+     * spellings of one address would defeat any future lookup.
+     */
+    email: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .max(254, "El email es demasiado largo")
+      .pipe(z.string().email("Introduce un email válido"))
+      .optional(),
+
     consentMarketing: z.boolean("Indica si aceptas recibir comunicaciones comerciales"),
 
     /**
@@ -84,8 +98,9 @@ export const membershipSignupSchema = z
   })
   // Flattened here rather than in the service so the parsed value is already shaped like
   // the row it becomes, and the raw submission cannot be dropped by a forgetful caller.
-  .transform(({ name, phone, consentMarketing, consentSource }) => ({
+  .transform(({ name, phone, email, consentMarketing, consentSource }) => ({
     name,
+    email,
     phone: phone.e164,
     phoneRaw: phone.raw,
     phoneRegionAssumed: phone.regionAssumed,

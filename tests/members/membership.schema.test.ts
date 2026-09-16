@@ -100,6 +100,23 @@ describe("membershipSignupSchema", () => {
     });
   });
 
+  describe("email", () => {
+    it("is optional, because the phone is the identity", () => {
+      expect(membershipSignupSchema.parse(VALID).email).toBeUndefined();
+    });
+
+    it("lowercases, so one address cannot be stored two ways", () => {
+      expect(membershipSignupSchema.parse({ ...VALID, email: "  Ana@Example.COM " }).email).toBe(
+        "ana@example.com"
+      );
+    });
+
+    it("rejects something that is not an address", () => {
+      expect(details({ ...VALID, email: "ana@" })).toContain("email");
+      expect(details({ ...VALID, email: "nope" })).toContain("email");
+    });
+  });
+
   describe("consentSource", () => {
     it("is omitted by the public form, which the route reads as a QR sign-up", () => {
       expect(membershipSignupSchema.parse(VALID).consentSource).toBeUndefined();

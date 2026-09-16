@@ -38,6 +38,7 @@ export const signUpMember = async (
       data: {
         clinicId: clinic.id,
         name: input.name,
+        email: input.email,
         phone: input.phone,
         phoneRaw: input.phoneRaw,
         phoneRegionAssumed: input.phoneRegionAssumed,
