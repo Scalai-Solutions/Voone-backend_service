@@ -49,7 +49,7 @@ membersRouter.post(
       throw new MembershipValidationError(details);
     }
 
-    await signUpMember(prisma, clinic, parsed.data);
+    await signUpMember(prisma, clinic, parsed.data, "qr_signup");
 
     // Byte-identical whether the member was created or already existed. A 201/200
     // distinction would tell anyone who can POST whether a given phone number belongs

@@ -25,7 +25,7 @@ const NAME_TOO_LONG = "El nombre es demasiado largo";
  */
 export const membershipSignupSchema = z
   .object({
-    fullName: z
+    name: z
       .string(NAME_INVALID)
       // Bounded before cleaning so a megabyte of whitespace is rejected, not normalized.
       .max(200, NAME_TOO_LONG)
@@ -68,8 +68,8 @@ export const membershipSignupSchema = z
   })
   // Flattened here rather than in the service so the parsed value is already shaped like
   // the row it becomes, and the raw submission cannot be dropped by a forgetful caller.
-  .transform(({ fullName, phone, consentMarketing }) => ({
-    fullName,
+  .transform(({ name, phone, consentMarketing }) => ({
+    name,
     phone: phone.e164,
     phoneRaw: phone.raw,
     phoneRegionAssumed: phone.regionAssumed,

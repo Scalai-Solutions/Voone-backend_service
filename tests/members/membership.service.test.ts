@@ -7,14 +7,16 @@ const AUREA = {
   id: "c1",
   slug: "aurea",
   name: "AURÉA",
-  tagline: "CLINIC CLUB",
+  addressLine: "Calle de Serrano 21",
+  pincode: "28001",
   privacyPolicyVersion: "v3",
   isActive: true,
-  createdAt: new Date("2026-01-01T00:00:00Z")
+  createdAt: new Date("2026-01-01T00:00:00Z"),
+  updatedAt: new Date("2026-01-01T00:00:00Z")
 } satisfies Clinic;
 
 const INPUT = {
-  fullName: "Verónica Navarro",
+  name: "Verónica Navarro",
   phone: "+34612345678",
   phoneRaw: "612 34 56 78",
   phoneRegionAssumed: true,
@@ -36,14 +38,14 @@ describe("signUpMember", () => {
   it("stores the canonical submission against the clinic", async () => {
     const create = vi.fn().mockResolvedValue({});
 
-    await expect(signUpMember(db({ create }), AUREA, INPUT, NOW)).resolves.toEqual({
+    await expect(signUpMember(db({ create }), AUREA, INPUT, "qr_signup", NOW)).resolves.toEqual({
       created: true
     });
 
     expect(create).toHaveBeenCalledWith({
       data: {
         clinicId: "c1",
-        fullName: "Verónica Navarro",
+        name: "Verónica Navarro",
         phone: "+34612345678",
         phoneRaw: "612 34 56 78",
         phoneRegionAssumed: true,
@@ -51,6 +53,7 @@ describe("signUpMember", () => {
         memberSince: 2026,
         consentMarketing: true,
         consentMarketingAt: NOW,
+        consentSource: "qr_signup",
         // Snapshot of the notice the member was actually shown, taken from the clinic.
         privacyPolicyVersion: "v3",
         lastSignupAt: NOW
@@ -61,7 +64,13 @@ describe("signUpMember", () => {
   it("records no consent timestamp when marketing consent is declined", async () => {
     const create = vi.fn().mockResolvedValue({});
 
-    await signUpMember(db({ create }), AUREA, { ...INPUT, consentMarketing: false }, NOW);
+    await signUpMember(
+      db({ create }),
+      AUREA,
+      { ...INPUT, consentMarketing: false },
+      "qr_signup",
+      NOW
+    );
 
     expect(create.mock.calls[0][0].data).toMatchObject({
       consentMarketing: false,
@@ -74,7 +83,9 @@ describe("signUpMember", () => {
       const create = vi.fn().mockRejectedValue(uniqueViolation());
       const update = vi.fn().mockResolvedValue({});
 
-      await expect(signUpMember(db({ create, update }), AUREA, INPUT, NOW)).resolves.toEqual({
+      await expect(
+        signUpMember(db({ create, update }), AUREA, INPUT, "qr_signup", NOW)
+      ).resolves.toEqual({
         created: false
       });
 
@@ -90,9 +101,15 @@ describe("signUpMember", () => {
       const create = vi.fn().mockRejectedValue(uniqueViolation());
       const update = vi.fn().mockResolvedValue({});
 
-      await signUpMember(db({ create, update }), AUREA, { ...INPUT, fullName: "Otra" }, NOW);
+      await signUpMember(
+        db({ create, update }),
+        AUREA,
+        { ...INPUT, name: "Otra" },
+        "qr_signup",
+        NOW
+      );
 
-      expect(update.mock.calls[0][0].data).not.toHaveProperty("fullName");
+      expect(update.mock.calls[0][0].data).not.toHaveProperty("name");
       expect(update.mock.calls[0][0].data).not.toHaveProperty("consentMarketing");
       expect(update.mock.calls[0][0].data).not.toHaveProperty("phoneRaw");
     });
@@ -105,7 +122,9 @@ describe("signUpMember", () => {
     const create = vi.fn().mockRejectedValue(violation);
     const update = vi.fn().mockRejectedValue(new Error("record not found"));
 
-    await expect(signUpMember(db({ create, update }), AUREA, INPUT, NOW)).rejects.toBe(violation);
+    await expect(signUpMember(db({ create, update }), AUREA, INPUT, "qr_signup", NOW)).rejects.toBe(
+      violation
+    );
     expect(create).toHaveBeenCalledOnce();
     expect(update).toHaveBeenCalledOnce();
   });
@@ -118,7 +137,9 @@ describe("signUpMember", () => {
     const create = vi.fn().mockRejectedValue(outage);
     const update = vi.fn();
 
-    await expect(signUpMember(db({ create, update }), AUREA, INPUT, NOW)).rejects.toBe(outage);
+    await expect(signUpMember(db({ create, update }), AUREA, INPUT, "qr_signup", NOW)).rejects.toBe(
+      outage
+    );
     expect(update).not.toHaveBeenCalled();
   });
 });

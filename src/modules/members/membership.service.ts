@@ -5,6 +5,13 @@ import { madridYear } from "./member-since";
 import type { MembershipSignupInput } from "./membership.schema";
 import { NORMALIZER_VERSION } from "./phone-es";
 
+/**
+ * How a member reached the programme. Stated by the caller rather than defaulted: the
+ * column is a provenance record, and a default would quietly attribute a staff entry to
+ * the public form.
+ */
+export type SignupSource = "qr_signup" | "staff_entry";
+
 export interface SignUpResult {
   /** False when the number was already a member. Not exposed — see the route. */
   created: boolean;
@@ -22,13 +29,14 @@ export const signUpMember = async (
   db: PrismaClient,
   clinic: Clinic,
   input: MembershipSignupInput,
+  source: SignupSource,
   now: Date = new Date()
 ): Promise<SignUpResult> => {
   try {
     await db.member.create({
       data: {
         clinicId: clinic.id,
-        fullName: input.fullName,
+        name: input.name,
         phone: input.phone,
         phoneRaw: input.phoneRaw,
         phoneRegionAssumed: input.phoneRegionAssumed,
@@ -36,6 +44,7 @@ export const signUpMember = async (
         memberSince: madridYear(now),
         consentMarketing: input.consentMarketing,
         consentMarketingAt: input.consentMarketing ? now : null,
+        consentSource: source,
         // Snapshot, not a reference: the evidence is which notice the member was shown,
         // and a foreign key to an editable row would destroy it.
         privacyPolicyVersion: clinic.privacyPolicyVersion,
@@ -51,7 +60,7 @@ export const signUpMember = async (
 
     try {
       // Addressed by the composite unique key directly, so this is one round trip and
-      // cannot race with itself. Only the counters move: rewriting fullName here would
+      // cannot race with itself. Only the counters move: rewriting the name here would
       // let anyone who knows a phone number rename a real member, and that name is what
       // appears on the pass they show at reception.
       await db.member.update({

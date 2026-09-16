@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sapphira Privé | Google Wallet QA</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: sans-serif;
+        background: #f6f1e8;
+        color: #2c2419;
+      }
+
+      body {
+        display: grid;
+        min-height: 100vh;
+        margin: 0;
+        place-items: center;
+      }
+
+      main {
+        display: grid;
+        gap: 16px;
+        justify-items: center;
+        padding: 24px;
+      }
+
+      #save-link {
+        display: inline-flex;
+        min-height: 48px;
+        align-items: center;
+        padding: 8px;
+      }
+
+      #save-link img {
+        display: block;
+        height: 48px;
+        width: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <a id="save-link" href="#">
+        <img src="/wallet/add-to-google-wallet-es.svg" alt="Añadir a Google Wallet" />
+      </a>
+    </main>
+    <script>
+      const saveLink = document.querySelector("#save-link");
+
+      fetch("/api/v1/wallet/test/sapphira-prive/sergio-gil")
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error(`Wallet fixture request failed: ${response.status}`);
+          }
+
+          return response.json();
+        })
+        .then(({ saveUrl }) => {
+          saveLink.href = saveUrl;
+        })
+        .catch((error) => {
+          console.error(error);
+        });
+    </script>
+  </body>
+</html>

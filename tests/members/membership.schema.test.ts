@@ -6,7 +6,7 @@ import {
 } from "../../src/modules/members/membership.schema";
 
 const VALID = {
-  fullName: "Verónica Navarro",
+  name: "Verónica Navarro",
   phone: "612 34 56 78",
   consentMarketing: false
 };
@@ -21,13 +21,13 @@ const details = (input: unknown): string => {
 describe("membershipSignupSchema", () => {
   it("emits a canonical name and an E.164 phone, so nothing else must remember to", () => {
     const parsed = membershipSignupSchema.parse({
-      fullName: "  Verónica   Navarro ",
+      name: "  Verónica   Navarro ",
       phone: "(+34) 612-34-56-78",
       consentMarketing: true
     });
 
     expect(parsed).toEqual({
-      fullName: "Verónica Navarro",
+      name: "Verónica Navarro",
       phone: "+34612345678",
       phoneRaw: "(+34) 612-34-56-78",
       phoneRegionAssumed: false,
@@ -66,7 +66,7 @@ describe("membershipSignupSchema", () => {
     });
 
     it("rejects a missing consent field, so an absent choice is never read as a choice", () => {
-      const withoutConsent = { fullName: VALID.fullName, phone: VALID.phone };
+      const withoutConsent = { name: VALID.name, phone: VALID.phone };
 
       expect(details(withoutConsent)).toContain("consentMarketing");
     });
@@ -78,25 +78,25 @@ describe("membershipSignupSchema", () => {
     });
   });
 
-  describe("fullName", () => {
+  describe("name", () => {
     it("rejects a name that is empty once cleaned", () => {
-      expect(details({ ...VALID, fullName: "   " })).toMatch(/fullName/);
+      expect(details({ ...VALID, name: "   " })).toMatch(/name/);
     });
 
     it("rejects a single character", () => {
-      expect(details({ ...VALID, fullName: "V" })).toMatch(/fullName/);
+      expect(details({ ...VALID, name: "V" })).toMatch(/name/);
     });
 
     it("rejects a name longer than the pass field can carry", () => {
-      expect(details({ ...VALID, fullName: "á".repeat(65) })).toMatch(/fullName/);
-      expect(
-        membershipSignupSchema.parse({ ...VALID, fullName: "á".repeat(64) }).fullName
-      ).toHaveLength(64);
+      expect(details({ ...VALID, name: "á".repeat(65) })).toMatch(/name/);
+      expect(membershipSignupSchema.parse({ ...VALID, name: "á".repeat(64) }).name).toHaveLength(
+        64
+      );
     });
 
     it("rejects digits and injection payloads", () => {
-      expect(details({ ...VALID, fullName: "12345" })).toMatch(/fullName/);
-      expect(details({ ...VALID, fullName: "Ana <script>" })).toMatch(/fullName/);
+      expect(details({ ...VALID, name: "12345" })).toMatch(/name/);
+      expect(details({ ...VALID, name: "Ana <script>" })).toMatch(/name/);
     });
   });
 
@@ -113,9 +113,9 @@ describe("membershipSignupSchema", () => {
   });
 
   it("reports every failing field at once, so the form can show them together", () => {
-    const message = details({ fullName: "1", phone: "nope", consentMarketing: "yes" });
+    const message = details({ name: "1", phone: "nope", consentMarketing: "yes" });
 
-    expect(message).toContain("fullName");
+    expect(message).toContain("name");
     expect(message).toContain("phone");
     expect(message).toContain("consentMarketing");
   });

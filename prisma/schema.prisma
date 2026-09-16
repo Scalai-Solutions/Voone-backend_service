@@ -12,52 +12,119 @@ model Health {
   checkedAt DateTime @default(now())
 }
 
-/// Marketing promises five tiers and per-clinic configuration; the wallet pass schema
-/// currently accepts two. All five are defined now because Postgres makes adding an enum
-/// value trivial but reordering or removing one a locking type rewrite. Widening the pass
-/// schema to match is a separate change.
-enum MemberTier {
-  BRONZE
-  SILVER
-  GOLD
-  PLATINUM
-  DIAMOND
-}
-
 model Clinic {
-  id String @id @default(cuid())
+  id          String   @id @default(uuid())
+  name        String
+  addressLine String
+  pincode     String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  /// The URL key, printed on a QR poster. Lowercase because Postgres unique is
-  /// case-sensitive and a slug can be typed by hand off that poster.
-  slug    String @unique
-  name    String
-  tagline String
+  /// The URL key printed on a QR poster. Lowercase, because Postgres unique is
+  /// case-sensitive and a slug gets typed by hand off that poster.
+  slug String @unique
 
-  /// Which notice a member is shown at sign-up. The clinic is the data controller, so
-  /// this is per-clinic rather than a global constant.
+  /// Which privacy notice a member is shown at sign-up. Per clinic rather than a global
+  /// constant: the clinic is the data controller, Voone is the processor.
   privacyPolicyVersion String @default("v1")
 
   /// A churned clinic's poster stays in its waiting room for months. Inactive clinics
-  /// 404 rather than 403, so the endpoint does not confirm they ever existed.
+  /// 404 rather than 403, so the response never confirms they existed.
   isActive Boolean @default(true)
 
+  users      User[]
+  treatments ClinicTreatment[]
+  template   ClinicTemplate?
+  members    Member[]
+}
+
+model User {
+  id        String   @id @default(uuid())
+  clinicId  String?
+  clinic    Clinic?  @relation(fields: [clinicId], references: [id])
+  email     String   @unique
+  role      UserRole
   createdAt DateTime @default(now())
 
-  members Member[]
+  @@index([clinicId])
+}
 
+enum UserRole {
+  OWNER
+  MANAGER
+  STAFF
+  VOONE_ADMIN
+}
+
+model ClinicTreatment {
+  id             String   @id @default(uuid())
+  clinicId       String
+  clinic         Clinic   @relation(fields: [clinicId], references: [id])
+  name           String
+  pointsAllotted Int
+  createdAt      DateTime @default(now())
+
+  @@index([clinicId])
+}
+
+model TemplatePreset {
+  id                 String   @id @default(uuid())
+  name               String   @unique
+  hexBackgroundColor String
+  previewImageUrl    String?
+  createdAt          DateTime @default(now())
+
+  templates ClinicTemplate[]
+}
+
+model ClinicTemplate {
+  id                 String         @id @default(uuid())
+  clinicId           String         @unique
+  clinic             Clinic         @relation(fields: [clinicId], references: [id])
+  presetId           String
+  preset             TemplatePreset @relation(fields: [presetId], references: [id])
+  programName        String
+  hexBackgroundColor String
+  logoUrl            String?
+  heroImageUrl       String?
+  pointsLabel        String
+  tierLabel          String
+  benefitsText       String
+  infoText           String
+  status             TemplateStatus @default(PENDING)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  walletClasses WalletClass[]
+
+  @@index([presetId])
+}
+
+enum TemplateStatus {
+  PENDING
+  ACTIVE
+  FAILED
 }
 
 model Member {
-  id       String @id @default(cuid())
+  id       String @id @default(uuid())
   clinicId String
+  clinic   Clinic @relation(fields: [clinicId], references: [id])
+  name     String
 
-  /// NFC-normalized, at most 64 characters to match LoyaltyPassData.member.fullName.
-  fullName String
+  /// Canonical E.164, written only by normalizeSpanishMobile. A database CHECK enforces
+  /// the shape, because the unique index below only detects duplicates if every writer
+  /// agrees on the canonical form.
+  ///
+  /// Nullable so the dashboard's add-by-email path still works: Postgres treats NULLs as
+  /// distinct in a unique index, so one clinic can hold many email-only members while a
+  /// real number still cannot repeat.
+  phone String?
 
-  /// Canonical E.164. Written only by normalizeSpanishMobile — a database CHECK enforces
-  /// the shape, because @@unique below is only a duplicate check if every writer agrees
-  /// on the canonical form.
-  phone String
+  email         String?
+  pointsBalance Int      @default(0)
+  tier          String?
+  createdAt     DateTime @default(now())
 
   /// The submission verbatim. Without it, changing the normalization rules is data loss
   /// rather than a backfill.
@@ -68,36 +135,77 @@ model Member {
   /// An audit filter, not an alarm — see phone-es.ts.
   phoneRegionAssumed Boolean @default(false)
 
-  /// Europe/Madrid year, frozen at sign-up. Not derived from createdAt at render time:
-  /// the container runs UTC, so a December 31st evening sign-up would print the wrong
-  /// year on something that reads as a physical card.
-  memberSince Int
-  tier        MemberTier @default(BRONZE)
-  locale      String     @default("es-ES")
+  /// Europe/Madrid year, frozen at sign-up rather than derived from createdAt at render
+  /// time: the container runs UTC, so a sign-up at 23:30 on the 31st of December would
+  /// print the previous year on something that reads as a physical card. Nullable because
+  /// it is derived data and a member created outside this flow legitimately has none.
+  memberSince Int?
 
-  /// Membership rests on performance of a contract, so it needs no consent. Marketing
-  /// does. The value may be false; what is recorded is that a choice was made.
+  locale String @default("es-ES")
+
+  /// Required, with no default. Membership itself rests on performance of a contract, so
+  /// what must be recorded is that a choice was made; a default would let an absent
+  /// choice be read as one, which is the accountability failure the column prevents.
   consentMarketing   Boolean
   consentMarketingAt DateTime?
 
-  /// Snapshot of the notice actually shown, not a foreign key: the point is to record
-  /// what the member read, and a reference to an editable row destroys that evidence.
-  privacyPolicyVersion String
-  consentSource        String @default("qr_signup")
+  /// Snapshot of the notice actually shown, not a foreign key: the evidence is what the
+  /// member read, and a reference to an editable row destroys it.
+  privacyPolicyVersion String?
+
+  /// How the member was collected — "qr_signup", "staff_entry". Required for the same
+  /// reason as consentMarketing: provenance is not a safe thing to assume.
+  consentSource String
 
   /// A re-scan at reception bumps these instead of rewriting the name, which would let
   /// anyone who knows a phone number rename a real member.
   signupCount  Int      @default(1)
   lastSignupAt DateTime @default(now())
 
-  createdAt DateTime @default(now())
-
   /// Erasure overwrites the row in place rather than deleting it, so a future points
   /// ledger keeps its references. phone becomes a random tombstone, which keeps the
   /// unique index satisfiable and lets the person register again later.
   erasedAt DateTime?
 
-  clinic Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  walletObjects WalletObject[]
 
   @@unique([clinicId, phone])
+  @@index([clinicId])
+}
+
+model WalletClass {
+  id               String             @id @default(uuid())
+  clinicTemplateId String
+  clinicTemplate   ClinicTemplate     @relation(fields: [clinicTemplateId], references: [id])
+  provider         WalletProviderType
+  externalClassId  String
+  status           WalletSyncStatus   @default(PENDING)
+  lastSyncedAt     DateTime?
+  createdAt        DateTime           @default(now())
+
+  @@unique([clinicTemplateId, provider])
+}
+
+model WalletObject {
+  id               String             @id @default(uuid())
+  memberId         String
+  member           Member             @relation(fields: [memberId], references: [id])
+  provider         WalletProviderType
+  externalObjectId String
+  status           WalletSyncStatus   @default(PENDING)
+  lastSyncedAt     DateTime?
+  createdAt        DateTime           @default(now())
+
+  @@unique([memberId, provider])
+}
+
+enum WalletProviderType {
+  GOOGLE
+  APPLE
+}
+
+enum WalletSyncStatus {
+  PENDING
+  SYNCED
+  FAILED
 }
