@@ -128,9 +128,15 @@ describe("membershipSignupSchema", () => {
       ).toBe("staff_entry");
     });
 
-    it("rejects a provenance it does not know", () => {
-      expect(details({ ...VALID, consentSource: "imported" })).toContain("consentSource");
+    it("rejects a provenance it does not know, in Spanish like every other message", () => {
+      expect(details({ ...VALID, consentSource: "imported" })).toBe(
+        "consentSource: Origen de alta no válido"
+      );
       expect(details({ ...VALID, consentSource: "" })).toContain("consentSource");
+    });
+
+    it("does not list the accepted values, which are an internal shape", () => {
+      expect(details({ ...VALID, consentSource: "imported" })).not.toContain("qr_signup");
     });
   });
 

@@ -82,19 +82,18 @@ curl -X POST http://localhost:4000/api/v1/clinics/aurea/members \
 
 The health endpoint is available at `GET /api/v1/health`.
 
-### Seeding a deployed environment
+### Seeding
 
-`prisma db seed` runs `tsx`, which is a devDependency, so it will **fail on a production
-install where dev dependencies are pruned**. A fresh deployment therefore comes up with no
-clinics, and every sign-up returns 404 until it is seeded. Run it once per environment as a
-release step:
+`npm run prisma:seed` inserts two **demo** clinics with templates, for local development.
+It is not needed in a deployed environment and should not be run in one: those clinics are
+fictional, and real ones need a provisioning flow.
 
-```bash
-npx prisma db seed
-```
-
-Moving the clinics into a migration would remove this step; that is deliberately left for
-when clinic provisioning gets a real surface.
+The `TemplatePreset` rows a clinic needs before it can create a template are reference
+data, so they live in a migration (`20260916160000_seed_template_presets`) and are applied
+by `prisma migrate deploy` in `preDeploy`. That is deliberate: they used to be seeded, and
+`prisma db seed` runs `tsx` — a devDependency — so it fails on a production install where
+dev dependencies are pruned, leaving an environment with no presets and no way to notice
+until a clinic tried to onboard.
 
 ## Deployment (Railway)
 
