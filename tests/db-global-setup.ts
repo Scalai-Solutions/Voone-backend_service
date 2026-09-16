@@ -2,6 +2,8 @@ import { execFileSync } from "node:child_process";
 
 import dotenv from "dotenv";
 
+import { assertLocalDatabaseUrl } from "./assert-local-database";
+
 /**
  * Brings the test database up to date before any suite runs.
  *
@@ -18,6 +20,11 @@ export default function setup(): void {
   process.env.REDIS_URL ??= "redis://localhost:6379";
   process.env.PORT ??= "4000";
   process.env.FRONTEND_URL ??= "http://localhost:3000";
+
+  // Checked after the fallbacks are applied and before anything touches the database: a
+  // developer's .env wins over those fallbacks, so a .env pointed at a hosted database
+  // would otherwise be migrated, seeded and written to by the suite.
+  assertLocalDatabaseUrl(process.env.DATABASE_URL);
 
   try {
     // deploy, not dev: dev is interactive and would prompt or reset in CI.
