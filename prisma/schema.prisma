@@ -20,6 +20,18 @@ model Clinic {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  /// The URL key printed on a QR poster. Lowercase, because Postgres unique is
+  /// case-sensitive and a slug gets typed by hand off that poster.
+  slug String @unique
+
+  /// Which privacy notice a member is shown at sign-up. Per clinic rather than a global
+  /// constant: the clinic is the data controller, Voone is the processor.
+  privacyPolicyVersion String @default("v1")
+
+  /// A churned clinic's poster stays in its waiting room for months. Inactive clinics
+  /// 404 rather than 403, so the response never confirms they existed.
+  isActive Boolean @default(true)
+
   users      User[]
   treatments ClinicTreatment[]
   template   ClinicTemplate?
@@ -95,18 +107,69 @@ enum TemplateStatus {
 }
 
 model Member {
-  id            String   @id @default(uuid())
-  clinicId      String
-  clinic        Clinic   @relation(fields: [clinicId], references: [id])
-  name          String
-  phone         String?
+  id       String @id @default(uuid())
+  clinicId String
+  clinic   Clinic @relation(fields: [clinicId], references: [id])
+  name     String
+
+  /// Canonical E.164, written only by normalizeSpanishMobile. A database CHECK enforces
+  /// the shape, because the unique index below only detects duplicates if every writer
+  /// agrees on the canonical form.
+  ///
+  /// Nullable so the dashboard's add-by-email path still works: Postgres treats NULLs as
+  /// distinct in a unique index, so one clinic can hold many email-only members while a
+  /// real number still cannot repeat.
+  phone String?
+
   email         String?
   pointsBalance Int      @default(0)
   tier          String?
   createdAt     DateTime @default(now())
 
+  /// The submission verbatim. Without it, changing the normalization rules is data loss
+  /// rather than a backfill.
+  phoneRaw          String?
+  normalizerVersion Int     @default(1)
+
+  /// True when no country code was supplied and Spain was inferred, which is most rows.
+  /// An audit filter, not an alarm — see phone-es.ts.
+  phoneRegionAssumed Boolean @default(false)
+
+  /// Europe/Madrid year, frozen at sign-up rather than derived from createdAt at render
+  /// time: the container runs UTC, so a sign-up at 23:30 on the 31st of December would
+  /// print the previous year on something that reads as a physical card. Nullable because
+  /// it is derived data and a member created outside this flow legitimately has none.
+  memberSince Int?
+
+  locale String @default("es-ES")
+
+  /// Required, with no default. Membership itself rests on performance of a contract, so
+  /// what must be recorded is that a choice was made; a default would let an absent
+  /// choice be read as one, which is the accountability failure the column prevents.
+  consentMarketing   Boolean
+  consentMarketingAt DateTime?
+
+  /// Snapshot of the notice actually shown, not a foreign key: the evidence is what the
+  /// member read, and a reference to an editable row destroys it.
+  privacyPolicyVersion String?
+
+  /// How the member was collected — "qr_signup", "staff_entry". Required for the same
+  /// reason as consentMarketing: provenance is not a safe thing to assume.
+  consentSource String
+
+  /// A re-scan at reception bumps these instead of rewriting the name, which would let
+  /// anyone who knows a phone number rename a real member.
+  signupCount  Int      @default(1)
+  lastSignupAt DateTime @default(now())
+
+  /// Erasure overwrites the row in place rather than deleting it, so a future points
+  /// ledger keeps its references. phone becomes a random tombstone, which keeps the
+  /// unique index satisfiable and lets the person register again later.
+  erasedAt DateTime?
+
   walletObjects WalletObject[]
 
+  @@unique([clinicId, phone])
   @@index([clinicId])
 }
 

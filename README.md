@@ -20,7 +20,27 @@ src/
 
 The `wallet/engine` folder is for provider-independent wallet behavior, shared pass data types, and interfaces used by the rest of the app. The `wallet/providers` folder is reserved for concrete Apple Wallet and Google Wallet implementations. Those provider implementations are intentionally not started yet.
 
-Domain modules under `src/modules` are placeholders only. Authentication is also intentionally not implemented in this skeleton.
+Domain modules under `src/modules` hold `clinics` and `members`; the rest are still placeholders. Authentication is intentionally not implemented — every endpoint below is public.
+
+## API
+
+| Endpoint                             | Purpose                                                     |
+| ------------------------------------ | ----------------------------------------------------------- |
+| `GET /api/v1/health`                 | Liveness. Needs no database.                                |
+| `GET /api/v1/clinics/:slug`          | Public branding for the sign-up form a QR poster points at. |
+| `POST /api/v1/clinics/:slug/members` | Membership sign-up. Name + phone + marketing consent.       |
+
+Sign-up is idempotent per clinic: the same phone number submitted again returns the same
+response and bumps a counter rather than creating a second member or failing. The response
+body is byte-identical whether the member was created or already existed, deliberately — a
+distinguishable response would reveal whether a phone number belongs to a member of a named
+clinic.
+
+```bash
+curl -X POST http://localhost:4000/api/v1/clinics/aurea/members \
+  -H 'Content-Type: application/json' \
+  -d '{"fullName":"Verónica Navarro","phone":"612 34 56 78","consentMarketing":false}'
+```
 
 ## Local Development
 
@@ -48,7 +68,13 @@ Domain modules under `src/modules` are placeholders only. Authentication is also
    npm run prisma:migrate
    ```
 
-5. Start the dev server:
+5. Seed the demo clinics:
+
+   ```bash
+   npm run prisma:seed
+   ```
+
+6. Start the dev server:
 
    ```bash
    npm run dev
@@ -56,11 +82,57 @@ Domain modules under `src/modules` are placeholders only. Authentication is also
 
 The health endpoint is available at `GET /api/v1/health`.
 
+### Seeding a deployed environment
+
+`prisma db seed` runs `tsx`, which is a devDependency, so it will **fail on a production
+install where dev dependencies are pruned**. A fresh deployment therefore comes up with no
+clinics, and every sign-up returns 404 until it is seeded. Run it once per environment as a
+release step:
+
+```bash
+npx prisma db seed
+```
+
+Moving the clinics into a migration would remove this step; that is deliberately left for
+when clinic provisioning gets a real surface.
+
+## Deployment (Railway)
+
+The service is defined as code in `.railway/railway.ts` — a partial describing one service
+inside the existing `voone-web` project, matching how the marketing site declares itself.
+
+`preDeploy` runs `prisma migrate deploy` before the new version takes traffic, so the code and
+the schema are never live at different versions. **`DATABASE_URL` must therefore point at
+Supabase's session pooler (port 5432).** The transaction pooler (6543) cannot run DDL or hold
+the advisory lock Prisma takes, so a deploy configured against it fails in `preDeploy`.
+
+The health check is `/api/v1/health`, which needs no database — Railway's default of `/` would
+mark every deploy unhealthy, since nothing is served there.
+
+### Variables to set on the service
+
+| Variable                              | Notes                                                                                                                                                                   |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                        | Supabase **session** pooler, port 5432. A `@` in the password must be percent-encoded as `%40`, or libpq splits the URL on the wrong `@` and the host fails to resolve. |
+| `REDIS_URL`                           | Required by `src/config/env.ts`, which throws at import without it. Nothing reads it yet.                                                                               |
+| `PORT`                                | Injected by Railway.                                                                                                                                                    |
+| `FRONTEND_URL`                        | CORS origin. Single origin only — a clinic-branded form on another domain fails with an opaque browser error and no server-side log.                                    |
+| `GOOGLE_WALLET_ISSUER_ID`             | Google Pay & Wallet Console.                                                                                                                                            |
+| `GOOGLE_WALLET_SERVICE_ACCOUNT_EMAIL` |                                                                                                                                                                         |
+| `GOOGLE_WALLET_SERVICE_ACCOUNT_KEY`   | PEM with escaped newlines.                                                                                                                                              |
+| `GOOGLE_WALLET_ALLOWED_ORIGIN`        | Origins allowed to host a "Save to Google Wallet" button.                                                                                                               |
+| `EDGE_SHARED_SECRET`                  | Optional. Set it with a matching Cloudflare Transform Rule to reject requests that bypass the edge and reach the origin directly. Unset, that guard is a no-op.         |
+
+A freshly deployed environment has no clinics until it is seeded — see above.
+
 ## Scripts
 
 - `npm run dev` starts the TypeScript server with hot reload.
 - `npm run build` generates the Prisma client and compiles TypeScript.
 - `npm start` runs the compiled server.
 - `npm run lint` runs ESLint.
+- `npm test` runs the suite. Parts of it need a database — see Local Development.
 - `npm run typecheck` runs TypeScript without emitting files.
 - `npm run format` formats files with Prettier.
+- `npm run prisma:migrate` applies migrations in development.
+- `npm run prisma:seed` inserts the demo clinics. Safe to re-run.

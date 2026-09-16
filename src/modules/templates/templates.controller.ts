@@ -2,7 +2,12 @@ import type { Request, Response } from "express";
 import { ZodError } from "zod";
 
 import { ConflictError } from "../../common/errors/conflict-error";
-import { clinicContextSchema, createTemplateSchema, templateParamsSchema, updateTemplateSchema } from "./templates.schema";
+import {
+  clinicContextSchema,
+  createTemplateSchema,
+  templateParamsSchema,
+  updateTemplateSchema
+} from "./templates.schema";
 import { templatesService } from "./templates.service";
 
 const getClinicId = (request: Request): string => {

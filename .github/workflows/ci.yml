@@ -8,6 +8,32 @@ jobs:
   verify:
     runs-on: ubuntu-latest
 
+    # The suite exercises the unique index, the phone CHECK, and the concurrent sign-up
+    # race directly, none of which a mock can prove. 16-alpine matches docker-compose.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: voone
+          POSTGRES_PASSWORD: voone
+          POSTGRES_DB: voone
+        ports:
+          - 5432:5432
+        # Without a health check the first test races the container starting, which fails
+        # only on cold runners and looks like flakiness.
+        options: >-
+          --health-cmd "pg_isready -U voone"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://voone:voone@localhost:5432/voone?schema=public
+      # Unused by any code path, but src/config/env.ts throws at import without them.
+      REDIS_URL: redis://localhost:6379
+      PORT: "4000"
+      FRONTEND_URL: http://localhost:3000
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4

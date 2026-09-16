@@ -46,7 +46,10 @@ export const getAuthenticatedClient = (): GoogleWalletAuthenticatedClient => {
   }
 
   authenticatedClient = {
-    async request<TResponse>(path: string, options: GoogleWalletRequestOptions = {}): Promise<TResponse> {
+    async request<TResponse>(
+      path: string,
+      options: GoogleWalletRequestOptions = {}
+    ): Promise<TResponse> {
       const accessToken = await getAccessToken();
       const headers = new Headers(options.headers);
 
@@ -110,10 +113,12 @@ export const loadServiceAccountCredentials = async (): Promise<GoogleServiceAcco
   }
 
   if (!serviceAccountCredentialsPromise) {
-    serviceAccountCredentialsPromise = readAndValidateServiceAccountCredentials().then((credentials) => {
-      serviceAccountCredentials = credentials;
-      return credentials;
-    });
+    serviceAccountCredentialsPromise = readAndValidateServiceAccountCredentials().then(
+      (credentials) => {
+        serviceAccountCredentials = credentials;
+        return credentials;
+      }
+    );
   }
 
   return serviceAccountCredentialsPromise;
@@ -132,13 +137,16 @@ export const loadServiceAccountCredentialsSync = (): GoogleServiceAccountCredent
 
 export const getGoogleWalletIssuerId = (): string => getRequiredEnv("GOOGLE_WALLET_ISSUER_ID");
 
-export const getGoogleWalletAllowedOrigin = (): string => getRequiredEnv("GOOGLE_WALLET_ALLOWED_ORIGIN");
+export const getGoogleWalletAllowedOrigin = (): string =>
+  getRequiredEnv("GOOGLE_WALLET_ALLOWED_ORIGIN");
 
 export const assertIssuerScopedId = (id: string, fieldName: string): void => {
   const issuerId = getGoogleWalletIssuerId();
 
   if (!id.startsWith(`${issuerId}.`)) {
-    throw new Error(`${fieldName} must start with the configured Google Wallet issuer ID (${issuerId}.)`);
+    throw new Error(
+      `${fieldName} must start with the configured Google Wallet issuer ID (${issuerId}.)`
+    );
   }
 };
 
@@ -168,28 +176,33 @@ const createOAuthClient = async (): Promise<OAuth2Client> => {
   return (await auth.getClient()) as OAuth2Client;
 };
 
-const readAndValidateServiceAccountCredentials = async (): Promise<GoogleServiceAccountCredentials> => {
-  const keyFileOrPrivateKey = getRequiredEnv("GOOGLE_WALLET_SERVICE_ACCOUNT_KEY");
+const readAndValidateServiceAccountCredentials =
+  async (): Promise<GoogleServiceAccountCredentials> => {
+    const keyFileOrPrivateKey = getRequiredEnv("GOOGLE_WALLET_SERVICE_ACCOUNT_KEY");
 
-  if (!looksLikePrivateKey(keyFileOrPrivateKey)) {
-    const rawCredentials = JSON.parse(await readFile(keyFileOrPrivateKey, "utf8")) as Partial<GoogleServiceAccountCredentials>;
+    if (!looksLikePrivateKey(keyFileOrPrivateKey)) {
+      const rawCredentials = JSON.parse(
+        await readFile(keyFileOrPrivateKey, "utf8")
+      ) as Partial<GoogleServiceAccountCredentials>;
+
+      return validateServiceAccountCredentials(rawCredentials);
+    }
+
+    const rawCredentials = {
+      client_email: getRequiredEnv("GOOGLE_WALLET_SERVICE_ACCOUNT_EMAIL"),
+      private_key: keyFileOrPrivateKey
+    };
 
     return validateServiceAccountCredentials(rawCredentials);
-  }
-
-  const rawCredentials = {
-    client_email: getRequiredEnv("GOOGLE_WALLET_SERVICE_ACCOUNT_EMAIL"),
-    private_key: keyFileOrPrivateKey
   };
-
-  return validateServiceAccountCredentials(rawCredentials);
-};
 
 const readAndValidateServiceAccountCredentialsSync = (): GoogleServiceAccountCredentials => {
   const keyFileOrPrivateKey = getRequiredEnv("GOOGLE_WALLET_SERVICE_ACCOUNT_KEY");
 
   if (!looksLikePrivateKey(keyFileOrPrivateKey)) {
-    const rawCredentials = JSON.parse(readFileSync(keyFileOrPrivateKey, "utf8")) as Partial<GoogleServiceAccountCredentials>;
+    const rawCredentials = JSON.parse(
+      readFileSync(keyFileOrPrivateKey, "utf8")
+    ) as Partial<GoogleServiceAccountCredentials>;
 
     return validateServiceAccountCredentials(rawCredentials);
   }
@@ -205,7 +218,6 @@ const readAndValidateServiceAccountCredentialsSync = (): GoogleServiceAccountCre
 const validateServiceAccountCredentials = (
   rawCredentials: Partial<GoogleServiceAccountCredentials>
 ): GoogleServiceAccountCredentials => {
-
   if (!rawCredentials.client_email || !rawCredentials.private_key) {
     throw new Error("Google Wallet service account key must contain client_email and private_key");
   }

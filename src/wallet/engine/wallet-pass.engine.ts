@@ -4,10 +4,15 @@ import { config } from "../../config/env";
 import { getGoogleWalletIssuerId } from "../providers/google/client";
 import { createOrUpdateClass } from "../providers/google";
 import type { LoyaltyClassInput } from "../providers/google/types";
-import type { ClinicTemplateWithRelations, WalletClassSyncResult } from "../../modules/templates/templates.repository";
+import type {
+  ClinicTemplateWithRelations,
+  WalletClassSyncResult
+} from "../../modules/templates/templates.repository";
 
 export class WalletPassEngine {
-  async createClassForTemplate(template: ClinicTemplateWithRelations): Promise<WalletClassSyncResult[]> {
+  async createClassForTemplate(
+    template: ClinicTemplateWithRelations
+  ): Promise<WalletClassSyncResult[]> {
     const results: WalletClassSyncResult[] = [];
     const googleClassId = `${getGoogleWalletIssuerId()}.clinic_template_${template.id.replace(/-/g, "_")}`;
     const googleInput: LoyaltyClassInput = {
@@ -15,9 +20,13 @@ export class WalletPassEngine {
       classId: googleClassId,
       programName: template.programName,
       hexBackgroundColor: template.hexBackgroundColor,
-      logoUrl: template.logoUrl ?? placeholderImageUrl(template.programName, template.hexBackgroundColor, "Logo"),
+      logoUrl:
+        template.logoUrl ??
+        placeholderImageUrl(template.programName, template.hexBackgroundColor, "Logo"),
       // TODO: Confirm recommended hero image dimensions in the current Google Wallet REST docs before replacing this placeholder policy.
-      heroImageUrl: template.heroImageUrl ?? placeholderImageUrl(template.programName, template.hexBackgroundColor, "Hero"),
+      heroImageUrl:
+        template.heroImageUrl ??
+        placeholderImageUrl(template.programName, template.hexBackgroundColor, "Hero"),
       heroImageDescription: `${template.programName} hero image`,
       homepageUrl: config.FRONTEND_URL,
       accountNameLabel: "Member",
@@ -63,7 +72,11 @@ export class WalletPassEngine {
 
 export const walletPassEngine = new WalletPassEngine();
 
-const placeholderImageUrl = (programName: string, hexBackgroundColor: string, label: string): string => {
+const placeholderImageUrl = (
+  programName: string,
+  hexBackgroundColor: string,
+  label: string
+): string => {
   const background = hexBackgroundColor.replace("#", "");
   const text = encodeURIComponent(`${programName} ${label}`);
 

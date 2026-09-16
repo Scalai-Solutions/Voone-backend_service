@@ -9,7 +9,9 @@ const templateInclude = {
   walletClasses: true
 } satisfies Prisma.ClinicTemplateInclude;
 
-export type ClinicTemplateWithRelations = Prisma.ClinicTemplateGetPayload<{ include: typeof templateInclude }>;
+export type ClinicTemplateWithRelations = Prisma.ClinicTemplateGetPayload<{
+  include: typeof templateInclude;
+}>;
 
 export interface WalletClassSyncResult {
   provider: WalletProviderType;
@@ -18,7 +20,8 @@ export interface WalletClassSyncResult {
 
 type DatabaseClient = Prisma.TransactionClient | typeof prisma;
 
-const normalizeOptionalUrl = (value: string | undefined): string | null => (value?.trim() ? value.trim() : null);
+const normalizeOptionalUrl = (value: string | undefined): string | null =>
+  value?.trim() ? value.trim() : null;
 
 export const templatesRepository = {
   findPresets() {
@@ -58,7 +61,12 @@ export const templatesRepository = {
     });
   },
 
-  update(db: DatabaseClient, templateId: string, input: CreateTemplateInput, status?: TemplateStatus) {
+  update(
+    db: DatabaseClient,
+    templateId: string,
+    input: CreateTemplateInput,
+    status?: TemplateStatus
+  ) {
     return db.clinicTemplate.update({
       where: { id: templateId },
       data: {
@@ -117,7 +125,11 @@ export const templatesRepository = {
 };
 
 export const treatmentsRepository = {
-  async replaceForClinic(db: DatabaseClient, clinicId: string, treatments: CreateTemplateInput["treatments"]) {
+  async replaceForClinic(
+    db: DatabaseClient,
+    clinicId: string,
+    treatments: CreateTemplateInput["treatments"]
+  ) {
     await db.clinicTreatment.deleteMany({ where: { clinicId } });
 
     if (treatments.length === 0) {
