@@ -49,7 +49,10 @@ membersRouter.post(
       throw new MembershipValidationError(details);
     }
 
-    await signUpMember(prisma, clinic, parsed.data, "qr_signup");
+    // The default lives here rather than in the schema or the service: it is an API
+    // default, so an omitted field means the public form, while the staff surface states
+    // itself explicitly.
+    await signUpMember(prisma, clinic, parsed.data, parsed.data.consentSource ?? "qr_signup");
 
     // Byte-identical whether the member was created or already existed. A 201/200
     // distinction would tell anyone who can POST whether a given phone number belongs

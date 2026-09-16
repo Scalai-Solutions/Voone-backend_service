@@ -100,6 +100,23 @@ describe("membershipSignupSchema", () => {
     });
   });
 
+  describe("consentSource", () => {
+    it("is omitted by the public form, which the route reads as a QR sign-up", () => {
+      expect(membershipSignupSchema.parse(VALID).consentSource).toBeUndefined();
+    });
+
+    it("accepts a staff entry, so provenance is not attributed to the public form", () => {
+      expect(
+        membershipSignupSchema.parse({ ...VALID, consentSource: "staff_entry" }).consentSource
+      ).toBe("staff_entry");
+    });
+
+    it("rejects a provenance it does not know", () => {
+      expect(details({ ...VALID, consentSource: "imported" })).toContain("consentSource");
+      expect(details({ ...VALID, consentSource: "" })).toContain("consentSource");
+    });
+  });
+
   describe("phone", () => {
     it("reports an invalid number in Spanish, since the form renders the message", () => {
       expect(details({ ...VALID, phone: "912345678" })).toBe(

@@ -20,7 +20,10 @@ const INPUT = {
   phone: "+34612345678",
   phoneRaw: "612 34 56 78",
   phoneRegionAssumed: true,
-  consentMarketing: true
+  consentMarketing: true,
+  // Omitted by the public form, which is what the undefined represents. The service takes
+  // the provenance as its own argument regardless, so this field never reaches the row.
+  consentSource: undefined
 };
 
 const NOW = new Date("2026-09-11T10:00:00Z");

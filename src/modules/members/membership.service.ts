@@ -1,8 +1,9 @@
 import type { Clinic, PrismaClient } from "@prisma/client";
+import type { z } from "zod";
 
 import { isUniqueViolation } from "../../common/utils/prisma-errors";
 import { madridYear } from "./member-since";
-import type { MembershipSignupInput } from "./membership.schema";
+import type { MembershipSignupInput, signupSourceSchema } from "./membership.schema";
 import { NORMALIZER_VERSION } from "./phone-es";
 
 /**
@@ -10,7 +11,7 @@ import { NORMALIZER_VERSION } from "./phone-es";
  * column is a provenance record, and a default would quietly attribute a staff entry to
  * the public form.
  */
-export type SignupSource = "qr_signup" | "staff_entry";
+export type SignupSource = z.infer<typeof signupSourceSchema>;
 
 export interface SignUpResult {
   /** False when the number was already a member. Not exposed — see the route. */
