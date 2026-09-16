@@ -7,7 +7,7 @@ import { PassBuilder } from "../../engine/pass-builder.interface";
 import { BuiltPass, LoyaltyPassData } from "../../engine/wallet-pass.types";
 import { buildStoreCardFields } from "./apple-pass.fields";
 import { PASS_TRANSLATIONS } from "./apple-pass.strings";
-import { resolveAppleTheme } from "./apple-pass.theme";
+import { deriveAppleTheme } from "./apple-pass.theme";
 import { PKPassInstance, loadPasskit } from "./passkit";
 
 export interface ApplePassBuilderOptions {
@@ -60,7 +60,7 @@ export class ApplePassBuilder implements PassBuilder {
 
   private async sign(data: LoyaltyPassData): Promise<Buffer> {
     const { PKPass, PassType } = await loadPasskit();
-    const theme = resolveAppleTheme(data.tier);
+    const theme = deriveAppleTheme(data.template.backgroundColor);
 
     let pass: PKPassInstance;
 
@@ -76,7 +76,7 @@ export class ApplePassBuilder implements PassBuilder {
           teamIdentifier: this.options.teamIdentifier,
           organizationName: this.options.organizationName,
           // Apple requires a description for VoiceOver; the library does not enforce it.
-          description: `${data.clinic.name} · ${data.tierName}`,
+          description: `${data.clinic.name} · ${data.template.programName}`,
           logoText: data.clinic.name,
           sharingProhibited: true,
           backgroundColor: theme.backgroundColor,

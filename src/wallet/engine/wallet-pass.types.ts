@@ -1,9 +1,9 @@
 import { z } from "zod";
 
-import { loyaltyPassDataSchema, loyaltyTierSchema } from "./wallet-pass.schema";
+import { loyaltyPassDataSchema, passTemplateSchema } from "./wallet-pass.schema";
 
 // Shared types for pass data, independent of provider.
-export type LoyaltyTier = z.infer<typeof loyaltyTierSchema>;
+export type PassTemplate = z.infer<typeof passTemplateSchema>;
 
 export type LoyaltyPassData = z.infer<typeof loyaltyPassDataSchema>;
 

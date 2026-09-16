@@ -119,13 +119,27 @@ describe("ApplePassBuilder", () => {
   it("describes a storeCard carrying the mapped fields", () => {
     const storeCard = readPassJson(entries).storeCard as Record<
       string,
-      { key: string; value: unknown }[]
+      { key: string; label?: string; value: unknown }[]
     >;
 
-    expect(storeCard.headerFields[0]).toMatchObject({ key: "points", value: 1250 });
-    expect(storeCard.primaryFields[0]).toMatchObject({ key: "balance", value: 240 });
-    expect(storeCard.secondaryFields.map((field) => field.key)).toEqual(["member", "tier"]);
+    // Points are primary and labelled from the clinic template, not a constant.
+    expect(storeCard.primaryFields[0]).toMatchObject({
+      key: "points",
+      label: "Saldo Beauty",
+      value: 1250
+    });
+    expect(storeCard.headerFields[0]).toMatchObject({ key: "tier", label: "Nivel", value: "Gold" });
+    expect(storeCard.secondaryFields.map((field) => field.key)).toEqual(["member"]);
     expect(storeCard.backFields.map((field) => field.key)).toContain("redemptionCode");
+    // No column backs credit or reward, so neither is invented.
+    expect(storeCard.auxiliaryFields ?? []).toHaveLength(0);
+  });
+
+  it("derives the theme from the clinic template background", () => {
+    const passJson = readPassJson(entries);
+
+    expect(passJson.backgroundColor).toBe("rgb(241, 220, 205)");
+    expect(passJson.foregroundColor).toBe("rgb(43, 33, 28)");
   });
 
   it("encodes the redemption code as a QR barcode, never the serial number", () => {
@@ -154,14 +168,15 @@ describe("ApplePassBuilder", () => {
     const text = Buffer.from(entries["pass.json"]).toString("utf8");
 
     expect(text).toContain("AURÉA");
-    expect(text).toContain("PRÓXIMA RECOMPENSA");
+    expect(text).toContain("CÓDIGO DE CANJE");
+    expect(text).toContain("INFORMACIÓN");
   });
 
   it("ships English translations alongside the Spanish keys", () => {
     const strings = Buffer.from(entries["en.lproj/pass.strings"]).toString("utf8");
 
-    expect(strings).toContain("PUNTOS");
-    expect(strings).toContain("POINTS");
+    expect(strings).toContain("SOCIA");
+    expect(strings).toContain("MEMBER");
   });
 
   it("reports a missing model directory without leaking key material", async () => {

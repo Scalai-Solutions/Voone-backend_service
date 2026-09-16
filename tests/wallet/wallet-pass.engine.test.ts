@@ -15,10 +15,16 @@ describe("WalletPassEngine", () => {
   });
 
   it("rejects invalid data with a message that is safe to return to a caller", async () => {
-    const attempt = engine.createPass("apple", { ...aureaGoldPass, tier: "platinum" });
+    const attempt = engine.createPass("apple", { ...aureaGoldPass, points: -1 });
 
     await expect(attempt).rejects.toThrow(WalletPassDataError);
-    await expect(attempt).rejects.toThrow(/tier/);
+    await expect(attempt).rejects.toThrow(/points/);
+  });
+
+  it("accepts any tier string, since Member.tier is free text", async () => {
+    const built = await engine.createPass("apple", { ...aureaGoldPass, tier: "Socia Fundadora" });
+
+    expect(built.buffer.length).toBeGreaterThan(0);
   });
 
   it("reports validation errors as exposable, so a route may echo them", async () => {
