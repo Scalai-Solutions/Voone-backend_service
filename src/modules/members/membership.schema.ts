@@ -13,6 +13,9 @@ export const clinicSlugSchema = z
   .max(64)
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 
+/** Kept in step with SignupSource in membership.service.ts. */
+export const signupSourceSchema = z.enum(["qr_signup", "staff_entry"]);
+
 const NAME_INVALID = "Introduce tu nombre y apellidos";
 const NAME_TOO_LONG = "El nombre es demasiado largo";
 
@@ -64,16 +67,45 @@ export const membershipSignupSchema = z
     //
     // Never z.coerce.boolean(): it turns the string "false" into true and fabricates
     // consent for every member whose form serializes booleans as strings.
-    consentMarketing: z.boolean("Indica si aceptas recibir comunicaciones comerciales")
+    /**
+     * Optional additional contact. The phone is the identity — it is what the unique index
+     * and the programme's SMS depend on — so an email never replaces it, only supplements
+     * it. Lowercased because addresses are case-insensitive in practice and storing two
+     * spellings of one address would defeat any future lookup.
+     */
+    email: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .max(254, "El email es demasiado largo")
+      .pipe(z.string().email("Introduce un email válido"))
+      .optional(),
+
+    consentMarketing: z.boolean("Indica si aceptas recibir comunicaciones comerciales"),
+
+    /**
+     * How the member was collected. Optional over HTTP, where the route supplies the
+     * default, and never defaulted in the service — a member entered at reception by
+     * staff must not be recorded as having signed themselves up through the QR form,
+     * because that is the difference between consent the member gave and consent
+     * recorded on their behalf.
+     *
+     * Spoofable, like everything else on an unauthenticated endpoint: a caller can claim
+     * either value for a row they are creating anyway. It becomes trustworthy when the
+     * staff surface gets authentication, and is honest for legitimate callers meanwhile.
+     */
+    consentSource: signupSourceSchema.optional()
   })
   // Flattened here rather than in the service so the parsed value is already shaped like
   // the row it becomes, and the raw submission cannot be dropped by a forgetful caller.
-  .transform(({ name, phone, consentMarketing }) => ({
+  .transform(({ name, phone, email, consentMarketing, consentSource }) => ({
     name,
+    email,
     phone: phone.e164,
     phoneRaw: phone.raw,
     phoneRegionAssumed: phone.regionAssumed,
-    consentMarketing
+    consentMarketing,
+    consentSource
   }));
 
 export type MembershipSignupInput = z.infer<typeof membershipSignupSchema>;
