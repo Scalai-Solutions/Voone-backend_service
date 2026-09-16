@@ -1,36 +1,38 @@
 /**
- * Spanish labels double as their own localization keys: an unmatched locale falls back to
+ * Labels the clinic template does not supply. `pointsLabel` and `tierLabel` come from
+ * ClinicTemplate, so they are deliberately absent here.
+ *
+ * Spanish strings double as their own localization keys: an unmatched locale falls back to
  * the key, which is already the correct Spanish text, so no default `.lproj` is needed.
  */
 export const PASS_LABELS = {
-  points: "PUNTOS",
-  balance: "BEAUTY BALANCE",
   member: "SOCIA",
-  tier: "NIVEL",
+  credit: "SALDO",
   reward: "PRÓXIMA RECOMPENSA",
   progress: "PROGRESO",
-  clinic: "CLÍNICA",
+  program: "PROGRAMA",
+  benefits: "BENEFICIOS",
+  info: "INFORMACIÓN",
   memberSince: "SOCIA DESDE",
   redemptionCode: "CÓDIGO DE CANJE",
   serialNumber: "NÚMERO DE PASE",
-  pointsChangeMessage: "Tienes %@ puntos",
-  balanceChangeMessage: "Tu Beauty Balance es %@",
+  pointsChangeMessage: "Tu saldo ahora es %@",
   tierChangeMessage: "Ahora eres nivel %@"
 } as const;
 
 export const PASS_TRANSLATIONS: Record<string, Record<string, string>> = {
   en: {
-    PUNTOS: "POINTS",
     SOCIA: "MEMBER",
-    NIVEL: "TIER",
+    SALDO: "BALANCE",
     "PRÓXIMA RECOMPENSA": "NEXT REWARD",
     PROGRESO: "PROGRESS",
-    CLÍNICA: "CLINIC",
+    PROGRAMA: "PROGRAMME",
+    BENEFICIOS: "BENEFITS",
+    INFORMACIÓN: "INFORMATION",
     "SOCIA DESDE": "MEMBER SINCE",
     "CÓDIGO DE CANJE": "REDEMPTION CODE",
     "NÚMERO DE PASE": "PASS NUMBER",
-    "Tienes %@ puntos": "You have %@ points",
-    "Tu Beauty Balance es %@": "Your Beauty Balance is %@",
+    "Tu saldo ahora es %@": "Your balance is now %@",
     "Ahora eres nivel %@": "You are now %@ tier"
   }
 };
