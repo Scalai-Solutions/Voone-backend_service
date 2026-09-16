@@ -96,6 +96,35 @@ npx prisma db seed
 Moving the clinics into a migration would remove this step; that is deliberately left for
 when clinic provisioning gets a real surface.
 
+## Deployment (Railway)
+
+The service is defined as code in `.railway/railway.ts` — a partial describing one service
+inside the existing `voone-web` project, matching how the marketing site declares itself.
+
+`preDeploy` runs `prisma migrate deploy` before the new version takes traffic, so the code and
+the schema are never live at different versions. **`DATABASE_URL` must therefore point at
+Supabase's session pooler (port 5432).** The transaction pooler (6543) cannot run DDL or hold
+the advisory lock Prisma takes, so a deploy configured against it fails in `preDeploy`.
+
+The health check is `/api/v1/health`, which needs no database — Railway's default of `/` would
+mark every deploy unhealthy, since nothing is served there.
+
+### Variables to set on the service
+
+| Variable                              | Notes                                                                                                                                                                   |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                        | Supabase **session** pooler, port 5432. A `@` in the password must be percent-encoded as `%40`, or libpq splits the URL on the wrong `@` and the host fails to resolve. |
+| `REDIS_URL`                           | Required by `src/config/env.ts`, which throws at import without it. Nothing reads it yet.                                                                               |
+| `PORT`                                | Injected by Railway.                                                                                                                                                    |
+| `FRONTEND_URL`                        | CORS origin. Single origin only — a clinic-branded form on another domain fails with an opaque browser error and no server-side log.                                    |
+| `GOOGLE_WALLET_ISSUER_ID`             | Google Pay & Wallet Console.                                                                                                                                            |
+| `GOOGLE_WALLET_SERVICE_ACCOUNT_EMAIL` |                                                                                                                                                                         |
+| `GOOGLE_WALLET_SERVICE_ACCOUNT_KEY`   | PEM with escaped newlines.                                                                                                                                              |
+| `GOOGLE_WALLET_ALLOWED_ORIGIN`        | Origins allowed to host a "Save to Google Wallet" button.                                                                                                               |
+| `EDGE_SHARED_SECRET`                  | Optional. Set it with a matching Cloudflare Transform Rule to reject requests that bypass the edge and reach the origin directly. Unset, that guard is a no-op.         |
+
+A freshly deployed environment has no clinics until it is seeded — see above.
+
 ## Scripts
 
 - `npm run dev` starts the TypeScript server with hot reload.

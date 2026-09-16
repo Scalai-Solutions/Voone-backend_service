@@ -11,13 +11,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:seed": "prisma db seed",
+    "prisma:seed": "tsx prisma/seed.ts",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "prisma:seed": "tsx prisma/seed.ts"
-  },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
+    "test:watch": "vitest"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -41,6 +37,7 @@
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.6.2",
     "prisma": "6.12.0",
+    "railway": "^3.11.0",
     "tsx": "^4.20.4",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.40.0",
