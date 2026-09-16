@@ -17,11 +17,18 @@ const prisma = new PrismaClient();
  * reference data every environment needs; these clinics are fictional and deliberately do
  * not follow them into production.
  *
+ * The ids are fixed rather than generated. A dashboard running without real authentication
+ * uses a mock session, which has to name a clinic somehow — and with random ids it named
+ * one that did not exist, so every template write failed. That failure was invisible while
+ * the API client fell back to mock data on error; it is visible now, which is why these are
+ * pinned. Real sessions carry the id from the user record and never read these.
+ *
  * Slugs are written down rather than derived from the name: they are URLs printed on
  * physical posters, and renaming a clinic must never invalidate its QR code.
  */
 const clinics = [
   {
+    id: "00000000-0000-4000-8000-0000000a0001",
     slug: "aurea",
     name: "AURÉA",
     addressLine: "Calle de Serrano 21",
@@ -37,6 +44,7 @@ const clinics = [
     }
   },
   {
+    id: "00000000-0000-4000-8000-0000000a0002",
     slug: "lumiere",
     name: "LUMIÈRE",
     addressLine: "Avinguda Diagonal 440",
@@ -55,7 +63,7 @@ const clinics = [
 
 const main = async () => {
   // Upserts throughout, so the seed is safe to re-run and safe for `prisma migrate reset`.
-  for (const { slug, name, addressLine, pincode, preset, template } of clinics) {
+  for (const { id, slug, name, addressLine, pincode, preset, template } of clinics) {
     const { id: presetId } = await prisma.templatePreset.findUniqueOrThrow({
       where: { name: preset },
       select: { id: true }
@@ -64,7 +72,7 @@ const main = async () => {
     const clinic = await prisma.clinic.upsert({
       where: { slug },
       update: { name, addressLine, pincode },
-      create: { slug, name, addressLine, pincode }
+      create: { id, slug, name, addressLine, pincode }
     });
 
     await prisma.clinicTemplate.upsert({
