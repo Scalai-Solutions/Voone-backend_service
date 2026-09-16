@@ -30,8 +30,13 @@ const handleControllerError = (error: unknown, res: Response) => {
     return;
   }
 
-  const message = error instanceof Error ? error.message : "Internal server error";
-  res.status(500).json({ message });
+  // Logged, not returned. Echoing error.message here reintroduced inside this module
+  // exactly what app-error.ts fixed app-wide: a Prisma failure would ship the datasource
+  // URL — password included — to whoever made the request, and a constraint violation
+  // would name the constrained columns. Nothing below a deliberate, reviewed error class
+  // is safe to hand back.
+  console.error(error);
+  res.status(500).json({ message: "Internal server error" });
 };
 
 export const templatesController = {

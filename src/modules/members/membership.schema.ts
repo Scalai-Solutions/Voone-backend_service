@@ -14,7 +14,13 @@ export const clinicSlugSchema = z
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 
 /** Kept in step with SignupSource in membership.service.ts. */
-export const signupSourceSchema = z.enum(["qr_signup", "staff_entry"]);
+export const signupSourceSchema = z.enum(
+  ["qr_signup", "staff_entry"],
+  // Spanish like every other message on this endpoint, and deliberately does not list the
+  // accepted values: no member ever sees this — the field is set by code, not typed — so
+  // there is nobody to help, and the enum is the shape of an internal surface.
+  "Origen de alta no válido"
+);
 
 const NAME_INVALID = "Introduce tu nombre y apellidos";
 const NAME_TOO_LONG = "El nombre es demasiado largo";

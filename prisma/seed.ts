@@ -8,16 +8,14 @@ dotenv.config();
 
 const prisma = new PrismaClient();
 
-const presets = [
-  { name: "Classic Gold", hexBackgroundColor: "#ead0bd" },
-  { name: "Modern Dark", hexBackgroundColor: "#2a2e35" },
-  { name: "Fresh Mint", hexBackgroundColor: "#d8efe3" }
-];
-
 /**
  * The two demo clinics from the marketing site, each with the template the public sign-up
  * page reads its branding from. Without a template a clinic cannot render that page at all,
  * so seeding one without the other would leave a clinic that 404s.
+ *
+ * Development data only. TemplatePreset rows moved to a migration, because they are
+ * reference data every environment needs; these clinics are fictional and deliberately do
+ * not follow them into production.
  *
  * Slugs are written down rather than derived from the name: they are URLs printed on
  * physical posters, and renaming a clinic must never invalidate its QR code.
@@ -57,14 +55,6 @@ const clinics = [
 
 const main = async () => {
   // Upserts throughout, so the seed is safe to re-run and safe for `prisma migrate reset`.
-  for (const preset of presets) {
-    await prisma.templatePreset.upsert({
-      where: { name: preset.name },
-      update: { hexBackgroundColor: preset.hexBackgroundColor },
-      create: preset
-    });
-  }
-
   for (const { slug, name, addressLine, pincode, preset, template } of clinics) {
     const { id: presetId } = await prisma.templatePreset.findUniqueOrThrow({
       where: { name: preset },
@@ -84,7 +74,7 @@ const main = async () => {
     });
   }
 
-  console.log(`Seeded ${presets.length} presets and ${clinics.length} clinics with templates.`);
+  console.log(`Seeded ${clinics.length} demo clinics with templates.`);
 };
 
 main()

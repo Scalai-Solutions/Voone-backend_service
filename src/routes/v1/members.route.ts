@@ -1,9 +1,10 @@
-import { Router } from "express";
+import { Router, type RequestHandler } from "express";
 
 import { MembershipValidationError } from "../../common/errors/membership.errors";
 import { asyncHandler } from "../../common/middleware/async-handler";
 import { createFixedWindowLimiter } from "../../common/middleware/rate-limit";
 import { createRequireEdge } from "../../common/middleware/require-edge";
+import { isStaffKeyConfigured, isStaffRequest } from "../../common/middleware/staff-key";
 import { clientIp } from "../../common/utils/client-ip";
 import { config } from "../../config/env";
 import { prisma } from "../../infrastructure/database/prisma-client";
@@ -25,6 +26,23 @@ const signUpLimiter = createFixedWindowLimiter({
   key: (req) => `${clientIp(req)}:${req.params.slug}`
 });
 
+/**
+ * The limiter guards anonymous traffic, so a request that proves it came from the staff
+ * surface skips it. A clinic's reception shares one address, and manual entries there would
+ * otherwise exhaust a ceiling sized for abuse — but loosening the limit for everyone to fix
+ * that would have protected nobody. This distinguishes the two rather than splitting the
+ * difference, and with no key configured nobody qualifies, so the limit still applies.
+ */
+const rateLimitAnonymous: RequestHandler = (req, res, next) => {
+  if (isStaffRequest(req, config.STAFF_API_KEY)) {
+    next();
+
+    return;
+  }
+
+  signUpLimiter(req, res, next);
+};
+
 // Applied per route rather than to the whole router: Railway's health check reaches the
 // origin directly, so guarding /health on an edge header would fail every probe.
 const requireEdge = createRequireEdge(config.EDGE_SHARED_SECRET);
@@ -32,7 +50,7 @@ const requireEdge = createRequireEdge(config.EDGE_SHARED_SECRET);
 membersRouter.post(
   "/clinics/:slug/members",
   requireEdge,
-  signUpLimiter,
+  rateLimitAnonymous,
   asyncHandler(async (req, res) => {
     // The clinic is resolved before the body is validated: an unknown slug is a 404
     // whatever was submitted, and there is no point reporting field errors for a clinic
@@ -47,6 +65,17 @@ membersRouter.post(
         .join("; ");
 
       throw new MembershipValidationError(details);
+    }
+
+    // Provenance is evidence, so a claim to be staff has to be proved. Unconfigured, the
+    // claim is taken at face value — that is the local-development case, and refusing it
+    // would break the dashboard on a machine with no key.
+    if (
+      parsed.data.consentSource === "staff_entry" &&
+      isStaffKeyConfigured(config.STAFF_API_KEY) &&
+      !isStaffRequest(req, config.STAFF_API_KEY)
+    ) {
+      throw new MembershipValidationError("consentSource: no autorizado");
     }
 
     // The default lives here rather than in the schema or the service: it is an API
