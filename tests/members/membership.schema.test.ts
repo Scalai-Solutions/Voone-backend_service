@@ -185,3 +185,18 @@ describe("clinicSlugSchema", () => {
     }
   });
 });
+
+describe("clinicSlugSchema messages", () => {
+  it("explains the rule instead of printing the pattern", () => {
+    // An operator reads this in the provisioning form, so a regex dump is not an answer.
+    const parsed = clinicSlugSchema.safeParse("Clinica Nova");
+
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues[0].message).toBe(
+        "Usa minúsculas, números y guiones (por ejemplo: clinica-nova)"
+      );
+      expect(parsed.error.issues[0].message).not.toContain("pattern");
+    }
+  });
+});
