@@ -1,5 +1,6 @@
 import cors from "cors";
 import express, { ErrorRequestHandler, RequestHandler } from "express";
+import path from "node:path";
 
 import { config } from "./config/env";
 import { v1Router } from "./routes/v1";
@@ -14,6 +15,7 @@ export const buildApp = () => {
     })
   );
 
+  app.use(express.static(path.resolve(process.cwd(), "public")));
   app.use("/api/v1", v1Router);
 
   const notFoundHandler: RequestHandler = (_req, res) => {

@@ -11,3 +11,138 @@ model Health {
   id        String   @id @default(cuid())
   checkedAt DateTime @default(now())
 }
+
+model Clinic {
+  id          String   @id @default(uuid())
+  name        String
+  addressLine String
+  pincode     String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users      User[]
+  treatments ClinicTreatment[]
+  template   ClinicTemplate?
+  members    Member[]
+}
+
+model User {
+  id        String   @id @default(uuid())
+  clinicId  String?
+  clinic    Clinic?  @relation(fields: [clinicId], references: [id])
+  email     String   @unique
+  role      UserRole
+  createdAt DateTime @default(now())
+
+  @@index([clinicId])
+}
+
+enum UserRole {
+  OWNER
+  MANAGER
+  STAFF
+  VOONE_ADMIN
+}
+
+model ClinicTreatment {
+  id             String   @id @default(uuid())
+  clinicId       String
+  clinic         Clinic   @relation(fields: [clinicId], references: [id])
+  name           String
+  pointsAllotted Int
+  createdAt      DateTime @default(now())
+
+  @@index([clinicId])
+}
+
+model TemplatePreset {
+  id                 String   @id @default(uuid())
+  name               String   @unique
+  hexBackgroundColor String
+  previewImageUrl    String?
+  createdAt          DateTime @default(now())
+
+  templates ClinicTemplate[]
+}
+
+model ClinicTemplate {
+  id                 String         @id @default(uuid())
+  clinicId           String         @unique
+  clinic             Clinic         @relation(fields: [clinicId], references: [id])
+  presetId           String
+  preset             TemplatePreset @relation(fields: [presetId], references: [id])
+  programName        String
+  hexBackgroundColor String
+  logoUrl            String?
+  heroImageUrl       String?
+  pointsLabel        String
+  tierLabel          String
+  benefitsText       String
+  infoText           String
+  status             TemplateStatus @default(PENDING)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  walletClasses WalletClass[]
+
+  @@index([presetId])
+}
+
+enum TemplateStatus {
+  PENDING
+  ACTIVE
+  FAILED
+}
+
+model Member {
+  id            String   @id @default(uuid())
+  clinicId      String
+  clinic        Clinic   @relation(fields: [clinicId], references: [id])
+  name          String
+  phone         String?
+  email         String?
+  pointsBalance Int      @default(0)
+  tier          String?
+  createdAt     DateTime @default(now())
+
+  walletObjects WalletObject[]
+
+  @@index([clinicId])
+}
+
+model WalletClass {
+  id               String             @id @default(uuid())
+  clinicTemplateId String
+  clinicTemplate   ClinicTemplate     @relation(fields: [clinicTemplateId], references: [id])
+  provider         WalletProviderType
+  externalClassId  String
+  status           WalletSyncStatus   @default(PENDING)
+  lastSyncedAt     DateTime?
+  createdAt        DateTime           @default(now())
+
+  @@unique([clinicTemplateId, provider])
+}
+
+model WalletObject {
+  id               String             @id @default(uuid())
+  memberId         String
+  member           Member             @relation(fields: [memberId], references: [id])
+  provider         WalletProviderType
+  externalObjectId String
+  status           WalletSyncStatus   @default(PENDING)
+  lastSyncedAt     DateTime?
+  createdAt        DateTime           @default(now())
+
+  @@unique([memberId, provider])
+}
+
+enum WalletProviderType {
+  GOOGLE
+  APPLE
+}
+
+enum WalletSyncStatus {
+  PENDING
+  SYNCED
+  FAILED
+}
