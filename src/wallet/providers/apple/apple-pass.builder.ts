@@ -4,7 +4,7 @@ import path from "node:path";
 import { WalletPassSigningError } from "../../../common/errors/wallet.errors";
 import { AppleWalletCertificates } from "../../../config/apple-wallet.config";
 import { LoyaltyCard } from "../../engine/loyalty-card";
-import { BuiltPass, PassBuilder } from "../../engine/pass-builder.interface";
+import { BuiltPass, PassBuilder, PassUpdateBinding } from "../../engine/pass-builder.interface";
 import { buildStoreCardFields } from "./apple-pass.fields";
 import { PASS_TRANSLATIONS } from "./apple-pass.strings";
 import { deriveAppleTheme } from "./apple-pass.theme";
@@ -23,10 +23,10 @@ const PASS_STYLE = "storeCard";
 export class ApplePassBuilder implements PassBuilder {
   constructor(private readonly options: ApplePassBuilderOptions) {}
 
-  async build(data: LoyaltyCard): Promise<BuiltPass> {
+  async build(data: LoyaltyCard, updates?: PassUpdateBinding): Promise<BuiltPass> {
     this.assertModelIsUsable();
 
-    const buffer = await this.sign(data);
+    const buffer = await this.sign(data, updates);
 
     return {
       buffer,
@@ -58,7 +58,7 @@ export class ApplePassBuilder implements PassBuilder {
     }
   }
 
-  private async sign(data: LoyaltyCard): Promise<Buffer> {
+  private async sign(data: LoyaltyCard, updates?: PassUpdateBinding): Promise<Buffer> {
     const { PKPass, PassType } = await loadPasskit();
     const theme = deriveAppleTheme(data.template.backgroundColor);
 
@@ -81,7 +81,16 @@ export class ApplePassBuilder implements PassBuilder {
           sharingProhibited: true,
           backgroundColor: theme.backgroundColor,
           foregroundColor: theme.foregroundColor,
-          labelColor: theme.labelColor
+          labelColor: theme.labelColor,
+          // Both or neither. Apple ignores a webServiceURL with no token and rejects a
+          // token with no URL, and a pass carrying one of them is a pass that silently
+          // never updates — the failure mode worth designing out rather than debugging.
+          ...(updates
+            ? {
+                webServiceURL: updates.webServiceUrl,
+                authenticationToken: updates.authenticationToken
+              }
+            : {})
         }
       );
     } catch (error) {

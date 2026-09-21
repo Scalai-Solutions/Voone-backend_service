@@ -22,7 +22,28 @@ const envSchema = z.object({
   // surface, so it belongs only in server-side code.
   STAFF_API_KEY: z.string().min(24, "STAFF_API_KEY must be at least 24 chars").optional(),
 
-  EDGE_SHARED_SECRET: z.string().min(16, "EDGE_SHARED_SECRET must be at least 16 chars").optional()
+  EDGE_SHARED_SECRET: z.string().min(16, "EDGE_SHARED_SECRET must be at least 16 chars").optional(),
+
+  // Optional, and read at startup rather than at first use, because whether the Apple
+  // pass web service is mounted at all depends on it. Without a certificate there is no
+  // pass to update, and routes that 500 on every call are worse than routes that 404.
+  //
+  // Apple appends "/v1/..." to this, and the pass routes live under the existing /api/v1
+  // router — so it stops at /api. It is baked into every signed pass and cannot be
+  // changed afterwards: a pass on a member's phone calls this host forever. Never a
+  // deploy-scoped hostname.
+  APPLE_PASS_WEB_SERVICE_URL: z
+    .string()
+    .url("APPLE_PASS_WEB_SERVICE_URL must be a valid URL")
+    .optional(),
+
+  // Optional. Keys the HMAC that derives each member's barcode. Rotating it changes every
+  // issued barcode at once, which is the argument for eventually storing the code per
+  // member instead.
+  CARD_REDEMPTION_SECRET: z
+    .string()
+    .min(24, "CARD_REDEMPTION_SECRET must be at least 24 chars")
+    .optional()
 });
 
 const parsedEnv = envSchema.safeParse(process.env);
