@@ -50,6 +50,12 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Added after a formatting violation reached main unnoticed: format:check existed as
+      # a script from the start but nothing ran it, so Prettier drift was only ever caught
+      # by whoever happened to run it locally.
+      - name: Format
+        run: npm run format:check
+
       - name: Typecheck
         run: npm run typecheck
 

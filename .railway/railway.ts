@@ -1,4 +1,4 @@
-import { defineRailway, github, preserve, project, service } from "railway/iac";
+import { defineRailway, github, preserve, project, redis, ref, service } from "railway/iac";
 
 // A per-service partial, matching voone-web's file. Its note about preferring one
 // project-level file still applies: when these are combined, this and voone-web's
@@ -6,6 +6,15 @@ import { defineRailway, github, preserve, project, service } from "railway/iac";
 export const partial = "voone-backend";
 
 export default defineRailway(() => {
+  // Managed Redis, declared here rather than clicked into the dashboard so REDIS_URL can
+  // be a reference instead of a pasted connection string that nobody dares rotate.
+  //
+  // Until this exists, REDIS_URL held a placeholder that satisfied the config validator
+  // and pointed at nothing — which was harmless only because nothing read it. The wallet
+  // sync queue now does, so a placeholder would become a runtime failure the moment
+  // WALLET_SYNC_MODE moved off "inline".
+  const cache = redis("voone-redis");
+
   const api = service("voone-backend", {
     // Built from the repository rather than an uploaded snapshot, so a deploy is
     // reproducible from a commit and pushes to main deploy themselves.
@@ -29,12 +38,51 @@ export default defineRailway(() => {
     // destroy" against the variables that had just been set by hand.
     env: {
       DATABASE_URL: preserve(),
-      REDIS_URL: preserve(),
+
+      // A reference, not a preserved value: Railway keeps it correct across a Redis
+      // rotation or rebuild, and there is no copied credential to go stale.
+      REDIS_URL: ref(cache, "REDIS_URL"),
+
       STAFF_API_KEY: preserve(),
+
+      // Optional in src/config/env.ts but declared here anyway. Anything this file does
+      // not name is DESTROYED by an apply, so an undeclared optional is not "left alone",
+      // it is deleted — which would silently switch the edge guard off.
+      EDGE_SHARED_SECRET: preserve(),
       GOOGLE_WALLET_ISSUER_ID: preserve(),
       GOOGLE_WALLET_SERVICE_ACCOUNT_EMAIL: preserve(),
       GOOGLE_WALLET_SERVICE_ACCOUNT_KEY: preserve(),
       GOOGLE_WALLET_ALLOWED_ORIGIN: preserve(),
+      // --- Apple Wallet signing ---
+      // The pass type and team identifiers are read from the certificate itself, so only
+      // the material is configured. All preserved: three of them are private keys or
+      // certificates and none belongs in git.
+      APPLE_WALLET_ORGANIZATION_NAME: preserve(),
+      APPLE_WALLET_SIGNER_CERT_BASE64: preserve(),
+      APPLE_WALLET_SIGNER_KEY_BASE64: preserve(),
+      APPLE_WALLET_SIGNER_KEY_PASSPHRASE: preserve(),
+      APPLE_WALLET_WWDR_CERT_BASE64: preserve(),
+
+      // Baked into every signed pass and unchangeable afterwards: a pass on a member's
+      // phone calls this host forever. Preserved rather than pinned so it cannot be
+      // changed by editing this file without someone thinking about it first.
+      APPLE_PASS_WEB_SERVICE_URL: preserve(),
+
+      // Keys the HMAC behind every member's barcode. Rotating it changes every issued
+      // barcode at once.
+      CARD_REDEMPTION_SECRET: preserve(),
+
+      // --- Wallet sync ---
+      // Still "inline" deliberately. This apply is what creates the Redis instance above,
+      // and a service booting against a queue that is still being provisioned fails for a
+      // reason nobody enjoys diagnosing. Flip to "queue" in a second apply, once the
+      // instance is up and REDIS_URL resolves.
+      WALLET_SYNC_MODE: "inline",
+
+      // The API consumes the queue itself. Set false only once a dedicated worker service
+      // running `npm run worker` exists, or nothing consumes and every card goes stale.
+      WALLET_WORKER_IN_PROCESS: "true",
+
       // Environment-specific, so preserved rather than pinned here.
       FRONTEND_URL: preserve(),
       // Not a secret and not environment-specific: src/config/env.ts requires it at import,
@@ -55,6 +103,6 @@ export default defineRailway(() => {
   // The existing project, so the API and the marketing site share one dashboard and one
   // set of shared variables rather than being split across two projects.
   return project("voone-web", {
-    resources: [api]
+    resources: [api, cache]
   });
 });
