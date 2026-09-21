@@ -3,8 +3,8 @@ import path from "node:path";
 
 import { WalletPassSigningError } from "../../../common/errors/wallet.errors";
 import { AppleWalletCertificates } from "../../../config/apple-wallet.config";
-import { PassBuilder } from "../../engine/pass-builder.interface";
-import { BuiltPass, LoyaltyPassData } from "../../engine/wallet-pass.types";
+import { LoyaltyCard } from "../../engine/loyalty-card";
+import { BuiltPass, PassBuilder } from "../../engine/pass-builder.interface";
 import { buildStoreCardFields } from "./apple-pass.fields";
 import { PASS_TRANSLATIONS } from "./apple-pass.strings";
 import { deriveAppleTheme } from "./apple-pass.theme";
@@ -23,7 +23,7 @@ const PASS_STYLE = "storeCard";
 export class ApplePassBuilder implements PassBuilder {
   constructor(private readonly options: ApplePassBuilderOptions) {}
 
-  async build(data: LoyaltyPassData): Promise<BuiltPass> {
+  async build(data: LoyaltyCard): Promise<BuiltPass> {
     this.assertModelIsUsable();
 
     const buffer = await this.sign(data);
@@ -58,7 +58,7 @@ export class ApplePassBuilder implements PassBuilder {
     }
   }
 
-  private async sign(data: LoyaltyPassData): Promise<Buffer> {
+  private async sign(data: LoyaltyCard): Promise<Buffer> {
     const { PKPass, PassType } = await loadPasskit();
     const theme = deriveAppleTheme(data.template.backgroundColor);
 
@@ -121,7 +121,7 @@ export class ApplePassBuilder implements PassBuilder {
    */
   private applyFields(
     pass: PKPassInstance,
-    data: LoyaltyPassData,
+    data: LoyaltyCard,
     PassType: Awaited<ReturnType<typeof loadPasskit>>["PassType"]
   ): void {
     let storeCard = pass.types.find((candidate) => candidate.type === PASS_STYLE);

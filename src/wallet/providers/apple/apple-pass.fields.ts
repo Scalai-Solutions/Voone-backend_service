@@ -1,4 +1,4 @@
-import { LoyaltyPassData } from "../../engine/wallet-pass.types";
+import { LoyaltyCard } from "../../engine/loyalty-card";
 import { PASS_LABELS } from "./apple-pass.strings";
 import { PassField } from "./passkit";
 
@@ -26,7 +26,7 @@ export interface StoreCardFields {
  * matching their names. The frontend's starter data puts value-like text in `tierLabel`
  * ("Miembro Gold"), so this reading needs confirming against the clinic-template code.
  */
-export const buildStoreCardFields = (data: LoyaltyPassData): StoreCardFields => {
+export const buildStoreCardFields = (data: LoyaltyCard): StoreCardFields => {
   const headerFields: PassField[] = [];
   const secondaryFields: PassField[] = [
     { key: "member", label: PASS_LABELS.member, value: data.member.fullName }

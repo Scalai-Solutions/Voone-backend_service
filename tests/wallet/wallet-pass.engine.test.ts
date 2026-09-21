@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { WalletPassDataError } from "../../src/common/errors/wallet.errors";
 import { WalletPassEngine } from "../../src/wallet/engine/wallet-pass.engine";
-import { aureaGoldPass } from "../fixtures/loyalty-pass.fixture";
+import { aureaGoldPass } from "../fixtures/loyalty-card.fixture";
 
 describe("WalletPassEngine", () => {
   const engine = new WalletPassEngine();

@@ -4,7 +4,7 @@ const INVISIBLE = /[\u200B-\u200F\u202A-\u202E\u2060\uFEFF]/g;
 export const MEMBER_NAME_MIN = 2;
 
 /**
- * Matches LoyaltyPassData's member.fullName max. A longer name would pass sign-up and
+ * Matches LoyaltyCard's member.fullName max. A longer name would pass sign-up and
  * then fail pass issuance for someone who is already in the database.
  */
 export const MEMBER_NAME_MAX = 64;
