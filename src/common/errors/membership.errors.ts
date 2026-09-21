@@ -16,6 +16,26 @@ export class ClinicNotFoundError extends AppError {
   }
 }
 
+/**
+ * No member with that id, or one that has been erased.
+ *
+ * The two are deliberately one answer. Erasure overwrites the row in place so a future
+ * ledger keeps its references, which means the row still exists — but saying so would
+ * confirm that a given person was once a member of a named aesthetic clinic, which is
+ * exactly what erasure is meant to prevent.
+ *
+ * Not exposed: the id is ours, and echoing it back tells a caller which ids are real.
+ */
+export class MemberNotFoundError extends AppError {
+  constructor(memberId: string) {
+    super(`Member "${memberId}" not found`, {
+      statusCode: 404,
+      code: "MEMBER_NOT_FOUND",
+      expose: false
+    });
+  }
+}
+
 /** The submitted sign-up form does not satisfy the schema. */
 export class MembershipValidationError extends AppError {
   constructor(details: string, cause?: unknown) {
