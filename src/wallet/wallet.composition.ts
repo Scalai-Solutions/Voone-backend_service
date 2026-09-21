@@ -56,11 +56,23 @@ export const buildWalletRegistry = (prisma: PrismaClient): WalletProviderRegistr
   return registry;
 };
 
+/**
+ * Whether the wallet subsystem has what it needs to run at all.
+ *
+ * Checked before construction rather than discovered inside it, so a half-configured
+ * deployment degrades instead of failing to boot. Membership sign-up does not need
+ * wallets, and taking the whole API down because a card cannot be assembled would turn a
+ * feature gap into an outage.
+ */
+export const isWalletSyncConfigured = (): boolean => Boolean(config.CARD_REDEMPTION_SECRET);
+
 export const buildWalletSyncService = (prisma: PrismaClient): WalletSyncService => {
   if (!config.CARD_REDEMPTION_SECRET) {
+    // Reaching here means a caller skipped isWalletSyncConfigured(), which is a
+    // programming error rather than a configuration one — hence a throw.
     throw new Error(
-      "CARD_REDEMPTION_SECRET is required to assemble loyalty cards. Set it, or leave " +
-        "the wallet subsystem unconfigured."
+      "CARD_REDEMPTION_SECRET is required to assemble loyalty cards. Call " +
+        "isWalletSyncConfigured() before building the wallet subsystem."
     );
   }
 
@@ -78,10 +90,17 @@ export const buildWalletSyncService = (prisma: PrismaClient): WalletSyncService 
  * the durable queue is a configuration change rather than a code change — and a
  * deployment with no Redis still works, just without retries.
  */
-export const buildWalletSyncQueue = (prisma: PrismaClient): WalletSyncQueue =>
-  config.WALLET_SYNC_MODE === "queue"
-    ? new BullWalletSyncQueue(config.REDIS_URL)
-    : new InlineWalletSyncQueue(buildWalletSyncService(prisma));
+export const buildWalletSyncQueue = (prisma: PrismaClient): WalletSyncQueue | null => {
+  if (config.WALLET_SYNC_MODE === "queue") {
+    return new BullWalletSyncQueue(config.REDIS_URL);
+  }
+
+  // Null rather than a throw, for the same reason as above: a caller that cannot sync
+  // wallets should skip the enqueue, not fail the request that triggered it.
+  return isWalletSyncConfigured()
+    ? new InlineWalletSyncQueue(buildWalletSyncService(prisma))
+    : null;
+};
 
 /**
  * A queue consumer inside the API process.
@@ -96,6 +115,20 @@ export const buildWalletSyncQueue = (prisma: PrismaClient): WalletSyncQueue =>
  */
 export const startInProcessWalletWorker = (prisma: PrismaClient): Worker<WalletSyncJob> | null => {
   if (config.WALLET_SYNC_MODE !== "queue" || !config.WALLET_WORKER_IN_PROCESS) {
+    return null;
+  }
+
+  // The trap this exists to disarm: turning WALLET_SYNC_MODE on without also setting
+  // CARD_REDEMPTION_SECRET used to throw here, at import, taking the entire API down —
+  // sign-up included, which needs no wallet at all. A config flip must not be able to
+  // cause an outage, so this warns and leaves the queue unconsumed instead.
+  if (!isWalletSyncConfigured()) {
+    console.warn(
+      "[wallet] WALLET_SYNC_MODE is 'queue' but CARD_REDEMPTION_SECRET is unset, so " +
+        "cards cannot be assembled. Not consuming the queue — jobs will accumulate " +
+        "until it is set."
+    );
+
     return null;
   }
 
