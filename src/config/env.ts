@@ -43,7 +43,20 @@ const envSchema = z.object({
   CARD_REDEMPTION_SECRET: z
     .string()
     .min(24, "CARD_REDEMPTION_SECRET must be at least 24 chars")
-    .optional()
+    .optional(),
+
+  // How a points change reaches the wallets.
+  //
+  // "inline" runs the sync in the API process: no retries, no durability, and a restart
+  // loses anything in flight. It is the default because it needs no infrastructure and
+  // the call sites are identical either way — moving to "queue" is configuration, not
+  // code.
+  //
+  // "queue" uses Redis and BullMQ, and needs the worker process running
+  // (`npm run worker`). Setting it without a worker means jobs pile up and no card ever
+  // updates, which is why the worker exits loudly rather than idling when the mode is
+  // wrong.
+  WALLET_SYNC_MODE: z.enum(["inline", "queue"]).default("inline")
 });
 
 const parsedEnv = envSchema.safeParse(process.env);

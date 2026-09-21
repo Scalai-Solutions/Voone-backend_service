@@ -14,13 +14,16 @@
     "prisma:seed": "tsx prisma/seed.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "copy:pass-assets": "node scripts/copy-pass-assets.mjs"
+    "copy:pass-assets": "node scripts/copy-pass-assets.mjs",
+    "worker": "node dist/jobs/wallet-sync.worker.js",
+    "worker:dev": "tsx watch src/jobs/wallet-sync.worker.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "6.12.0",
+    "bullmq": "^6.3.8",
     "cors": "^2.8.5",
     "dotenv": "^17.2.1",
     "express": "^4.19.2",
