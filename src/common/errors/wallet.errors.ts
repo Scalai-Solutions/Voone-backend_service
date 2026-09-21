@@ -20,3 +20,16 @@ export class WalletPassSigningError extends AppError {
     super(message, { statusCode: 500, code: "WALLET_PASS_SIGNING_FAILED", expose: false, cause });
   }
 }
+
+/**
+ * A provider rejected or could not receive an update.
+ *
+ * 502 rather than 500: the failure is downstream, and the distinction is what tells an
+ * operator to look at Apple or Google rather than at us. Never exposed — the cause can
+ * carry a provider payload, and those have been known to echo member data back.
+ */
+export class WalletSyncError extends AppError {
+  constructor(message: string, cause?: unknown) {
+    super(message, { statusCode: 502, code: "WALLET_SYNC_FAILED", expose: false, cause });
+  }
+}
