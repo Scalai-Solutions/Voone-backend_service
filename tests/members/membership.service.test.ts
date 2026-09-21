@@ -21,6 +21,10 @@ const INPUT = {
   phone: "+34612345678",
   phoneRaw: "612 34 56 78",
   phoneRegionAssumed: true,
+  // Both optional on the form. A member who skipped them is the ordinary case, so that
+  // is what the shared fixture represents.
+  birthYear: undefined,
+  sex: undefined,
   consentMarketing: true,
   // Omitted by the public form, which is what the undefined represents. The service takes
   // the provenance as its own argument regardless, so this field never reaches the row.
@@ -117,6 +121,38 @@ describe("signUpMember", () => {
       expect(update.mock.calls[0][0].data).not.toHaveProperty("name");
       expect(update.mock.calls[0][0].data).not.toHaveProperty("consentMarketing");
       expect(update.mock.calls[0][0].data).not.toHaveProperty("phoneRaw");
+    });
+
+    it("never rewrites the stored demographics either", async () => {
+      // Same reasoning as the name: a re-scan must not let anyone who knows a phone
+      // number change what a real member said about themselves.
+      const create = vi.fn().mockRejectedValue(uniqueViolation());
+      const update = vi.fn().mockResolvedValue({});
+
+      await signUpMember(
+        db({ create, update }),
+        AUREA,
+        { ...INPUT, birthYear: 1990, sex: "hombre" },
+        "qr_signup",
+        NOW
+      );
+
+      expect(update.mock.calls[0][0].data).not.toHaveProperty("birthYear");
+      expect(update.mock.calls[0][0].data).not.toHaveProperty("sex");
+    });
+
+    it("stores the demographics a member did give", async () => {
+      const create = vi.fn().mockResolvedValue({});
+
+      await signUpMember(
+        db({ create }),
+        AUREA,
+        { ...INPUT, birthYear: 1994, sex: "mujer" },
+        "qr_signup",
+        NOW
+      );
+
+      expect(create.mock.calls[0][0].data).toMatchObject({ birthYear: 1994, sex: "mujer" });
     });
   });
 

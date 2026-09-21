@@ -200,3 +200,67 @@ describe("clinicSlugSchema messages", () => {
     }
   });
 });
+
+describe("birthYear", () => {
+  const withYear = (birthYear: unknown) =>
+    membershipSignupSchema.safeParse({ ...VALID, birthYear });
+
+  it("is optional, because refusing a sign-up over a demographic costs a member", () => {
+    expect(membershipSignupSchema.safeParse(VALID).success).toBe(true);
+  });
+
+  it("accepts a plausible year", () => {
+    const parsed = withYear(1994);
+
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.birthYear).toBe(1994);
+  });
+
+  it("coerces the string a form submits", () => {
+    const parsed = withYear("1994");
+
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.birthYear).toBe(1994);
+  });
+
+  it("rejects a year in the future", () => {
+    expect(withYear(new Date().getUTCFullYear() + 1).success).toBe(false);
+  });
+
+  it("rejects an implausibly distant year", () => {
+    expect(withYear(1800).success).toBe(false);
+  });
+
+  it("rejects a fractional year rather than silently truncating it", () => {
+    expect(withYear(1994.5).success).toBe(false);
+  });
+});
+
+describe("sex", () => {
+  const withSex = (sex: unknown) => membershipSignupSchema.safeParse({ ...VALID, sex });
+
+  it("is optional", () => {
+    expect(membershipSignupSchema.safeParse(VALID).success).toBe(true);
+  });
+
+  it("accepts each offered option", () => {
+    for (const value of ["mujer", "hombre", "otro", "prefiero_no_decirlo"]) {
+      expect(withSex(value).success).toBe(true);
+    }
+  });
+
+  it("treats declining to answer as a real answer, not an absent field", () => {
+    // A member who chose not to say is a different fact from one never asked, and
+    // segmentation that conflated them would under-count.
+    const parsed = withSex("prefiero_no_decirlo");
+
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.sex).toBe("prefiero_no_decirlo");
+  });
+
+  it("rejects anything outside the offered set", () => {
+    expect(withSex("Mujer").success).toBe(false);
+    expect(withSex("f").success).toBe(false);
+  });
+});
+
