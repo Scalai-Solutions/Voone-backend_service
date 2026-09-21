@@ -17,9 +17,19 @@ const main = async (): Promise<void> => {
   if (config.WALLET_SYNC_MODE !== "queue") {
     console.error(
       "WALLET_SYNC_MODE is not 'queue', so there is no queue to consume. " +
-        "The API is running syncs in-process; this worker has nothing to do."
+        "The API is running syncs inline; this worker has nothing to do."
     );
     process.exit(1);
+  }
+
+  if (config.WALLET_WORKER_IN_PROCESS) {
+    // Not fatal — two consumers is safe, BullMQ hands each job to one of them. But it is
+    // almost always a misconfiguration, and silently doubling capacity is the kind of
+    // thing that is discovered months later while debugging something else.
+    console.warn(
+      "WALLET_WORKER_IN_PROCESS is true, so the API is consuming the queue as well. " +
+        "Set it to false on the API now that a dedicated worker is running."
+    );
   }
 
   const worker = createWalletSyncWorker(config.REDIS_URL, buildWalletSyncService(prisma));

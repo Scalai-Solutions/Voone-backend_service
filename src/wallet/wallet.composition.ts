@@ -1,7 +1,13 @@
 import type { PrismaClient } from "@prisma/client";
 
 import { config } from "../config/env";
-import { BullWalletSyncQueue } from "../infrastructure/queue/bull-wallet-sync.queue";
+import type { Worker } from "bullmq";
+
+import {
+  BullWalletSyncQueue,
+  createWalletSyncWorker,
+  type WalletSyncJob
+} from "../infrastructure/queue/bull-wallet-sync.queue";
 import { NoopRefreshChannel } from "./engine/pass-refresh-channel.interface";
 import { WalletProviderRegistry } from "./engine/wallet-provider.registry";
 import { InlineWalletSyncQueue, WalletSyncQueue } from "./engine/wallet-sync.queue";
@@ -76,3 +82,32 @@ export const buildWalletSyncQueue = (prisma: PrismaClient): WalletSyncQueue =>
   config.WALLET_SYNC_MODE === "queue"
     ? new BullWalletSyncQueue(config.REDIS_URL)
     : new InlineWalletSyncQueue(buildWalletSyncService(prisma));
+
+/**
+ * A queue consumer inside the API process.
+ *
+ * Returns null when there is nothing to consume — inline mode, or a deployment that has
+ * handed consumption to a dedicated worker service.
+ *
+ * Concurrency is deliberately low. Signing a .pkpass is CPU-bound and this shares an
+ * event loop with request handling, so the ceiling exists to stop a backlog of syncs
+ * slowing the scan at reception — which is the exact coupling the queue was added to
+ * prevent, and would be embarrassing to reintroduce here.
+ */
+export const startInProcessWalletWorker = (prisma: PrismaClient): Worker<WalletSyncJob> | null => {
+  if (config.WALLET_SYNC_MODE !== "queue" || !config.WALLET_WORKER_IN_PROCESS) {
+    return null;
+  }
+
+  const worker = createWalletSyncWorker(config.REDIS_URL, buildWalletSyncService(prisma), 2);
+
+  worker.on("failed", (job, error) => {
+    console.error(`[wallet] job ${job?.id ?? "?"} failed:`, error.message);
+  });
+
+  worker.on("error", (error) => {
+    console.error("[wallet] worker error:", error.message);
+  });
+
+  return worker;
+};

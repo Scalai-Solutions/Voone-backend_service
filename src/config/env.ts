@@ -56,7 +56,21 @@ const envSchema = z.object({
   // (`npm run worker`). Setting it without a worker means jobs pile up and no card ever
   // updates, which is why the worker exits loudly rather than idling when the mode is
   // wrong.
-  WALLET_SYNC_MODE: z.enum(["inline", "queue"]).default("inline")
+  WALLET_SYNC_MODE: z.enum(["inline", "queue"]).default("inline"),
+
+  // Whether the API process also consumes the queue, rather than only enqueueing onto it.
+  //
+  // True by default, because a durable queue with nobody consuming it is worse than no
+  // queue at all: jobs accumulate, every card goes stale, and nothing looks broken. One
+  // Redis instance and no second deploy is the right trade at pilot scale.
+  //
+  // Set it false on the API when a dedicated worker service exists (`npm run worker`) —
+  // at that point pass signing should stop competing with request handling for the event
+  // loop, which is the only reason to separate them.
+  WALLET_WORKER_IN_PROCESS: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true")
 });
 
 const parsedEnv = envSchema.safeParse(process.env);
