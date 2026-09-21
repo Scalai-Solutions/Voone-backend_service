@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WalletSyncError } from "../../src/common/errors/wallet.errors";
 import type { LoyaltyCard } from "../../src/wallet/engine/loyalty-card";
 import type { BuiltPass, PassBuilder } from "../../src/wallet/engine/pass-builder.interface";
+import type { DeviceRegistration } from "../../src/wallet/engine/pass-device-registry.interface";
+import type { PassDeviceRepository } from "../../src/wallet/engine/pass-device.repository";
 import type { PassRefreshChannel } from "../../src/wallet/engine/pass-refresh-channel.interface";
 import type {
   CardRef,
@@ -47,6 +49,48 @@ class InMemoryRepository implements WalletSyncRepository {
   }
 }
 
+class InMemoryDeviceRepository implements PassDeviceRepository {
+  readonly registrations = new Map<string, Required<DeviceRegistration>>();
+  readonly tokens = new Map<string, string>();
+  updatedSince: { serialNumbers: string[]; lastUpdated: Date | null } = {
+    serialNumbers: [],
+    lastUpdated: null
+  };
+
+  private key(device: string, serial: string) {
+    return `${device}:${serial}`;
+  }
+
+  async saveRegistration(registration: Required<DeviceRegistration>) {
+    const key = this.key(registration.deviceLibraryIdentifier, registration.serialNumber);
+    const created = !this.registrations.has(key);
+    this.registrations.set(key, registration);
+    return { created };
+  }
+  async removeRegistration(device: string, serial: string) {
+    return this.registrations.delete(this.key(device, serial));
+  }
+  async serialsUpdatedSince() {
+    return this.updatedSince;
+  }
+  async pushTokensFor(serial: string) {
+    return [...this.registrations.values()]
+      .filter((r) => r.serialNumber === serial)
+      .map((r) => r.pushToken);
+  }
+  async authenticationTokenFor(serial: string) {
+    return this.tokens.get(serial) ?? null;
+  }
+  async setAuthenticationToken(serial: string, token: string) {
+    this.tokens.set(serial, token);
+  }
+  async passRecordFor(serial: string) {
+    return this.tokens.has(serial) ? { memberId: "member-for-" + serial, lastUpdated: null } : null;
+  }
+}
+
+const WEB_SERVICE_URL = "https://api.voone.ai/api";
+
 const builtPassFor = (card: LoyaltyCard): BuiltPass => ({
   buffer: Buffer.from(`signed:${card.serialNumber}`),
   fileName: `${card.serialNumber}.pkpass`,
@@ -67,6 +111,7 @@ const template: ProgramTemplate = {
 
 describe("AppleWalletProvider", () => {
   let repo: InMemoryRepository;
+  let devices: InMemoryDeviceRepository;
   let build: ReturnType<typeof vi.fn>;
   let notifyRefresh: ReturnType<typeof vi.fn>;
   let refresh: PassRefreshChannel;
@@ -74,13 +119,32 @@ describe("AppleWalletProvider", () => {
 
   beforeEach(() => {
     repo = new InMemoryRepository();
+    devices = new InMemoryDeviceRepository();
     build = vi.fn(async (card: LoyaltyCard) => builtPassFor(card));
     notifyRefresh = vi.fn(async () => {});
     refresh = { notifyRefresh } as unknown as PassRefreshChannel;
-    provider = new AppleWalletProvider(repo, () => ({ build }) as unknown as PassBuilder, refresh);
+    provider = new AppleWalletProvider(
+      repo,
+      () => ({ build }) as unknown as PassBuilder,
+      refresh,
+      devices,
+      WEB_SERVICE_URL
+    );
   });
 
   describe("issuing", () => {
+    it("mints a token, binds it into the pass, and stores it", async () => {
+      await provider.issueCard(aureaGoldPass, program);
+
+      const stored = devices.tokens.get(aureaGoldPass.serialNumber);
+
+      expect(stored).toMatch(/^[A-Za-z0-9_-]{40,}$/);
+      expect(build.mock.calls[0][1]).toEqual({
+        webServiceUrl: WEB_SERVICE_URL,
+        authenticationToken: stored
+      });
+    });
+
     it("hands back a file, not a link — an Apple pass is downloaded, not fetched by URL", async () => {
       const issued = await provider.issueCard(aureaGoldPass, program);
 
@@ -151,7 +215,26 @@ describe("AppleWalletProvider", () => {
     it("rebuilds the pass first, so an unsignable card fails now instead of on the device", async () => {
       await provider.syncCard(ref, aureaGoldPass);
 
-      expect(build).toHaveBeenCalledWith(aureaGoldPass);
+      expect(build.mock.calls[0][0]).toEqual(aureaGoldPass);
+    });
+
+    it("rebuilds with the token the pass already has, never a fresh one", async () => {
+      // Reissuing a token would lock out every device already registered for this pass.
+      devices.tokens.set(aureaGoldPass.serialNumber, "existing-token");
+
+      await provider.syncCard(ref, aureaGoldPass);
+
+      expect(build.mock.calls[0][1]).toEqual({
+        webServiceUrl: WEB_SERVICE_URL,
+        authenticationToken: "existing-token"
+      });
+    });
+
+    it("binds no web service at all when the pass has no token", async () => {
+      await provider.syncCard(ref, aureaGoldPass);
+
+      // Better a frozen pass than one advertising an endpoint that will 401 it forever.
+      expect(build.mock.calls[0][1]).toBeUndefined();
     });
 
     it("fails the sync when the pass can no longer be built, and does not wake the device", async () => {
@@ -175,6 +258,28 @@ describe("AppleWalletProvider", () => {
     });
   });
 
+  describe("authenticating a device", () => {
+    it("accepts the token stored for that pass", async () => {
+      await provider.issueCard(aureaGoldPass, program);
+      const token = devices.tokens.get(aureaGoldPass.serialNumber) as string;
+
+      expect(await provider.authenticate(aureaGoldPass.serialNumber, token)).toBe(true);
+    });
+
+    it("rejects a token belonging to a different pass", async () => {
+      await provider.issueCard(aureaGoldPass, program);
+      devices.tokens.set("other-serial", "someone-elses-token");
+
+      expect(await provider.authenticate(aureaGoldPass.serialNumber, "someone-elses-token")).toBe(
+        false
+      );
+    });
+
+    it("rejects everything for a pass with no stored token", async () => {
+      expect(await provider.authenticate("never-issued", "anything")).toBe(false);
+    });
+  });
+
   describe("configuration", () => {
     it("reports itself usable once signing material is present", () => {
       // The suite's global setup generates a throwaway certificate chain whose subject
@@ -191,7 +296,9 @@ describe("AppleWalletProvider", () => {
       });
 
       expect(
-        () => new AppleWalletProvider(repo, builderFactory as never, refresh).provider
+        () =>
+          new AppleWalletProvider(repo, builderFactory as never, refresh, devices, WEB_SERVICE_URL)
+            .provider
       ).not.toThrow();
       expect(builderFactory).not.toHaveBeenCalled();
     });

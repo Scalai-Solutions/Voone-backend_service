@@ -197,6 +197,48 @@ model WalletObject {
   createdAt        DateTime           @default(now())
 
   @@unique([memberId, provider])
+  /// Apple addresses a pass by serial alone, so the web service looks rows up that way.
+  @@index([externalObjectId])
+}
+
+/// The bearer secret one Apple pass authenticates with.
+///
+/// Its own table rather than a column on WalletObject, for two reasons. It is meaningful
+/// only to a provider whose pass is a file on a device, so it does not belong on a model
+/// both providers share. And it has to be written before the pass is signed — the token
+/// goes inside the file — which is before the WalletObject row exists.
+///
+/// Stored, never derived from the serial: serials travel in URLs and barcodes, so anyone
+/// who saw one could otherwise read or deregister that member's pass.
+model ApplePassCredential {
+  serialNumber        String   @id
+  authenticationToken String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+/// One device's request to be told when one pass changes.
+///
+/// Apple's own table, in effect: the device supplies all four values and we hand the push
+/// token back to APNs when the pass is republished. Not tied to Member by a foreign key —
+/// the device knows only the serial, and an erased member's row must still be findable so
+/// its registrations can be cleared.
+model PassDeviceRegistration {
+  id                      String   @id @default(uuid())
+  deviceLibraryIdentifier String
+  passTypeIdentifier      String
+  serialNumber            String
+  pushToken               String
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  /// A device registers a given pass once. Re-registering replaces the push token, which
+  /// is what Apple expects when a token is rotated.
+  @@unique([deviceLibraryIdentifier, serialNumber])
+  /// The updated-serials endpoint filters by both.
+  @@index([deviceLibraryIdentifier, passTypeIdentifier])
+  /// Fan-out on republish goes the other way: serial to every device holding it.
+  @@index([serialNumber])
 }
 
 enum WalletProviderType {
