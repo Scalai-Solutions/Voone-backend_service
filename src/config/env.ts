@@ -43,7 +43,34 @@ const envSchema = z.object({
   CARD_REDEMPTION_SECRET: z
     .string()
     .min(24, "CARD_REDEMPTION_SECRET must be at least 24 chars")
-    .optional()
+    .optional(),
+
+  // How a points change reaches the wallets.
+  //
+  // "inline" runs the sync in the API process: no retries, no durability, and a restart
+  // loses anything in flight. It is the default because it needs no infrastructure and
+  // the call sites are identical either way — moving to "queue" is configuration, not
+  // code.
+  //
+  // "queue" uses Redis and BullMQ, and needs the worker process running
+  // (`npm run worker`). Setting it without a worker means jobs pile up and no card ever
+  // updates, which is why the worker exits loudly rather than idling when the mode is
+  // wrong.
+  WALLET_SYNC_MODE: z.enum(["inline", "queue"]).default("inline"),
+
+  // Whether the API process also consumes the queue, rather than only enqueueing onto it.
+  //
+  // True by default, because a durable queue with nobody consuming it is worse than no
+  // queue at all: jobs accumulate, every card goes stale, and nothing looks broken. One
+  // Redis instance and no second deploy is the right trade at pilot scale.
+  //
+  // Set it false on the API when a dedicated worker service exists (`npm run worker`) —
+  // at that point pass signing should stop competing with request handling for the event
+  // loop, which is the only reason to separate them.
+  WALLET_WORKER_IN_PROCESS: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true")
 });
 
 const parsedEnv = envSchema.safeParse(process.env);
