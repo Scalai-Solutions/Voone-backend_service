@@ -42,6 +42,13 @@ export const cardTemplateSchema = z.object({
  */
 export const loyaltyCardSchema = z
   .object({
+    /**
+     * Member.id. Ours, never a provider's, and never rendered onto the card — it is here
+     * because a card belongs to someone, and WalletObject is keyed by [memberId,
+     * provider]. Without it a provider could build a card it cannot then record.
+     */
+    memberId: z.string().min(1).max(64),
+
     serialNumber: z.string().min(1).max(64),
     // Base32 is safe in every barcode encoding, and the code must never carry personal data
     // or a guessable member identifier.

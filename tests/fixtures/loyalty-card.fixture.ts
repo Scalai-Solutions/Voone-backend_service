@@ -8,6 +8,7 @@ import { LoyaltyCard } from "../../src/wallet/engine/loyalty-card";
  * a real member actually has today.
  */
 export const aureaGoldPass: LoyaltyCard = {
+  memberId: "00000000-0000-4000-8000-00000000c123",
   serialNumber: "voone-member-000123",
   redemptionCode: "MFRGGZDFMZTWQ2LKNNWG23Q",
   tier: "Gold",
@@ -33,6 +34,7 @@ export const fullyPopulatedPass: LoyaltyCard = {
 
 /** The minimum a brand new member has: no tier, no credit, no reward, no join year. */
 export const brandNewMemberPass: LoyaltyCard = {
+  memberId: "00000000-0000-4000-8000-00000000c999",
   serialNumber: "voone-member-000999",
   redemptionCode: "GEZDGNBVGY3TQOJQGEZDGNA",
   clinic: { name: "AURÉA" },
