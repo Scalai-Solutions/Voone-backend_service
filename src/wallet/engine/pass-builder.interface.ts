@@ -17,7 +17,29 @@ export interface BuiltPass {
   serialNumber: string;
 }
 
-/** Contract for turning a provider-independent loyalty card into a pass file. */
+/**
+ * What makes a pass updatable.
+ *
+ * A .pkpass without these two fields is a snapshot: the device never calls back, so the
+ * points on it stay frozen at the moment it was issued. With them, the device registers
+ * itself and fetches a new version whenever it is told to.
+ *
+ * The URL is baked into the signed file and cannot be changed afterwards — a pass on a
+ * member's phone calls that host forever — so it has to be a permanent hostname before
+ * the first real pass is issued, never a deploy-scoped one.
+ */
+export interface PassUpdateBinding {
+  webServiceUrl: string;
+  /** Per-pass bearer secret the device returns on every web service call. */
+  authenticationToken: string;
+}
+
+/**
+ * Contract for turning a provider-independent loyalty card into a pass file.
+ *
+ * `updates` is optional because a pass is still valid without it, just frozen — which is
+ * what a preview wants. A real issue always supplies it.
+ */
 export interface PassBuilder {
-  build(card: LoyaltyCard): Promise<BuiltPass>;
+  build(card: LoyaltyCard, updates?: PassUpdateBinding): Promise<BuiltPass>;
 }
