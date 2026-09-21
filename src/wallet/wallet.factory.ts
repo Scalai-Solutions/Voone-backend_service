@@ -1,18 +1,17 @@
 import { getAppleWalletConfig } from "../config/apple-wallet.config";
 import { PassBuilder } from "./engine/pass-builder.interface";
-import { WalletProvider } from "./engine/wallet-provider.interface";
 import { ApplePassBuilder } from "./providers/apple/apple-pass.builder";
 import { resolvePassModelDirectory } from "./providers/apple/apple-pass.model";
 
 export type WalletPlatform = "apple" | "google";
 
-// This will route wallet operations to the correct provider implementation.
-export const getWalletProvider = (platform: WalletPlatform): WalletProvider => {
-  void platform;
-
-  throw new Error("Not implemented");
-};
-
+/**
+ * Builds the Apple pass builder from configuration.
+ *
+ * Superseded in spirit by WalletPassProvider and the provider registry, which resolve an
+ * adapter by capability rather than by a platform string. Kept only because
+ * WalletPassEngine.createPass still calls it; the registry replaces both.
+ */
 export const getPassBuilder = (platform: WalletPlatform): PassBuilder => {
   if (platform === "google") {
     throw new Error("Not implemented");
