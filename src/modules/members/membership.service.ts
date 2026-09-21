@@ -42,6 +42,8 @@ export const signUpMember = async (
         phone: input.phone,
         phoneRaw: input.phoneRaw,
         phoneRegionAssumed: input.phoneRegionAssumed,
+        birthYear: input.birthYear,
+        sex: input.sex,
         normalizerVersion: NORMALIZER_VERSION,
         memberSince: madridYear(now),
         consentMarketing: input.consentMarketing,
@@ -67,6 +69,9 @@ export const signUpMember = async (
       // appears on the pass they show at reception.
       await db.member.update({
         where: { clinicId_phone: { clinicId: clinic.id, phone: input.phone } },
+        // Only the counters move. Demographics are deliberately not rewritten here for
+        // the same reason the name is not: a re-scan must not let anyone who knows a
+        // phone number change what a real member said about themselves.
         data: { signupCount: { increment: 1 }, lastSignupAt: now }
       });
     } catch {

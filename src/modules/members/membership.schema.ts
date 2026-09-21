@@ -28,6 +28,26 @@ export const signupSourceSchema = z.enum(
   "Origen de alta no válido"
 );
 
+/**
+ * Kept in step with the options the sign-up form renders.
+ *
+ * Not a database enum: "prefiero no decirlo" must be answerable, and widening a Postgres
+ * enum is a migration — a poor reason to leave a member unable to answer honestly.
+ */
+export const memberSexSchema = z.enum(
+  ["mujer", "hombre", "otro", "prefiero_no_decirlo"],
+  "Selecciona una opción válida"
+);
+
+export type MemberSex = z.infer<typeof memberSexSchema>;
+
+/**
+ * Read once at module load rather than per request. A process running across New Year
+ * would reject that year's birthdays until restart, which is a trade worth naming: the
+ * alternative is a clock read on every sign-up to move a sanity bound by one.
+ */
+const CURRENT_YEAR = new Date().getUTCFullYear();
+
 const NAME_INVALID = "Introduce tu nombre y apellidos";
 const NAME_TOO_LONG = "El nombre es demasiado largo";
 
@@ -96,6 +116,34 @@ export const membershipSignupSchema = z
     consentMarketing: z.boolean("Indica si aceptas recibir comunicaciones comerciales"),
 
     /**
+     * Year of birth, not an age.
+     *
+     * An age is wrong within a year of being stored and nothing here would ever correct
+     * it, so the form asks for a year and the dashboard derives the age when it needs
+     * one. Optional: the field is new, and refusing a sign-up over it would cost a
+     * member to gain a demographic.
+     *
+     * The bounds are sanity, not policy — 120 years back, and nothing in the future.
+     * Anyone genuinely younger than the lower bound is a data-protection question for
+     * the clinic, not a validation one for this form.
+     */
+    birthYear: z.coerce
+      .number("Introduce un año de nacimiento válido")
+      .int("Introduce un año de nacimiento válido")
+      .min(CURRENT_YEAR - 120, "Introduce un año de nacimiento válido")
+      .max(CURRENT_YEAR, "El año de nacimiento no puede estar en el futuro")
+      .optional(),
+
+    /**
+     * Self-declared, from a small set that includes declining to answer.
+     *
+     * "prefer not to say" is a first-class answer rather than an absent field: a member
+     * who chose not to say is a different fact from one who was never asked, and
+     * segmentation that conflates them would quietly under-count.
+     */
+    sex: memberSexSchema.optional(),
+
+    /**
      * How the member was collected. Optional over HTTP, where the route supplies the
      * default, and never defaulted in the service — a member entered at reception by
      * staff must not be recorded as having signed themselves up through the QR form,
@@ -110,12 +158,14 @@ export const membershipSignupSchema = z
   })
   // Flattened here rather than in the service so the parsed value is already shaped like
   // the row it becomes, and the raw submission cannot be dropped by a forgetful caller.
-  .transform(({ name, phone, email, consentMarketing, consentSource }) => ({
+  .transform(({ name, phone, email, birthYear, sex, consentMarketing, consentSource }) => ({
     name,
     email,
     phone: phone.e164,
     phoneRaw: phone.raw,
     phoneRegionAssumed: phone.regionAssumed,
+    birthYear,
+    sex,
     consentMarketing,
     consentSource
   }));

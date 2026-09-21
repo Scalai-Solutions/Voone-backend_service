@@ -26,7 +26,11 @@ model Clinic {
 
   /// Which privacy notice a member is shown at sign-up. Per clinic rather than a global
   /// constant: the clinic is the data controller, Voone is the processor.
-  privacyPolicyVersion String @default("v1")
+  ///
+  /// v2 from the sign-up form collecting year of birth and sex. Existing clinics keep
+  /// whatever they were set to — the version has to describe the notice a member was
+  /// actually shown, so moving it for everyone would make the stored evidence a lie.
+  privacyPolicyVersion String @default("v2")
 
   /// A churned clinic's poster stays in its waiting room for months. Inactive clinics
   /// 404 rather than 403, so the response never confirms they existed.
@@ -142,6 +146,19 @@ model Member {
   memberSince Int?
 
   locale String @default("es-ES")
+
+  /// Year of birth rather than an age, because an age is wrong within a year of being
+  /// stored and nothing would ever correct it. Optional: members who signed up before
+  /// this field existed have none, and it cannot be backfilled.
+  birthYear Int?
+
+  /// Self-declared, and free text within a small set rather than an enum: "prefer not to
+  /// say" has to be a first-class answer, and a database enum would make adding one a
+  /// migration. Optional for the same reason as birthYear.
+  ///
+  /// Ordinary personal data, not GDPR Art. 9 special category — but it is new data the
+  /// privacy notice did not previously cover, which is why privacyPolicyVersion moves.
+  sex String?
 
   /// Required, with no default. Membership itself rests on performance of a contract, so
   /// what must be recorded is that a choice was made; a default would let an absent
