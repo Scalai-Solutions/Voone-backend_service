@@ -4,7 +4,7 @@ import { ApplePassBuilder } from "../../src/wallet/providers/apple/apple-pass.bu
 import { resolvePassModelDirectory } from "../../src/wallet/providers/apple/apple-pass.model";
 import { WalletPassSigningError } from "../../src/common/errors/wallet.errors";
 import { parseAppleWalletConfig } from "../../src/config/apple-wallet.config";
-import { aureaGoldPass } from "../fixtures/loyalty-pass.fixture";
+import { aureaGoldPass } from "../fixtures/loyalty-card.fixture";
 import { PkpassEntries, readManifest, readPassJson, readPkpass, sha1 } from "../helpers/pkpass";
 import {
   TEST_KEY_PASSPHRASE,

@@ -10,8 +10,8 @@ import type {
   WalletClassSyncResult
 } from "../../modules/templates/templates.repository";
 import { WalletPlatform, getPassBuilder } from "../wallet.factory";
-import { loyaltyPassDataSchema } from "./wallet-pass.schema";
-import { BuiltPass } from "./wallet-pass.types";
+import { loyaltyCardSchema } from "./loyalty-card";
+import { BuiltPass } from "./pass-builder.interface";
 
 /**
  * Provider-independent orchestration.
@@ -71,7 +71,7 @@ export class WalletPassEngine {
 
   /** Validate the data, then delegate to the platform's builder. */
   async createPass(platform: WalletPlatform, data: unknown): Promise<BuiltPass> {
-    const parsed = loyaltyPassDataSchema.safeParse(data);
+    const parsed = loyaltyCardSchema.safeParse(data);
 
     if (!parsed.success) {
       const details = parsed.error.issues

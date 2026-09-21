@@ -1,4 +1,4 @@
-import { hexColorSchema } from "../../engine/wallet-pass.schema";
+import { hexColorSchema } from "../../engine/loyalty-card";
 
 export interface ApplePassTheme {
   backgroundColor: string;

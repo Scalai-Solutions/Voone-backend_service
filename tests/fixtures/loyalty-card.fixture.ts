@@ -1,4 +1,4 @@
-import { LoyaltyPassData } from "../../src/wallet/engine/wallet-pass.types";
+import { LoyaltyCard } from "../../src/wallet/engine/loyalty-card";
 
 /**
  * Mirrors the AURÉA example the marketing site uses, with the template values the
@@ -7,7 +7,7 @@ import { LoyaltyPassData } from "../../src/wallet/engine/wallet-pass.types";
  * `credit` and `reward` are absent on purpose: no column backs them, so this is the shape
  * a real member actually has today.
  */
-export const aureaGoldPass: LoyaltyPassData = {
+export const aureaGoldPass: LoyaltyCard = {
   serialNumber: "voone-member-000123",
   redemptionCode: "MFRGGZDFMZTWQ2LKNNWG23Q",
   tier: "Gold",
@@ -25,14 +25,14 @@ export const aureaGoldPass: LoyaltyPassData = {
 };
 
 /** A member with everything optional filled in, for the fields that only appear then. */
-export const fullyPopulatedPass: LoyaltyPassData = {
+export const fullyPopulatedPass: LoyaltyCard = {
   ...aureaGoldPass,
   credit: { cents: 24000, currency: "EUR" },
   reward: { description: "Hydrafacial a 250 pts · te faltan 2 visitas", progressPercent: 83 }
 };
 
 /** The minimum a brand new member has: no tier, no credit, no reward, no join year. */
-export const brandNewMemberPass: LoyaltyPassData = {
+export const brandNewMemberPass: LoyaltyCard = {
   serialNumber: "voone-member-000999",
   redemptionCode: "GEZDGNBVGY3TQOJQGEZDGNA",
   clinic: { name: "AURÉA" },

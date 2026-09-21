@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { loyaltyPassDataSchema } from "../../src/wallet/engine/wallet-pass.schema";
+import { loyaltyCardSchema } from "../../src/wallet/engine/loyalty-card";
 import { buildStoreCardFields } from "../../src/wallet/providers/apple/apple-pass.fields";
 import {
   MIN_CONTRAST,
@@ -11,7 +11,7 @@ import {
   aureaGoldPass,
   brandNewMemberPass,
   fullyPopulatedPass
-} from "../fixtures/loyalty-pass.fixture";
+} from "../fixtures/loyalty-card.fixture";
 
 const allKeys = (fields: ReturnType<typeof buildStoreCardFields>): string[] =>
   [
@@ -195,23 +195,23 @@ describe("contrastRatio", () => {
   });
 });
 
-describe("loyaltyPassDataSchema", () => {
+describe("loyaltyCardSchema", () => {
   it.each([
     ["typical", aureaGoldPass],
     ["fully populated", fullyPopulatedPass],
     ["brand new", brandNewMemberPass]
   ])("accepts the %s fixture", (_label, data) => {
-    expect(loyaltyPassDataSchema.safeParse(data).success).toBe(true);
+    expect(loyaltyCardSchema.safeParse(data).success).toBe(true);
   });
 
   it("accepts any tier string, because Member.tier is free text", () => {
     for (const tier of ["Bronze", "Platinum", "Socia Fundadora", "★"]) {
-      expect(loyaltyPassDataSchema.safeParse({ ...aureaGoldPass, tier }).success).toBe(true);
+      expect(loyaltyCardSchema.safeParse({ ...aureaGoldPass, tier }).success).toBe(true);
     }
   });
 
   it("rejects a redemption code that is the serial number", () => {
-    const result = loyaltyPassDataSchema.safeParse({
+    const result = loyaltyCardSchema.safeParse({
       ...aureaGoldPass,
       redemptionCode: aureaGoldPass.serialNumber
     });
@@ -220,7 +220,7 @@ describe("loyaltyPassDataSchema", () => {
   });
 
   it("rejects a lowercase redemption code, which is unsafe in some barcode encodings", () => {
-    const result = loyaltyPassDataSchema.safeParse({
+    const result = loyaltyCardSchema.safeParse({
       ...aureaGoldPass,
       redemptionCode: "mfrggzdfmztwq2lknnwg23q"
     });
@@ -229,11 +229,11 @@ describe("loyaltyPassDataSchema", () => {
   });
 
   it("rejects a negative point balance", () => {
-    expect(loyaltyPassDataSchema.safeParse({ ...aureaGoldPass, points: -1 }).success).toBe(false);
+    expect(loyaltyCardSchema.safeParse({ ...aureaGoldPass, points: -1 }).success).toBe(false);
   });
 
   it("rejects a template background that is not a hex colour", () => {
-    const result = loyaltyPassDataSchema.safeParse({
+    const result = loyaltyCardSchema.safeParse({
       ...aureaGoldPass,
       template: { ...aureaGoldPass.template, backgroundColor: "papayawhip" }
     });
