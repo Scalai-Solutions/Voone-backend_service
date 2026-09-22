@@ -21,15 +21,14 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { X509Certificate } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 
 import {
+  RENEWAL_WARNING_DAYS,
+  certificateStatus,
   preflightCertificates,
   type AppleWalletCertificates
 } from "../src/config/apple-wallet.config";
-
-const RENEWAL_WARNING_DAYS = 30;
 
 const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
@@ -110,16 +109,6 @@ const splitP12 = (p12Path: string, passphrase: string): { cert: Buffer; key: Buf
   };
 };
 
-const describe = (certificate: Buffer): { validTo: Date; daysLeft: number } => {
-  const leaf = new X509Certificate(certificate);
-  const validTo = new Date(leaf.validTo);
-
-  return {
-    validTo,
-    daysLeft: Math.floor((validTo.getTime() - Date.now()) / 86_400_000)
-  };
-};
-
 const main = (): void => {
   const args = parseArgs(process.argv.slice(2));
   const passphrase = process.env.APPLE_WALLET_SIGNER_KEY_PASSPHRASE ?? "";
@@ -175,23 +164,29 @@ const main = (): void => {
     fail(error instanceof Error ? error.message : String(error));
   }
 
+  // The server's own reading, so the boot log and this report can never disagree about
+  // the same certificate.
+  const { validTo, daysRemaining } = certificateStatus(new Date(), {
+    ...identifiers,
+    organizationName: process.env.APPLE_WALLET_ORGANIZATION_NAME ?? "",
+    certificates
+  });
   const { passTypeIdentifier, teamIdentifier } = identifiers;
-  const { validTo, daysLeft } = describe(signerCert);
 
   console.log(`
   ✓ Signing material is valid.
 
     Pass type identifier   ${passTypeIdentifier}
     Team identifier        ${teamIdentifier}
-    Expires                ${validTo.toISOString().slice(0, 10)}  (${plural(daysLeft, "day")})
+    Expires                ${validTo.toISOString().slice(0, 10)}  (${plural(daysRemaining, "day")})
 
     Checked: certificate and key are a pair, WWDR issued the certificate,
     the passphrase decrypts the key, and the certificate is in date.
 `);
 
-  if (daysLeft < RENEWAL_WARNING_DAYS) {
+  if (daysRemaining < RENEWAL_WARNING_DAYS) {
     console.warn(
-      `  ! Expires in ${plural(daysLeft, "day")}. Renew now — an expired certificate stops every\n` +
+      `  ! Expires in ${plural(daysRemaining, "day")}. Renew now — an expired certificate stops every\n` +
         `    pass installing and every update being accepted, with no error anywhere\n` +
         `    except on the device.\n`
     );
