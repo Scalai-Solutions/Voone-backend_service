@@ -15,6 +15,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "copy:pass-assets": "node scripts/copy-pass-assets.mjs",
+    "apple:check": "tsx scripts/check-apple-wallet.ts",
     "worker": "node dist/jobs/wallet-sync.worker.js",
     "worker:dev": "tsx watch src/jobs/wallet-sync.worker.ts"
   },
