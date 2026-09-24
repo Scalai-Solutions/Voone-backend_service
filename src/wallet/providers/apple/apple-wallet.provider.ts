@@ -151,8 +151,11 @@ export class AppleWalletProvider extends BaseWalletProvider implements PassDevic
    * failing to update, which is close to undiagnosable remotely.
    *
    * Then the device is asked to come and fetch. What it fetches is served by the pass web
-   * service; until the APNs client lands the refresh channel is a no-op, so today the
-   * device collects the new version on its own schedule rather than immediately.
+   * service; the refresh channel only shortens the wait. Where a certificate is present
+   * that is a real APNs push and the device collects the new version within seconds;
+   * where it is not, the channel is a no-op and the device collects it on its own
+   * schedule. Either way the published pass is already authoritative, which is why a
+   * failed push is logged rather than failing the sync.
    */
   protected async doSync(ref: CardRef, card: LoyaltyCard): Promise<void> {
     const token = await this.devices.authenticationTokenFor(

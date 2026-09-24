@@ -82,6 +82,11 @@ class InMemoryDeviceRepository implements PassDeviceRepository {
   async serialsUpdatedSince() {
     return this.updatedSince;
   }
+  async removeRegistrationsByPushToken(pushToken: string) {
+    const doomed = [...this.registrations.entries()].filter(([, r]) => r.pushToken === pushToken);
+    doomed.forEach(([key]) => this.registrations.delete(key));
+    return doomed.length;
+  }
   async pushTokensFor(passType: string, serial: string) {
     return [...this.registrations.values()]
       .filter((r) => r.passTypeIdentifier === passType && r.serialNumber === serial)

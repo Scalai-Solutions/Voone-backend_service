@@ -92,6 +92,14 @@ export class PrismaPassDeviceRepository implements PassDeviceRepository {
     return rows.map((row) => row.pushToken);
   }
 
+  async removeRegistrationsByPushToken(pushToken: string): Promise<number> {
+    const { count } = await this.prisma.passDeviceRegistration.deleteMany({
+      where: { pushToken }
+    });
+
+    return count;
+  }
+
   async authenticationTokenFor(
     passTypeIdentifier: string,
     serialNumber: string
