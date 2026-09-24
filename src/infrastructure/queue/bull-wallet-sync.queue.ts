@@ -10,8 +10,16 @@ export interface WalletSyncJob {
 }
 
 /**
- * BullMQ's connection accepts a URL directly, so nothing here imports a Redis client and
- * the backend keeps one fewer dependency it would have to keep in step.
+ * BullMQ's connection accepts a URL directly, so nothing here imports a Redis client.
+ *
+ * It still needs one installed. BullMQ 6 moved ioredis from a direct dependency to an
+ * OPTIONAL peer, so the package resolves and type-checks and builds without it, then
+ * fails at runtime with "could not load the optional 'ioredis' package" the first time a
+ * queue or worker is constructed — which is only ever when WALLET_SYNC_MODE=queue. That
+ * is why this survived every CI run and only surfaced on the deploy that flipped the
+ * mode. ioredis is therefore a real dependency in package.json, pinned to ^5: BullMQ
+ * 6.3.8 declares >=5.0.0 but is tested against 5.11.x, and this is not the place to be
+ * the first to try a new major.
  */
 export const redisConnection = (url: string): ConnectionOptions => ({
   url,

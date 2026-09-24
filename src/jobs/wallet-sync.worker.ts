@@ -1,4 +1,5 @@
 import { config } from "../config/env";
+import { createRepeatingErrorLogger } from "../common/logger/repeating-error-logger";
 import { prisma } from "../infrastructure/database/prisma-client";
 import { createWalletSyncWorker } from "../infrastructure/queue/bull-wallet-sync.queue";
 import { buildWalletSyncService } from "../wallet/wallet.composition";
@@ -38,11 +39,10 @@ const main = async (): Promise<void> => {
     console.error(`[wallet] job ${job?.id ?? "?"} failed:`, error.message);
   });
 
-  worker.on("error", (error) => {
-    // Connection-level trouble. BullMQ reconnects on its own; logging it is what makes a
-    // flapping Redis visible rather than mysterious.
-    console.error("[wallet] worker error:", error.message);
-  });
+  // Connection-level trouble. BullMQ reconnects on its own; logging it is what makes a
+  // flapping Redis visible rather than mysterious — but throttled, because "reconnects on
+  // its own" means an unresolvable fault repeats without limit.
+  worker.on("error", createRepeatingErrorLogger("[wallet] worker error:"));
 
   console.log(`[wallet] sync worker listening on ${redactedRedisHost(config.REDIS_URL)}`);
 
