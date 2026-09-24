@@ -106,6 +106,7 @@ export const createApplePassesRouter = (deps: ApplePassesRouterDeps): Router => 
     asyncHandler(async (req, res) => {
       await deps.devices.removeRegistration(
         req.params.deviceLibraryIdentifier,
+        req.params.passTypeIdentifier,
         req.params.serialNumber
       );
 
@@ -162,7 +163,12 @@ export const createApplePassesRouter = (deps: ApplePassesRouterDeps): Router => 
     "/passes/:passTypeIdentifier/:serialNumber",
     authorise,
     asyncHandler(async (req, res) => {
-      const record = await deps.devices.passRecordFor(req.params.serialNumber);
+      // Scoped by the pass type in the URL, so a device holding a retired pass type gets a
+      // 404 for it rather than the current pass under a serial it happens to share.
+      const record = await deps.devices.passRecordFor(
+        req.params.passTypeIdentifier,
+        req.params.serialNumber
+      );
 
       // Authorised by a valid token but unknown to us: the pass was issued and the
       // WalletObject row has since gone, e.g. after a revoke. 404, not 401 — the token

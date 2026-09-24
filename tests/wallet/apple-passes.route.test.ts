@@ -194,7 +194,7 @@ describe("Apple pass web service", () => {
       const res = await call(ctx.app, "DELETE", registrationPath, { auth });
 
       expect(res.status).toBe(200);
-      expect(ctx.removeRegistration).toHaveBeenCalledWith(DEVICE, SERIAL);
+      expect(ctx.removeRegistration).toHaveBeenCalledWith(DEVICE, PASS_TYPE, SERIAL);
     });
 
     it("still answers 200 when there was nothing to remove", async () => {
