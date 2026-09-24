@@ -107,7 +107,16 @@ No `updatedAt`. No soft-delete column. The absence is the point.
 ### The two balances
 
 - **Spendable** = `SUM(points)`.
-- **Lifetime** = `SUM(points) WHERE points > 0`.
+- **Lifetime** = `SUM(points) WHERE kind IN ('EARN', 'REFERRAL', 'ADJUSTMENT')`.
+
+> **Corrected during implementation.** This originally read
+> `SUM(points) WHERE points > 0`, which is wrong in a way that only shows up on a
+> mistake: a staff member credits a million points by accident, a `-1,000,000`
+> `ADJUSTMENT` corrects the spendable balance, and the member stays at the top tier
+> for ever, because a negative row never reduced a sum of positive rows. Filtering by
+> kind instead of by sign makes a clawback undo the tier as well as the balance.
+> `REDEEM` and `EXPIRY` stay out: spending a reward must never demote anyone, and
+> lapsed points were still earned.
 
 Both derivable, which is the property worth having: a crediting bug is fixed by correcting
 the rows and recomputing, not by hand-patching a counter.

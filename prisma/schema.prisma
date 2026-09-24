@@ -36,10 +36,12 @@ model Clinic {
   /// 404 rather than 403, so the response never confirms they existed.
   isActive Boolean @default(true)
 
-  users      User[]
-  treatments ClinicTreatment[]
-  template   ClinicTemplate?
-  members    Member[]
+  users          User[]
+  treatments     ClinicTreatment[]
+  template       ClinicTemplate?
+  members        Member[]
+  pointsLedger   PointsTransaction[]
+  tierThresholds TierThreshold[]
 }
 
 model User {
@@ -185,6 +187,7 @@ model Member {
   erasedAt DateTime?
 
   walletObjects WalletObject[]
+  pointsLedger  PointsTransaction[]
 
   @@unique([clinicId, phone])
   @@index([clinicId])
@@ -281,4 +284,107 @@ enum WalletSyncStatus {
   PENDING
   SYNCED
   FAILED
+}
+
+/// Why points moved. The set is closed on purpose: "some other reason" is what turns a
+/// ledger into a log nobody can reconcile.
+enum PointsTransactionKind {
+  EARN
+  REDEEM
+  ADJUSTMENT
+  REFERRAL
+  EXPIRY
+}
+
+/// The points ledger. Append-only: no updates, no deletes, no soft-delete column.
+///
+/// The absence of `updatedAt` is the design. A balance that can be edited cannot answer
+/// "why do I have 340 points?", and it cannot be recomputed after a crediting bug — the
+/// wrong number simply becomes the truth. Every balance in the system is derived from
+/// these rows, so a bug is fixed by correcting the ledger and replaying it.
+///
+/// Deliberately holds NO treatment data. An append-only table and the Art. 17 right to
+/// erasure cannot both hold if special-category data is in it: erasing would mean
+/// breaking the one invariant this table exists to guarantee. Treatments, if a clinic is
+/// ever permitted to record them (VOO-5), live in their own erasable table that this one
+/// references by id and does not depend on. See
+/// docs/superpowers/specs/2026-09-25-points-ledger-design.md.
+model PointsTransaction {
+  id       String @id @default(uuid())
+  memberId String
+  member   Member @relation(fields: [memberId], references: [id])
+
+  /// Denormalised from the member so a clinic's whole ledger is one index scan. Metrics
+  /// read it far more often than a single member's history does.
+  clinicId String
+  clinic   Clinic @relation(fields: [clinicId], references: [id])
+
+  /// Signed. Positive earns, negative spends — one column rather than two, so the
+  /// spendable balance is a plain SUM and cannot disagree with itself. A database CHECK
+  /// enforces the sign against the kind, because "a REDEEM that added points" is the
+  /// kind of bug that is invisible until an audit.
+  points Int
+  kind   PointsTransactionKind
+
+  /// Staff-authored, for ADJUSTMENT. Free text and therefore never a treatment name:
+  /// the UI must not offer one, and nothing here should be parsed.
+  reason String?
+
+  /// Opaque pointer at whatever caused this — a scan, an import, a referral. Carries no
+  /// meaning to this table.
+  sourceRef String?
+
+  /// The double-redemption guard (VOO-21). A retried request carries the same key and
+  /// the insert is rejected, so a member cannot be charged twice by a double tap or a
+  /// queue redelivery. Unique across the whole table, not per member: keys are minted
+  /// from the operation, not from the member.
+  idempotencyKey String @unique
+
+  createdAt DateTime @default(now())
+
+  /// The staff user who caused it, null for system-generated rows. Present because
+  /// manual adjustment (VOO-65) is the one place a person can mint points by hand.
+  createdBy String?
+
+  /// Every read of a member's ledger is "this member, in order".
+  @@index([memberId, createdAt])
+  /// Metrics go the other way: a clinic's movements over a period.
+  @@index([clinicId, createdAt])
+}
+
+/// A tier and the lifetime points it takes to reach it.
+///
+/// Rows with a clinicId belong to that clinic; rows without are the global default that
+/// every clinic falls back to. That shape costs one nullable column today and means the
+/// second clinic wanting its own scale is a config change rather than a migration of a
+/// live table whose values already determine real members' tiers.
+///
+/// Driven by LIFETIME points earned, never by the spendable balance: redeeming a reward
+/// must not demote anyone. That is the whole reason the two balances are separate.
+model TierThreshold {
+  id       String  @id @default(uuid())
+  clinicId String?
+
+  /// Cascade, NOT Prisma's default of SET NULL for a nullable relation. SET NULL would
+  /// turn a deleted clinic's bespoke tiers into GLOBAL defaults, silently rewriting the
+  /// scale for every other clinic on the platform.
+  clinic Clinic? @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  /// Stable key used in code and in the pass. Display text belongs in the template.
+  code  String
+  /// What a member is shown, in the clinic's language.
+  label String
+
+  /// Inclusive floor. The tier a member holds is the highest one they have reached.
+  minLifetimePoints Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Postgres treats NULLs as distinct, so this constrains per-clinic rows only. The
+  /// global rows are constrained by a partial unique index in the migration — without
+  /// it, two conflicting global defaults could coexist and the fallback would be
+  /// whichever one the planner happened to return.
+  @@unique([clinicId, code])
+  @@index([clinicId, minLifetimePoints])
 }
