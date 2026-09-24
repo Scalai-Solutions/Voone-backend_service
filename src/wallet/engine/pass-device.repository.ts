@@ -40,6 +40,17 @@ export interface PassDeviceRepository {
   pushTokensFor(passTypeIdentifier: string, serialNumber: string): Promise<string[]>;
 
   /**
+   * Forget every registration holding this push token. Returns how many were removed.
+   *
+   * APNs answers 410 Unregistered when a device token is dead — the pass was deleted, the
+   * app was removed, the device was wiped. That verdict is about the TOKEN, not about one
+   * pass, so it is keyed by token rather than by (device, passType, serial): the same dead
+   * token can be registered against several passes, and leaving the others behind means
+   * pushing to a black hole on every future republish for as long as the rows survive.
+   */
+  removeRegistrationsByPushToken(pushToken: string): Promise<number>;
+
+  /**
    * The pass's stored bearer token, or null when the pass is unknown or has none.
    *
    * Compared in constant time by the caller — returning it rather than comparing here

@@ -2,10 +2,10 @@ import { Router } from "express";
 
 import { prisma } from "../../infrastructure/database/prisma-client";
 import { config } from "../../config/env";
-import { NoopRefreshChannel } from "../../wallet/engine/pass-refresh-channel.interface";
 import { PrismaLoyaltyCardAssembler } from "../../wallet/prisma-loyalty-card.assembler";
 import { PrismaPassDeviceRepository } from "../../wallet/prisma-pass-device.repository";
 import { PrismaWalletSyncRepository } from "../../wallet/prisma-wallet-sync.repository";
+import { createAppleRefreshChannel } from "../../wallet/providers/apple/apple-refresh-channel.factory";
 import { createAppleWalletProvider } from "../../wallet/providers/apple/apple-wallet.provider";
 import { adminClinicsRouter } from "./admin-clinics.route";
 import { createApplePassesRouter } from "./apple-passes.route";
@@ -38,7 +38,7 @@ if (config.APPLE_PASS_WEB_SERVICE_URL && config.CARD_REDEMPTION_SECRET) {
     createApplePassesRouter({
       provider: createAppleWalletProvider(
         new PrismaWalletSyncRepository(prisma),
-        new NoopRefreshChannel(),
+        createAppleRefreshChannel(devices),
         devices,
         config.APPLE_PASS_WEB_SERVICE_URL
       ),
