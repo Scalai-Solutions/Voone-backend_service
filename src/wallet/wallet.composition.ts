@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 
+import { createRepeatingErrorLogger } from "../common/logger/repeating-error-logger";
 import { config } from "../config/env";
 import type { Worker } from "bullmq";
 
@@ -138,9 +139,9 @@ export const startInProcessWalletWorker = (prisma: PrismaClient): Worker<WalletS
     console.error(`[wallet] job ${job?.id ?? "?"} failed:`, error.message);
   });
 
-  worker.on("error", (error) => {
-    console.error("[wallet] worker error:", error.message);
-  });
+  // Throttled: BullMQ reconnects forever, so an unresolvable connection fault repeats as
+  // fast as the event loop allows and would otherwise bury its own first line.
+  worker.on("error", createRepeatingErrorLogger("[wallet] worker error:"));
 
   return worker;
 };
