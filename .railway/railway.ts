@@ -73,11 +73,16 @@ export default defineRailway(() => {
       CARD_REDEMPTION_SECRET: preserve(),
 
       // --- Wallet sync ---
-      // Still "inline" deliberately. This apply is what creates the Redis instance above,
-      // and a service booting against a queue that is still being provisioned fails for a
-      // reason nobody enjoys diagnosing. Flip to "queue" in a second apply, once the
-      // instance is up and REDIS_URL resolves.
-      WALLET_SYNC_MODE: "inline",
+      // "queue" now that voone-redis exists and REDIS_URL resolves to it over private
+      // networking. Inline was never meant to be the destination: it runs the provider
+      // fan-out inside the request, so a slow Apple or Google call is latency the member
+      // waits for at the sign-up form, and a failed one is lost the moment the response
+      // is sent. The queue gives it retries with backoff and survives a redeploy.
+      //
+      // This is deliberately a separate apply from the one that created the instance: a
+      // service booting against a queue still being provisioned fails for a reason nobody
+      // enjoys diagnosing.
+      WALLET_SYNC_MODE: "queue",
 
       // The API consumes the queue itself. Set false only once a dedicated worker service
       // running `npm run worker` exists, or nothing consumes and every card goes stale.

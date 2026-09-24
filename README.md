@@ -124,7 +124,7 @@ mark every deploy unhealthy, since nothing is served there.
 | `APPLE_WALLET_*`                      | Signing material: organization name, signer cert, signer key, key passphrase, WWDR cert. The pass type and team identifiers are read off the certificate, not set.      |
 | `APPLE_PASS_WEB_SERVICE_URL`          | Baked into every signed pass and unchangeable afterwards — a pass on a member's phone calls this host forever. Unset, the pass web service routes are not mounted.      |
 | `CARD_REDEMPTION_SECRET`              | Keys the HMAC behind every member's barcode. Rotating it changes every issued barcode at once.                                                                          |
-| `WALLET_SYNC_MODE`                    | `inline` (default, no infrastructure) or `queue` (Redis + BullMQ). Only move to `queue` once `voone-redis` is up.                                                       |
+| `WALLET_SYNC_MODE`                    | `inline` (code default, no infrastructure) or `queue` (Redis + BullMQ). Production runs `queue`; `voone-redis` must be up before it is set.                             |
 | `WALLET_WORKER_IN_PROCESS`            | `true` by default: the API consumes the queue itself. Set `false` only once a dedicated worker service runs `npm run worker`, or nothing consumes and cards go stale.   |
 
 A freshly deployed environment has no clinics until it is seeded — see above.
