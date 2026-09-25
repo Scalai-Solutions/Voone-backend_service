@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, TemplateStatus } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -24,19 +24,64 @@ const VALID = {
 
 const db = (over: Record<string, unknown> = {}) => {
   const clinicCreate = vi.fn().mockResolvedValue({ id: "c1", slug: VALID.slug });
-  const templateCreate = vi.fn().mockResolvedValue({ id: "t1", programName: VALID.programName });
+  const template = {
+    id: "t1",
+    clinicId: "c1",
+    presetId: "p1",
+    programName: VALID.programName,
+    hexBackgroundColor: "#ead0bd",
+    logoUrl: null,
+    heroImageUrl: null,
+    websiteUrl: null,
+    appointmentUrl: null,
+    appLinkText: null,
+    appLinkDescription: null,
+    pointsLabel: "Puntos",
+    tierLabel: "Nivel",
+    benefitsText: "x".repeat(10),
+    infoText: "x".repeat(10),
+    tierRewards: [],
+    milestoneRewards: {
+      milestoneCount: 10,
+      pointsToNextMilestone: 2000,
+      priceAmount: 10,
+      pointsAwarded: 100
+    },
+    status: TemplateStatus.PENDING,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    clinic: { id: "c1", name: VALID.name },
+    preset: PRESET,
+    walletClasses: []
+  };
+  const templateCreate = vi.fn().mockResolvedValue(template);
+  const treatmentDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
+  const treatmentCreateMany = vi.fn().mockResolvedValue({ count: 1 });
 
   return {
     handle: {
       templatePreset: { findUnique: vi.fn().mockResolvedValue(PRESET) },
       // Runs the callback inline: the transaction is here for atomicity, not control flow.
       $transaction: vi.fn(async (fn: (tx: unknown) => unknown) =>
-        fn({ clinic: { create: clinicCreate }, clinicTemplate: { create: templateCreate } })
+        typeof fn === "function"
+          ? fn({
+              clinic: { create: clinicCreate },
+              clinicTemplate: { create: templateCreate },
+              clinicTreatment: { deleteMany: treatmentDeleteMany, createMany: treatmentCreateMany }
+            })
+          : fn
       ),
+      walletClass: { upsert: vi.fn() },
+      clinicTemplate: {
+        update: vi.fn().mockResolvedValue({ ...template, status: TemplateStatus.FAILED }),
+        findUnique: vi.fn().mockResolvedValue({ ...template, status: TemplateStatus.FAILED })
+      },
       ...over
     },
     clinicCreate,
-    templateCreate
+    templateCreate,
+    treatmentDeleteMany,
+    treatmentCreateMany
   };
 };
 
@@ -48,12 +93,25 @@ describe("provisionClinicSchema", () => {
     expect(parsed.tierLabel).toBe("Nivel");
     expect(parsed.benefitsText.length).toBeGreaterThan(8);
     expect(parsed.infoText.length).toBeGreaterThan(8);
+    expect(parsed.tierRewards.map((tier) => tier.name)).toEqual([
+      "Bronze",
+      "Silver",
+      "Gold",
+      "Platinum",
+      "Diamond"
+    ]);
+    expect(parsed.milestoneRewards).toEqual({
+      milestoneCount: 10,
+      pointsToNextMilestone: 2000,
+      priceAmount: 10,
+      pointsAwarded: 100
+    });
   });
 
-  it("refuses a colour, because that is the preset's job", () => {
+  it("accepts a colour when onboarding starts from an edited template", () => {
     const parsed = provisionClinicSchema.parse({ ...VALID, hexBackgroundColor: "#ff0000" });
 
-    expect(parsed).not.toHaveProperty("hexBackgroundColor");
+    expect(parsed.hexBackgroundColor).toBe("#ff0000");
   });
 
   it("applies the same slug rules as the public URL", () => {
@@ -84,6 +142,54 @@ describe("provisionClinic", () => {
     await provisionClinic(handle as never, provisionClinicSchema.parse(VALID));
 
     expect(templateCreate.mock.calls[0][0].data.hexBackgroundColor).toBe("#ead0bd");
+  });
+
+  it("persists edited template details during onboarding", async () => {
+    const { handle, templateCreate, treatmentCreateMany } = db();
+
+    await provisionClinic(
+      handle as never,
+      provisionClinicSchema.parse({
+        ...VALID,
+        hexBackgroundColor: "#101820",
+        logoUrl: "https://example.com/logo.png",
+        websiteUrl: "https://example.com",
+        benefitsText: "Priority booking and birthday rewards.",
+        infoText: "Show this pass before payment.",
+        tierRewards: [
+          { name: "Bronze", rewardText: "Welcome reward" },
+          { name: "Gold", rewardText: "Priority booking" }
+        ],
+        milestoneRewards: {
+          milestoneCount: 10,
+          pointsToNextMilestone: 2000,
+          priceAmount: 10,
+          pointsAwarded: 100
+        },
+        treatments: [{ name: "Laser", priceEuro: 220, pointsAllotted: 2200 }]
+      })
+    );
+
+    expect(templateCreate.mock.calls[0][0].data).toMatchObject({
+      hexBackgroundColor: "#101820",
+      logoUrl: "https://example.com/logo.png",
+      websiteUrl: "https://example.com",
+      benefitsText: "Priority booking and birthday rewards.",
+      infoText: "Show this pass before payment.",
+      tierRewards: [
+        { name: "Bronze", rewardText: "Welcome reward" },
+        { name: "Gold", rewardText: "Priority booking" }
+      ],
+      milestoneRewards: {
+        milestoneCount: 10,
+        pointsToNextMilestone: 2000,
+        priceAmount: 10,
+        pointsAwarded: 100
+      }
+    });
+    expect(treatmentCreateMany.mock.calls[0][0].data).toEqual([
+      { clinicId: "c1", name: "Laser", priceEuro: 220, pointsAllotted: 2200 }
+    ]);
   });
 
   it("refuses an unknown preset before writing anything", async () => {
@@ -138,6 +244,9 @@ describe("toProvisionedSummary", () => {
         pincode: "08007",
         isActive: true,
         privacyPolicyVersion: "v1",
+        voonePlan: "starter",
+        notificationsMonthlyQuota: 8,
+        notificationsUsedThisMonth: 0,
         createdAt: new Date(),
         updatedAt: new Date()
       },
@@ -149,13 +258,40 @@ describe("toProvisionedSummary", () => {
         hexBackgroundColor: "#ead0bd",
         logoUrl: null,
         heroImageUrl: null,
+        websiteUrl: null,
+        appointmentUrl: null,
+        appLinkText: null,
+        appLinkDescription: null,
         pointsLabel: "Puntos",
         tierLabel: "Nivel",
         benefitsText: "x".repeat(10),
         infoText: "x".repeat(10),
+        tierRewards: [],
+        milestoneRewards: {
+          milestoneCount: 10,
+          pointsToNextMilestone: 2000,
+          priceAmount: 10,
+          pointsAwarded: 100
+        },
         status: "PENDING",
         createdAt: new Date(),
-        updatedAt: new Date()
+        updatedAt: new Date(),
+        clinic: {
+          id: "c1",
+          slug: "clinica-nova",
+          name: "Clínica Nova",
+          addressLine: "Carrer de Balmes 12",
+          pincode: "08007",
+          isActive: true,
+          privacyPolicyVersion: "v1",
+          voonePlan: "starter",
+          notificationsMonthlyQuota: 8,
+          notificationsUsedThisMonth: 0,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        },
+        preset: { ...PRESET, previewImageUrl: null, createdAt: new Date() },
+        walletClasses: []
       }
     });
 

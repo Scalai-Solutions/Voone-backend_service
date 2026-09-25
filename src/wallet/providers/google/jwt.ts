@@ -1,10 +1,6 @@
 import jwt from "jsonwebtoken";
 
-import {
-  assertIssuerScopedId,
-  getGoogleWalletAllowedOrigin,
-  loadServiceAccountCredentialsSync
-} from "./client";
+import { assertIssuerScopedId, getGoogleWalletAllowedOrigin, loadServiceAccountCredentialsSync } from "./client";
 
 interface SaveToGoogleWalletJwtPayload {
   iss: string;

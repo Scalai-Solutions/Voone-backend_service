@@ -46,7 +46,20 @@ const INPUT = {
   tierLabel: "Nivel",
   benefitsText: "Acumula puntos en cada visita.",
   infoText: "Presenta tu pase en recepción.",
-  treatments: [{ name: "Limpieza facial", pointsAllotted: 50 }]
+  tierRewards: [
+    { name: "Bronze", rewardText: "" },
+    { name: "Silver", rewardText: "" },
+    { name: "Gold", rewardText: "" },
+    { name: "Platinum", rewardText: "" },
+    { name: "Diamond", rewardText: "" }
+  ],
+  milestoneRewards: {
+    milestoneCount: 10,
+    pointsToNextMilestone: 2000,
+    priceAmount: 10,
+    pointsAwarded: 100
+  },
+  treatments: [{ name: "Limpieza facial", priceEuro: 50, pointsAllotted: 500 }]
 };
 
 const asMock = <T>(value: T) => value as unknown as ReturnType<typeof vi.fn>;

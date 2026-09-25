@@ -12,6 +12,7 @@ export interface LoyaltyClassInput {
   // The class template maps shared details through the "benefits" and "info" module IDs.
   textModules?: LoyaltyTextModuleInput[];
   linkModules?: LoyaltyLinkModuleInput[];
+  appLink?: LoyaltyAppLinkInput;
   rewardsTierLabel?: string;
   rewardsTier?: string;
 }
@@ -25,6 +26,13 @@ export interface LoyaltyTextModuleInput {
 export interface LoyaltyLinkModuleInput {
   tag: string;
   url: string;
+  description?: string;
+}
+
+export interface LoyaltyAppLinkInput {
+  displayText: string;
+  url: string;
+  description?: string;
 }
 
 export type LoyaltyObjectState = "ACTIVE" | "INACTIVE";
@@ -34,6 +42,7 @@ export interface LoyaltyObjectInput {
   classId: string;
   accountName: string;
   accountId: string;
+  memberSince?: string;
   loyaltyPointsLabel: string;
   loyaltyPointsBalance: number;
   tier?: string;

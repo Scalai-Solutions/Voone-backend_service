@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { WalletProviderType, WalletSyncStatus } from "@prisma/client";
 
 import { MembershipValidationError } from "../../common/errors/membership.errors";
 import { asyncHandler } from "../../common/middleware/async-handler";
@@ -7,11 +8,315 @@ import { config } from "../../config/env";
 import { prisma } from "../../infrastructure/database/prisma-client";
 import { provisionClinicSchema } from "../../modules/clinics/clinic-provisioning.schema";
 import {
+  generateTemporaryPassword,
+  hashPassword,
+  sendOnboardingCredentialsEmail,
+  verifyPassword
+} from "../../modules/clinics/onboarding-credentials.service";
+import {
   provisionClinic,
   toProvisionedSummary
 } from "../../modules/clinics/clinic-provisioning.service";
 
 export const adminClinicsRouter = Router();
+
+const emptyWalletStatus = {
+  google: "not_added",
+  apple: "not_added"
+} as const;
+
+const walletProviderKey = (provider: WalletProviderType): keyof typeof emptyWalletStatus =>
+  provider === WalletProviderType.GOOGLE ? "google" : "apple";
+
+const providerStatus = (status: WalletSyncStatus) =>
+  status === WalletSyncStatus.SYNCED ? "added" : status === WalletSyncStatus.FAILED ? "failed" : "not_added";
+
+const toWalletStatus = (walletClasses: Array<{ provider: WalletProviderType; status: WalletSyncStatus }>) =>
+  walletClasses.reduce(
+    (statuses, walletClass) => ({
+      ...statuses,
+      [walletProviderKey(walletClass.provider)]: providerStatus(walletClass.status)
+    }),
+    emptyWalletStatus
+  );
+
+const planQuota = (plan: string): number => {
+  if (plan === "pro") return 30;
+  if (plan === "medium") return 15;
+  return 8;
+};
+
+const toAdminClinicSummary = (clinic: Awaited<ReturnType<typeof listAdminClinics>>[number]) => ({
+  id: clinic.id,
+  slug: clinic.slug,
+  name: clinic.name,
+  addressLine: clinic.addressLine,
+  pincode: clinic.pincode,
+  isActive: clinic.isActive,
+  privacyPolicyVersion: clinic.privacyPolicyVersion,
+  voonePlan: clinic.voonePlan,
+  notificationsMonthlyQuota: clinic.notificationsMonthlyQuota,
+  notificationsUsedThisMonth: clinic.notificationsUsedThisMonth,
+  notificationsRemainingThisMonth: Math.max(
+    0,
+    clinic.notificationsMonthlyQuota - clinic.notificationsUsedThisMonth
+  ),
+  status: clinic.isActive && clinic.template ? "active" : "setup",
+  members: clinic._count.members,
+  templates: clinic.template ? 1 : 0,
+  treatments: clinic.treatments.map((treatment) => ({
+    id: treatment.id,
+    name: treatment.name,
+    priceEuro: treatment.priceEuro,
+    points: treatment.pointsAllotted
+  })),
+  users: clinic.users.map((user) => ({ id: user.id, email: user.email, role: user.role })),
+  onboardingCredentials: (() => {
+    const owner = clinic.users.find((user) => user.role === "OWNER") ?? clinic.users[0];
+
+    return owner
+      ? {
+          email: owner.email,
+          generatedAt: owner.onboardingPasswordGeneratedAt,
+          sentAt: owner.onboardingCredentialsSentAt,
+          hasPassword: Boolean(owner.passwordHash)
+        }
+      : null;
+  })(),
+  template: clinic.template
+    ? {
+        id: clinic.template.id,
+        programName: clinic.template.programName,
+        presetId: clinic.template.presetId,
+        hexBackgroundColor: clinic.template.hexBackgroundColor,
+        logoUrl: clinic.template.logoUrl,
+        heroImageUrl: clinic.template.heroImageUrl,
+        websiteUrl: clinic.template.websiteUrl,
+        appointmentUrl: clinic.template.appointmentUrl,
+        appLinkText: clinic.template.appLinkText,
+        appLinkDescription: clinic.template.appLinkDescription,
+        pointsLabel: clinic.template.pointsLabel,
+        tierLabel: clinic.template.tierLabel,
+        benefitsText: clinic.template.benefitsText,
+        infoText: clinic.template.infoText,
+        tierRewards: clinic.template.tierRewards,
+        milestoneRewards: clinic.template.milestoneRewards,
+        status: clinic.template.status,
+        walletStatus: toWalletStatus(clinic.template.walletClasses)
+      }
+    : null
+});
+
+const toAdminMemberSummary = (member: Awaited<ReturnType<typeof listAdminMembers>>[number]) => ({
+  id: member.id,
+  name: member.name,
+  identity: member.phone ?? member.email ?? member.id,
+  templateId: member.clinic.template?.id ?? "",
+  templateName: member.clinic.template?.programName ?? member.clinic.name,
+  points: member.pointsBalance,
+  tier: member.tier ?? "Nuevo",
+  walletStatus: member.walletObjects.reduce(
+    (statuses, walletObject) => ({
+      ...statuses,
+      [walletProviderKey(walletObject.provider)]:
+        walletObject.status === WalletSyncStatus.SYNCED ? "added" : "failed"
+    }),
+    emptyWalletStatus
+  ),
+  history: []
+});
+
+const listAdminClinics = () =>
+  prisma.clinic.findMany({
+    include: {
+      users: { orderBy: { createdAt: "asc" } },
+      treatments: { orderBy: { createdAt: "asc" } },
+      template: { include: { walletClasses: true } },
+      _count: { select: { members: true } }
+    },
+    orderBy: { createdAt: "desc" }
+  });
+
+const listAdminMembers = () =>
+  prisma.member.findMany({
+    where: { erasedAt: null },
+    include: {
+      clinic: { include: { template: true } },
+      walletObjects: true
+    },
+    orderBy: { createdAt: "desc" }
+  });
+
+adminClinicsRouter.get(
+  "/admin/clinics",
+  createRequireStaffKey(config.STAFF_API_KEY),
+  asyncHandler(async (_req, res) => {
+    const clinics = await listAdminClinics();
+
+    res.json(clinics.map(toAdminClinicSummary));
+  })
+);
+
+adminClinicsRouter.post(
+  "/auth/credentials",
+  createRequireStaffKey(config.STAFF_API_KEY),
+  asyncHandler(async (req, res) => {
+    const identifier = typeof req.body?.identifier === "string" ? req.body.identifier.trim().toLowerCase() : "";
+    const password = typeof req.body?.password === "string" ? req.body.password : "";
+
+    if (!identifier || !password) {
+      res.status(401).json({ message: "Invalid credentials" });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email: identifier },
+      include: { clinic: true }
+    });
+
+    if (!user || !verifyPassword(password, user.passwordHash)) {
+      res.status(401).json({ message: "Invalid credentials" });
+      return;
+    }
+
+    res.json({
+      id: user.id,
+      name: user.name ?? user.email,
+      email: user.email,
+      role: user.role.toLowerCase(),
+      clinicId: user.clinicId ?? "",
+      clinicSlug: user.clinic?.slug ?? ""
+    });
+  })
+);
+
+adminClinicsRouter.post(
+  "/admin/clinics/:clinicId/credentials/share",
+  createRequireStaffKey(config.STAFF_API_KEY),
+  asyncHandler(async (req, res) => {
+    const clinic = await prisma.clinic.findUnique({
+      where: { id: req.params.clinicId },
+      include: { users: { orderBy: { createdAt: "asc" } } }
+    });
+
+    if (!clinic) {
+      res.status(404).json({ message: "Clinic not found" });
+      return;
+    }
+
+    const owner = clinic.users.find((user) => user.role === "OWNER") ?? clinic.users[0];
+
+    if (!owner) {
+      res.status(422).json({ message: "Clinic has no owner email to share credentials with" });
+      return;
+    }
+
+    const password = generateTemporaryPassword();
+
+    await sendOnboardingCredentialsEmail({
+      to: owner.email,
+      clinicName: clinic.name,
+      password
+    });
+
+    const updated = await prisma.user.update({
+      where: { id: owner.id },
+      data: {
+        passwordHash: hashPassword(password),
+        onboardingPasswordGeneratedAt: new Date(),
+        onboardingCredentialsSentAt: new Date()
+      }
+    });
+
+    res.json({
+      email: updated.email,
+      generatedAt: updated.onboardingPasswordGeneratedAt,
+      sentAt: updated.onboardingCredentialsSentAt,
+      hasPassword: Boolean(updated.passwordHash)
+    });
+  })
+);
+
+adminClinicsRouter.patch(
+  "/admin/clinics/:clinicId",
+  createRequireStaffKey(config.STAFF_API_KEY),
+  asyncHandler(async (req, res) => {
+    const clinic = await prisma.clinic.findUnique({ where: { id: req.params.clinicId } });
+
+    if (!clinic) {
+      res.status(404).json({ message: "Clinic not found" });
+      return;
+    }
+
+    const voonePlan = typeof req.body?.voonePlan === "string" ? req.body.voonePlan : undefined;
+    const isActive = typeof req.body?.isActive === "boolean" ? req.body.isActive : undefined;
+    const notificationsMonthlyQuota = voonePlan ? planQuota(voonePlan) : undefined;
+
+    await prisma.clinic.update({
+      where: { id: clinic.id },
+      data: {
+        ...(isActive !== undefined ? { isActive } : {}),
+        ...(voonePlan ? { voonePlan, notificationsMonthlyQuota } : {})
+      }
+    });
+
+    const clinics = await listAdminClinics();
+    const updated = clinics.find((item) => item.id === clinic.id);
+
+    res.json(updated ? toAdminClinicSummary(updated) : { status: "ok" });
+  })
+);
+
+adminClinicsRouter.delete(
+  "/admin/clinics/:clinicId",
+  createRequireStaffKey(config.STAFF_API_KEY),
+  asyncHandler(async (req, res) => {
+    const clinic = await prisma.clinic.findUnique({ where: { id: req.params.clinicId } });
+
+    if (!clinic) {
+      res.status(404).json({ message: "Clinic not found" });
+      return;
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.walletObject.deleteMany({ where: { member: { clinicId: clinic.id } } });
+      await tx.member.deleteMany({ where: { clinicId: clinic.id } });
+      await tx.walletClass.deleteMany({ where: { clinicTemplate: { clinicId: clinic.id } } });
+      await tx.clinicTemplate.deleteMany({ where: { clinicId: clinic.id } });
+      await tx.clinicTreatment.deleteMany({ where: { clinicId: clinic.id } });
+      await tx.user.deleteMany({ where: { clinicId: clinic.id } });
+      await tx.clinic.delete({ where: { id: clinic.id } });
+    });
+
+    res.status(204).send();
+  })
+);
+
+adminClinicsRouter.get(
+  "/admin/clinics/:clinicId",
+  createRequireStaffKey(config.STAFF_API_KEY),
+  asyncHandler(async (req, res) => {
+    const clinics = await listAdminClinics();
+    const clinic = clinics.find((item) => item.id === req.params.clinicId);
+
+    if (!clinic) {
+      res.status(404).json({ message: "Clinic not found" });
+      return;
+    }
+
+    res.json(toAdminClinicSummary(clinic));
+  })
+);
+
+adminClinicsRouter.get(
+  "/admin/members",
+  createRequireStaffKey(config.STAFF_API_KEY),
+  asyncHandler(async (_req, res) => {
+    const members = await listAdminMembers();
+
+    res.json(members.map(toAdminMemberSummary));
+  })
+);
 
 /**
  * Onboards a clinic.

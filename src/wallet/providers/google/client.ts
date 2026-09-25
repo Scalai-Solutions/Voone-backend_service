@@ -14,8 +14,18 @@ export interface GoogleWalletRequestOptions {
   headers?: HeadersInit;
 }
 
+export interface GoogleWalletResponse<TResponse> {
+  status: number;
+  statusText: string;
+  body: TResponse;
+}
+
 export interface GoogleWalletAuthenticatedClient {
   request<TResponse>(path: string, options?: GoogleWalletRequestOptions): Promise<TResponse>;
+  requestWithResponse<TResponse>(
+    path: string,
+    options?: GoogleWalletRequestOptions
+  ): Promise<GoogleWalletResponse<TResponse>>;
 }
 
 export interface GoogleServiceAccountCredentials {
@@ -50,6 +60,15 @@ export const getAuthenticatedClient = (): GoogleWalletAuthenticatedClient => {
       path: string,
       options: GoogleWalletRequestOptions = {}
     ): Promise<TResponse> {
+      const response = await this.requestWithResponse<TResponse>(path, options);
+
+      return response.body;
+    },
+
+    async requestWithResponse<TResponse>(
+      path: string,
+      options: GoogleWalletRequestOptions = {}
+    ): Promise<GoogleWalletResponse<TResponse>> {
       const accessToken = await getAccessToken();
       const headers = new Headers(options.headers);
 
@@ -84,7 +103,11 @@ export const getAuthenticatedClient = (): GoogleWalletAuthenticatedClient => {
           );
         }
 
-        return responseBody as TResponse;
+        return {
+          status: response.status,
+          statusText: response.statusText,
+          body: responseBody as TResponse
+        };
       } catch (error) {
         if (error instanceof GoogleWalletApiError) {
           throw error;
@@ -139,6 +162,10 @@ export const getGoogleWalletIssuerId = (): string => getRequiredEnv("GOOGLE_WALL
 
 export const getGoogleWalletAllowedOrigin = (): string =>
   getRequiredEnv("GOOGLE_WALLET_ALLOWED_ORIGIN");
+
+export const isGoogleWalletConfigured = (): boolean =>
+  Boolean(process.env.GOOGLE_WALLET_ISSUER_ID?.trim()) &&
+  Boolean(process.env.GOOGLE_WALLET_SERVICE_ACCOUNT_KEY?.trim());
 
 export const assertIssuerScopedId = (id: string, fieldName: string): void => {
   const issuerId = getGoogleWalletIssuerId();

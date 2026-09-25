@@ -12,6 +12,7 @@
     "format:check": "prettier --check .",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "tsx prisma/seed.ts",
+    "wallet:verify-class-links": "tsx scripts/verify-google-wallet-class-links.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "copy:pass-assets": "node scripts/copy-pass-assets.mjs",

@@ -3,9 +3,16 @@ import { Prisma, TemplateStatus } from "@prisma/client";
 import { ConflictError } from "../../common/errors/conflict-error";
 import { logger } from "../../common/logger/logger";
 import { prisma } from "../../infrastructure/database/prisma-client";
-import { walletPassEngine } from "../../wallet/engine/wallet-pass.engine";
-import type { CreateTemplateInput } from "./templates.schema";
-import { templatesRepository, treatmentsRepository } from "./templates.repository";
+import { WalletPassEngine } from "../../wallet/engine/wallet-pass.engine";
+import { buildWalletRegistry } from "../../wallet/wallet.composition";
+import type { CreateTemplateInput, CreateVooneTemplateInput } from "./templates.schema";
+import {
+  templatesRepository,
+  treatmentsRepository,
+  vooneTemplatesRepository
+} from "./templates.repository";
+
+const walletPassEngine = new WalletPassEngine(buildWalletRegistry(prisma));
 
 const isUniqueClinicTemplateConflict = (error: unknown): boolean =>
   error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -14,8 +21,28 @@ const isUniqueClinicTemplateConflict = (error: unknown): boolean =>
   error.meta.target.includes("clinicId");
 
 export const templatesService = {
+  listVooneTemplates() {
+    return vooneTemplatesRepository.findMany();
+  },
+
+  findVooneTemplateById(id: string) {
+    return vooneTemplatesRepository.findById(id);
+  },
+
+  createVooneTemplate(input: CreateVooneTemplateInput) {
+    return vooneTemplatesRepository.create(input);
+  },
+
+  updateVooneTemplate(id: string, input: CreateVooneTemplateInput) {
+    return vooneTemplatesRepository.update(id, input);
+  },
+
   listPresets() {
     return templatesRepository.findPresets();
+  },
+
+  listTemplates() {
+    return templatesRepository.findMany();
   },
 
   findByClinicId(clinicId: string) {
