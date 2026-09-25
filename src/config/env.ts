@@ -24,6 +24,16 @@ const envSchema = z.object({
 
   EDGE_SHARED_SECRET: z.string().min(16, "EDGE_SHARED_SECRET must be at least 16 chars").optional(),
 
+  /**
+   * Whether the Google Wallet account is out of Demo Mode.
+   *
+   * Configured rather than derived because Google exposes no API that reports it: the
+   * status is granted by a human at Google (VOO-3) and there is nothing to query. The
+   * default is "demo" deliberately — claiming "live" on an unconfigured environment would
+   * tell the admin panel that real members can save cards when they cannot.
+   */
+  GOOGLE_WALLET_PUBLISHING_STATUS: z.enum(["demo", "live"]).default("demo"),
+
   // Optional, and read at startup rather than at first use, because whether the Apple
   // pass web service is mounted at all depends on it. Without a certificate there is no
   // pass to update, and routes that 500 on every call are worse than routes that 404.
