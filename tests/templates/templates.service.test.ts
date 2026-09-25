@@ -22,8 +22,12 @@ vi.mock("../../src/infrastructure/database/prisma-client", () => ({
   prisma: { $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({})) }
 }));
 
+const walletPassEngine = { createClassForTemplate: vi.fn() };
+
 vi.mock("../../src/wallet/engine/wallet-pass.engine", () => ({
-  walletPassEngine: { createClassForTemplate: vi.fn() }
+  WalletPassEngine: vi.fn(function WalletPassEngine() {
+    return walletPassEngine;
+  })
 }));
 
 vi.mock("../../src/common/logger/logger", () => ({
@@ -32,7 +36,6 @@ vi.mock("../../src/common/logger/logger", () => ({
 
 const { templatesRepository, treatmentsRepository } =
   await import("../../src/modules/templates/templates.repository");
-const { walletPassEngine } = await import("../../src/wallet/engine/wallet-pass.engine");
 const { templatesService } = await import("../../src/modules/templates/templates.service");
 const { ConflictError } = await import("../../src/common/errors/conflict-error");
 
@@ -46,7 +49,20 @@ const INPUT = {
   tierLabel: "Nivel",
   benefitsText: "Acumula puntos en cada visita.",
   infoText: "Presenta tu pase en recepción.",
-  treatments: [{ name: "Limpieza facial", pointsAllotted: 50 }]
+  tierRewards: [
+    { name: "Bronze", rewardText: "" },
+    { name: "Silver", rewardText: "" },
+    { name: "Gold", rewardText: "" },
+    { name: "Platinum", rewardText: "" },
+    { name: "Diamond", rewardText: "" }
+  ],
+  milestoneRewards: {
+    milestoneCount: 10,
+    pointsToNextMilestone: 2000,
+    priceAmount: 10,
+    pointsAwarded: 100
+  },
+  treatments: [{ name: "Limpieza facial", priceEuro: 50, pointsAllotted: 500 }]
 };
 
 const asMock = <T>(value: T) => value as unknown as ReturnType<typeof vi.fn>;

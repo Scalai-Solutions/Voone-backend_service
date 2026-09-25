@@ -1,7 +1,7 @@
 import { Prisma, TemplateStatus, WalletProviderType, WalletSyncStatus } from "@prisma/client";
 
 import { prisma } from "../../infrastructure/database/prisma-client";
-import type { CreateTemplateInput } from "./templates.schema";
+import type { CreateTemplateInput, CreateVooneTemplateInput } from "./templates.schema";
 
 const templateInclude = {
   clinic: true,
@@ -28,6 +28,13 @@ export const templatesRepository = {
     return prisma.templatePreset.findMany({ orderBy: { createdAt: "asc" } });
   },
 
+  findMany() {
+    return prisma.clinicTemplate.findMany({
+      include: templateInclude,
+      orderBy: { updatedAt: "desc" }
+    });
+  },
+
   findByClinicId(clinicId: string) {
     return prisma.clinicTemplate.findUnique({
       where: { clinicId },
@@ -51,10 +58,16 @@ export const templatesRepository = {
         hexBackgroundColor: input.hexBackgroundColor,
         logoUrl: normalizeOptionalUrl(input.logoUrl),
         heroImageUrl: normalizeOptionalUrl(input.heroImageUrl),
+        websiteUrl: normalizeOptionalUrl(input.websiteUrl),
+        appointmentUrl: normalizeOptionalUrl(input.appointmentUrl),
+        appLinkText: normalizeOptionalUrl(input.appLinkText),
+        appLinkDescription: normalizeOptionalUrl(input.appLinkDescription),
         pointsLabel: input.pointsLabel,
         tierLabel: input.tierLabel,
         benefitsText: input.benefitsText,
         infoText: input.infoText,
+        tierRewards: input.tierRewards,
+        milestoneRewards: input.milestoneRewards,
         status
       },
       include: templateInclude
@@ -75,10 +88,16 @@ export const templatesRepository = {
         hexBackgroundColor: input.hexBackgroundColor,
         logoUrl: normalizeOptionalUrl(input.logoUrl),
         heroImageUrl: normalizeOptionalUrl(input.heroImageUrl),
+        websiteUrl: normalizeOptionalUrl(input.websiteUrl),
+        appointmentUrl: normalizeOptionalUrl(input.appointmentUrl),
+        appLinkText: normalizeOptionalUrl(input.appLinkText),
+        appLinkDescription: normalizeOptionalUrl(input.appLinkDescription),
         pointsLabel: input.pointsLabel,
         tierLabel: input.tierLabel,
         benefitsText: input.benefitsText,
         infoText: input.infoText,
+        tierRewards: input.tierRewards,
+        milestoneRewards: input.milestoneRewards,
         ...(status ? { status } : {})
       },
       include: templateInclude
@@ -124,6 +143,64 @@ export const templatesRepository = {
   }
 };
 
+const normalizeJsonArray = (value: unknown): object[] => (Array.isArray(value) ? value : []);
+
+export const vooneTemplatesRepository = {
+  findMany() {
+    return prisma.vooneTemplate.findMany({
+      include: { preset: true },
+      orderBy: { updatedAt: "desc" }
+    });
+  },
+
+  findById(id: string) {
+    return prisma.vooneTemplate.findUnique({ where: { id }, include: { preset: true } });
+  },
+
+  create(input: CreateVooneTemplateInput) {
+    return prisma.vooneTemplate.create({
+      data: {
+        presetId: input.presetId || null,
+        name: input.name,
+        description: input.description || null,
+        programName: input.programName,
+        hexBackgroundColor: input.hexBackgroundColor,
+        logoUrl: normalizeOptionalUrl(input.logoUrl),
+        heroImageUrl: normalizeOptionalUrl(input.heroImageUrl),
+        pointsLabel: input.pointsLabel,
+        tierLabel: input.tierLabel,
+        benefitsText: input.benefitsText || null,
+        infoText: input.infoText || null,
+        buttons: normalizeJsonArray(input.buttons),
+        textModules: normalizeJsonArray(input.textModules)
+      },
+      include: { preset: true }
+    });
+  },
+
+  update(id: string, input: CreateVooneTemplateInput) {
+    return prisma.vooneTemplate.update({
+      where: { id },
+      data: {
+        presetId: input.presetId || null,
+        name: input.name,
+        description: input.description || null,
+        programName: input.programName,
+        hexBackgroundColor: input.hexBackgroundColor,
+        logoUrl: normalizeOptionalUrl(input.logoUrl),
+        heroImageUrl: normalizeOptionalUrl(input.heroImageUrl),
+        pointsLabel: input.pointsLabel,
+        tierLabel: input.tierLabel,
+        benefitsText: input.benefitsText || null,
+        infoText: input.infoText || null,
+        buttons: normalizeJsonArray(input.buttons),
+        textModules: normalizeJsonArray(input.textModules)
+      },
+      include: { preset: true }
+    });
+  }
+};
+
 export const treatmentsRepository = {
   async replaceForClinic(
     db: DatabaseClient,
@@ -140,6 +217,7 @@ export const treatmentsRepository = {
       data: treatments.map((treatment) => ({
         clinicId,
         name: treatment.name,
+        priceEuro: treatment.priceEuro ?? null,
         pointsAllotted: treatment.pointsAllotted
       }))
     });

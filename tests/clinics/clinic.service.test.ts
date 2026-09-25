@@ -12,6 +12,9 @@ const AUREA = {
   pincode: "28001",
   privacyPolicyVersion: "v1",
   isActive: true,
+  voonePlan: "starter",
+  notificationsMonthlyQuota: 8,
+  notificationsUsedThisMonth: 0,
   createdAt: new Date("2026-01-01T00:00:00Z"),
   updatedAt: new Date("2026-01-01T00:00:00Z")
 } satisfies Clinic;
@@ -24,10 +27,21 @@ const TEMPLATE = {
   hexBackgroundColor: "#ead0bd",
   logoUrl: null,
   heroImageUrl: null,
+  websiteUrl: null,
+  appointmentUrl: null,
+  appLinkText: null,
+  appLinkDescription: null,
   pointsLabel: "Puntos",
   tierLabel: "Nivel",
   benefitsText: "Acumula puntos en cada visita.",
   infoText: "Presenta tu pase en recepción.",
+  tierRewards: [],
+  milestoneRewards: {
+    milestoneCount: 10,
+    pointsToNextMilestone: 2000,
+    priceAmount: 10,
+    pointsAwarded: 100
+  },
   status: "ACTIVE",
   createdAt: new Date("2026-01-01T00:00:00Z"),
   updatedAt: new Date("2026-01-01T00:00:00Z")

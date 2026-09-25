@@ -58,6 +58,12 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
       template: {
         programName: template.programName,
         backgroundColor: template.hexBackgroundColor,
+        logoUrl: template.logoUrl ?? undefined,
+        heroImageUrl: template.heroImageUrl ?? undefined,
+        websiteUrl: template.websiteUrl ?? undefined,
+        appointmentUrl: template.appointmentUrl ?? undefined,
+        appLinkText: template.appLinkText ?? undefined,
+        appLinkDescription: template.appLinkDescription ?? undefined,
         pointsLabel: template.pointsLabel,
         tierLabel: template.tierLabel,
         benefitsText: template.benefitsText || undefined,

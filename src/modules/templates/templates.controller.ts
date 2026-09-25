@@ -4,9 +4,11 @@ import { ZodError } from "zod";
 import { ConflictError } from "../../common/errors/conflict-error";
 import {
   clinicContextSchema,
+  createVooneTemplateSchema,
   createTemplateSchema,
   templateParamsSchema,
-  updateTemplateSchema
+  updateTemplateSchema,
+  updateVooneTemplateSchema
 } from "./templates.schema";
 import { templatesService } from "./templates.service";
 
@@ -40,6 +42,62 @@ const handleControllerError = (error: unknown, res: Response) => {
 };
 
 export const templatesController = {
+  async listVoone(_req: Request, res: Response) {
+    try {
+      res.json(await templatesService.listVooneTemplates());
+    } catch (error) {
+      handleControllerError(error, res);
+    }
+  },
+
+  async getVoone(req: Request, res: Response) {
+    try {
+      const { templateId } = templateParamsSchema.parse(req.params);
+      const template = await templatesService.findVooneTemplateById(templateId);
+      if (!template) {
+        res.status(404).json({ message: "Voone template not found" });
+        return;
+      }
+      res.json(template);
+    } catch (error) {
+      handleControllerError(error, res);
+    }
+  },
+
+  async createVoone(req: Request, res: Response) {
+    try {
+      res
+        .status(201)
+        .json(
+          await templatesService.createVooneTemplate(createVooneTemplateSchema.parse(req.body))
+        );
+    } catch (error) {
+      handleControllerError(error, res);
+    }
+  },
+
+  async updateVoone(req: Request, res: Response) {
+    try {
+      const { templateId } = templateParamsSchema.parse(req.params);
+      res.json(
+        await templatesService.updateVooneTemplate(
+          templateId,
+          updateVooneTemplateSchema.parse(req.body)
+        )
+      );
+    } catch (error) {
+      handleControllerError(error, res);
+    }
+  },
+
+  async list(_req: Request, res: Response) {
+    try {
+      res.json(await templatesService.listTemplates());
+    } catch (error) {
+      handleControllerError(error, res);
+    }
+  },
+
   async listPresets(_req: Request, res: Response) {
     try {
       res.json(await templatesService.listPresets());

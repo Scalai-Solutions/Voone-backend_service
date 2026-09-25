@@ -70,7 +70,10 @@ const envSchema = z.object({
   WALLET_WORKER_IN_PROCESS: z
     .enum(["true", "false"])
     .default("true")
-    .transform((value) => value === "true")
+    .transform((value) => value === "true"),
+
+  SENDGRID_API_KEY: z.string().min(1).optional(),
+  SENDGRID_FROM_EMAIL: z.string().email("SENDGRID_FROM_EMAIL must be a valid email").optional()
 });
 
 const parsedEnv = envSchema.safeParse(process.env);

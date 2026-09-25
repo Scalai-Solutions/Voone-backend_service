@@ -17,6 +17,7 @@ import { PrismaPassDeviceRepository } from "./prisma-pass-device.repository";
 import { PrismaWalletSyncRepository } from "./prisma-wallet-sync.repository";
 import { createAppleRefreshChannel } from "./providers/apple/apple-refresh-channel.factory";
 import { createAppleWalletProvider } from "./providers/apple/apple-wallet.provider";
+import { createGoogleWalletProvider } from "./providers/google";
 
 /**
  * Where the wallet subsystem is assembled.
@@ -54,7 +55,11 @@ export const buildWalletRegistry = (prisma: PrismaClient): WalletProviderRegistr
     }
   }
 
-  // The Google adapter is registered here too, once it exists.
+  const googleRegistered = registry.register(createGoogleWalletProvider(syncRepo));
+
+  if (!googleRegistered) {
+    console.warn("[wallet] Google provider not registered: service account is not configured.");
+  }
 
   return registry;
 };
