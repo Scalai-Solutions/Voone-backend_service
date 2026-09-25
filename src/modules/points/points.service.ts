@@ -1,5 +1,6 @@
 import { PointsTransactionKind } from "@prisma/client";
 
+import { InsufficientPointsError } from "../../common/errors/points.errors";
 import type { WalletSyncQueue } from "../../wallet/engine/wallet-sync.queue";
 import type { PointsBalance } from "./points-balance";
 import type {
@@ -48,16 +49,8 @@ export interface PointsOutcome {
   tier: TierDefinition | null;
 }
 
-/** A member tried to spend more than they have. Ordinary, not exceptional. */
-export class InsufficientPointsError extends Error {
-  constructor(
-    readonly requested: number,
-    readonly spendable: number
-  ) {
-    super(`cannot redeem ${requested} points: member has ${spendable}`);
-    this.name = "InsufficientPointsError";
-  }
-}
+/** Re-exported so callers of the service need not know where the error is declared. */
+export { InsufficientPointsError };
 
 const assertPositive = (points: number): void => {
   if (!Number.isInteger(points) || points <= 0) {
