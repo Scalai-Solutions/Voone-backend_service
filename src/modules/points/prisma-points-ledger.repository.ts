@@ -1,11 +1,27 @@
 import { Prisma, PointsTransactionKind, type PrismaClient } from "@prisma/client";
 
 import { ZERO_BALANCE, type PointsBalance } from "./points-balance";
-import type { AppendResult, PointsEntry, PointsLedgerRepository } from "./points-ledger.repository";
+import type {
+  AppendResult,
+  MemberPointsCache,
+  PointsEntry,
+  PointsLedgerRepository,
+  SpendOutcome
+} from "./points-ledger.repository";
 import type { TierDefinition } from "./tier-engine";
 
 /** Postgres unique violation, surfaced by Prisma as P2002. */
 const UNIQUE_VIOLATION = "P2002";
+
+/** Prisma's code for a transaction the database rolled back to preserve serialisability. */
+const SERIALISATION_FAILURE = "P2034";
+
+/**
+ * Two concurrent redemptions for one member are exactly what Serializable is there to
+ * catch, so a retry is expected rather than exceptional. Bounded, because a loop that
+ * never gives up turns contention into an outage.
+ */
+const SPEND_ATTEMPTS = 3;
 
 /** Mirrors countsTowardsLifetime, expressed as a Prisma filter. */
 const LIFETIME_KINDS = [
@@ -72,6 +88,66 @@ export class PrismaPointsLedgerRepository implements PointsLedgerRepository {
     return this.read({ clinicId: null });
   }
 
+  async appendSpend(entry: PointsEntry): Promise<SpendOutcome> {
+    for (let attempt = 1; attempt <= SPEND_ATTEMPTS; attempt += 1) {
+      try {
+        return await this.spendOnce(entry);
+      } catch (error) {
+        const retryable =
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === SERIALISATION_FAILURE &&
+          attempt < SPEND_ATTEMPTS;
+
+        if (!retryable) throw error;
+      }
+    }
+
+    // Unreachable: the loop either returns or rethrows on the final attempt.
+    throw new Error("appendSpend exhausted its attempts without resolving");
+  }
+
+  /**
+   * The affordability check and the insert, as one atomic step.
+   *
+   * Serializable, not the default Read Committed. Under Read Committed two concurrent
+   * redemptions for the same member both read a sufficient balance, both insert, and the
+   * member ends up negative — the classic lost-update, and the idempotency key cannot
+   * help because these are two genuinely different operations.
+   */
+  private spendOnce(entry: PointsEntry): Promise<SpendOutcome> {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const current = await tx.pointsTransaction.aggregate({
+          where: { memberId: entry.memberId },
+          _sum: { points: true }
+        });
+
+        const spendable = current._sum.points ?? 0;
+
+        // entry.points is negative, so this is "would this take them below zero?".
+        if (spendable + entry.points < 0) {
+          return { outcome: "insufficient", spendable } as const;
+        }
+
+        try {
+          await tx.pointsTransaction.create({ data: entry });
+        } catch (error) {
+          if (
+            error instanceof Prisma.PrismaClientKnownRequestError &&
+            error.code === UNIQUE_VIOLATION
+          ) {
+            return { outcome: "duplicate" } as const;
+          }
+
+          throw error;
+        }
+
+        return { outcome: "applied" } as const;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    );
+  }
+
   private async read(where: { clinicId: string | null }): Promise<TierDefinition[]> {
     const rows = await this.prisma.tierThreshold.findMany({
       where,
@@ -80,5 +156,22 @@ export class PrismaPointsLedgerRepository implements PointsLedgerRepository {
     });
 
     return rows;
+  }
+}
+
+/**
+ * Writes the derived balance and tier back onto Member.
+ *
+ * Its own class because writing a cache is a different privilege from appending to an
+ * immutable ledger, and nothing that holds this should be able to reach the ledger.
+ */
+export class PrismaMemberPointsCache implements MemberPointsCache {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  async write(memberId: string, spendable: number, tierCode: string | null): Promise<void> {
+    await this.prisma.member.update({
+      where: { id: memberId },
+      data: { pointsBalance: spendable, tier: tierCode }
+    });
   }
 }
