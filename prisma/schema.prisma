@@ -36,6 +36,13 @@ model Clinic {
   /// 404 rather than 403, so the response never confirms they existed.
   isActive Boolean @default(true)
 
+  /// Commercial plan owned by Voone, not the clinic's own loyalty tier.
+  voonePlan String @default("starter")
+
+  /// Monthly manual notification allowance. Defaults match the public Starter plan.
+  notificationsMonthlyQuota  Int @default(8)
+  notificationsUsedThisMonth Int @default(0)
+
   users          User[]
   treatments     ClinicTreatment[]
   template       ClinicTemplate?
@@ -45,12 +52,16 @@ model Clinic {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  clinicId  String?
-  clinic    Clinic?  @relation(fields: [clinicId], references: [id])
-  email     String   @unique
-  role      UserRole
-  createdAt DateTime @default(now())
+  id                            String    @id @default(uuid())
+  clinicId                      String?
+  clinic                        Clinic?   @relation(fields: [clinicId], references: [id])
+  name                          String?
+  email                         String    @unique
+  passwordHash                  String?
+  onboardingPasswordGeneratedAt DateTime?
+  onboardingCredentialsSentAt   DateTime?
+  role                          UserRole
+  createdAt                     DateTime  @default(now())
 
   @@index([clinicId])
 }
@@ -67,6 +78,7 @@ model ClinicTreatment {
   clinicId       String
   clinic         Clinic   @relation(fields: [clinicId], references: [id])
   name           String
+  priceEuro      Int?
   pointsAllotted Int
   createdAt      DateTime @default(now())
 
@@ -80,7 +92,30 @@ model TemplatePreset {
   previewImageUrl    String?
   createdAt          DateTime @default(now())
 
-  templates ClinicTemplate[]
+  templates      ClinicTemplate[]
+  vooneTemplates VooneTemplate[]
+}
+
+model VooneTemplate {
+  id                 String          @id @default(uuid())
+  presetId           String?
+  preset             TemplatePreset? @relation(fields: [presetId], references: [id])
+  name               String
+  description        String?
+  programName        String
+  hexBackgroundColor String
+  logoUrl            String?
+  heroImageUrl       String?
+  pointsLabel        String
+  tierLabel          String
+  benefitsText       String?
+  infoText           String?
+  buttons            Json            @default("[]")
+  textModules        Json            @default("[]")
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  @@index([presetId])
 }
 
 model ClinicTemplate {
@@ -93,10 +128,16 @@ model ClinicTemplate {
   hexBackgroundColor String
   logoUrl            String?
   heroImageUrl       String?
+  websiteUrl         String?
+  appointmentUrl     String?
+  appLinkText        String?
+  appLinkDescription String?
   pointsLabel        String
   tierLabel          String
   benefitsText       String
   infoText           String
+  tierRewards        Json           @default("[]")
+  milestoneRewards   Json           @default("{\"milestoneCount\":10,\"pointsToNextMilestone\":2000,\"priceAmount\":10,\"pointsAwarded\":100}")
   status             TemplateStatus @default(PENDING)
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt

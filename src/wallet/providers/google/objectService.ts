@@ -209,7 +209,7 @@ const toGoogleLoyaltyObjectBody = (input: LoyaltyObjectInput): GoogleLoyaltyObje
       {
         id: "member_since",
         header: "Member Since",
-        body: "09/2026"
+        body: input.memberSince ?? "—"
       },
       ...(input.tier
         ? [

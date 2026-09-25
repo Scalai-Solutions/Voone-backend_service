@@ -27,6 +27,12 @@ export const hexColorSchema = z
 export const cardTemplateSchema = z.object({
   programName: z.string().min(1).max(48),
   backgroundColor: hexColorSchema,
+  logoUrl: z.string().url().max(2048).optional(),
+  heroImageUrl: z.string().url().max(2048).optional(),
+  websiteUrl: z.string().url().max(2048).optional(),
+  appointmentUrl: z.string().url().max(2048).optional(),
+  appLinkText: z.string().min(1).max(30).optional(),
+  appLinkDescription: z.string().min(1).max(120).optional(),
   pointsLabel: z.string().min(1).max(32),
   tierLabel: z.string().min(1).max(32),
   benefitsText: z.string().min(1).max(500).optional(),

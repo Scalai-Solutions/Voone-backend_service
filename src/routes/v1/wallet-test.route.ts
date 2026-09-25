@@ -9,6 +9,16 @@ import type { LoyaltyClassInput, LoyaltyObjectInput } from "../../wallet/provide
 
 export const walletTestRouter = Router();
 
+const sapphiraWebsiteUrl = "https://voone.app";
+const sapphiraScheduleAppointmentUrl = "https://voone.app/alta/sapphira-prive";
+const sapphiraCardBackgroundColor = "#ECCFBF";
+const sapphiraLogoUrl =
+  process.env.GOOGLE_WALLET_SAPPHIRA_LOGO_URL ??
+  "https://i.ibb.co/C5qhWHMk/Whats-App-Image-2026-08-31-at-12-18-49-PM-1.jpg";
+const sapphiraHeroImageUrl =
+  process.env.GOOGLE_WALLET_SAPPHIRA_HERO_IMAGE_URL ??
+  "https://i.ibb.co/GvVfjxJG/Gemini-Generated-Image-897qly897qly897q.png";
+
 function renderAddToWalletPage(saveUrl: string): string {
   return `<!doctype html>
 <html lang="es">
@@ -94,12 +104,11 @@ walletTestRouter.get("/wallet/test/sapphira-prive/sergio-gil", async (req, res, 
       classId,
       issuerName: "Sapphira Privé",
       programName: "Sapphira Privé",
-      hexBackgroundColor: "#2F4D56",
-      // TODO: Replace these placeholders with the real Sapphira Privé brand assets.
-      logoUrl: "https://placehold.co/660x660/2F4D56/FFFFFF.png?text=SP",
-      heroImageUrl: "https://placehold.co/1032x336/1F343B/FFFFFF.png?text=Sapphira+Prive+Clinic",
+      hexBackgroundColor: sapphiraCardBackgroundColor,
+      logoUrl: sapphiraLogoUrl,
+      heroImageUrl: sapphiraHeroImageUrl,
       heroImageDescription: "Imagen de Sapphira Privé Clinic",
-      homepageUrl: "https://voone.app",
+      homepageUrl: sapphiraWebsiteUrl,
       accountNameLabel: "Member",
       accountIdLabel: "Member ID",
       textModules: [
@@ -118,7 +127,24 @@ walletTestRouter.get("/wallet/test/sapphira-prive/sergio-gil", async (req, res, 
           header: "Information",
           body: "This membership card is personal and non-transferable."
         }
-      ]
+      ],
+      linkModules: [
+        {
+          tag: "Website",
+          description: "Website",
+          url: sapphiraWebsiteUrl
+        },
+        {
+          tag: "Schedule Appointment",
+          description: "Schedule Appointment",
+          url: sapphiraScheduleAppointmentUrl
+        }
+      ],
+      appLink: {
+        displayText: "Schedule Appointment",
+        description: "Schedule an appointment",
+        url: sapphiraScheduleAppointmentUrl
+      }
     };
 
     const objectInput: LoyaltyObjectInput = {
