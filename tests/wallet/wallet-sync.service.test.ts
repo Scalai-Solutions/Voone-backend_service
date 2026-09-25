@@ -5,6 +5,7 @@ import type { LoyaltyCard } from "../../src/wallet/engine/loyalty-card";
 import type { LoyaltyCardAssembler } from "../../src/wallet/engine/loyalty-card-assembler";
 import type {
   CardRef,
+  InstallArtifact,
   IssuedCard,
   ProgramRef,
   WalletPassProvider
@@ -38,6 +39,10 @@ class StubProvider implements WalletPassProvider {
       install: { kind: "link", url: "https://example.test/save" }
     };
   }
+  async installArtifact(): Promise<InstallArtifact> {
+    return { kind: "link", url: "https://example.test/save" };
+  }
+
   async revokeCard(): Promise<void> {}
 }
 

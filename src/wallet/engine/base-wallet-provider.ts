@@ -4,6 +4,7 @@ import { WalletSyncError } from "../../common/errors/wallet.errors";
 import { LoyaltyCard } from "./loyalty-card";
 import {
   CardRef,
+  InstallArtifact,
   IssuedCard,
   ProgramRef,
   ProgramTemplate,
@@ -69,6 +70,14 @@ export abstract class BaseWalletProvider implements WalletPassProvider {
     await this.repo.recordCard(issued.ref);
 
     return issued;
+  }
+
+  /**
+   * Public counterpart of doInstallArtifact, which already knows to reuse the token the
+   * pass carries rather than minting one.
+   */
+  async installArtifact(ref: CardRef, card: LoyaltyCard): Promise<InstallArtifact> {
+    return this.doInstallArtifact(ref, card);
   }
 
   async syncCard(ref: CardRef, card: LoyaltyCard): Promise<void> {
