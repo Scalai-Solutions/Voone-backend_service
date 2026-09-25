@@ -29,9 +29,15 @@ const walletProviderKey = (provider: WalletProviderType): keyof typeof emptyWall
   provider === WalletProviderType.GOOGLE ? "google" : "apple";
 
 const providerStatus = (status: WalletSyncStatus) =>
-  status === WalletSyncStatus.SYNCED ? "added" : status === WalletSyncStatus.FAILED ? "failed" : "not_added";
+  status === WalletSyncStatus.SYNCED
+    ? "added"
+    : status === WalletSyncStatus.FAILED
+      ? "failed"
+      : "not_added";
 
-const toWalletStatus = (walletClasses: Array<{ provider: WalletProviderType; status: WalletSyncStatus }>) =>
+const toWalletStatus = (
+  walletClasses: Array<{ provider: WalletProviderType; status: WalletSyncStatus }>
+) =>
   walletClasses.reduce(
     (statuses, walletClass) => ({
       ...statuses,
@@ -161,7 +167,8 @@ adminClinicsRouter.post(
   "/auth/credentials",
   createRequireStaffKey(config.STAFF_API_KEY),
   asyncHandler(async (req, res) => {
-    const identifier = typeof req.body?.identifier === "string" ? req.body.identifier.trim().toLowerCase() : "";
+    const identifier =
+      typeof req.body?.identifier === "string" ? req.body.identifier.trim().toLowerCase() : "";
     const password = typeof req.body?.password === "string" ? req.body.password : "";
 
     if (!identifier || !password) {

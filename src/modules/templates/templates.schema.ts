@@ -30,9 +30,10 @@ export const milestoneRewardsSchema = z.object({
   pointsAwarded: z.coerce.number().int().min(1).max(10_000_000).default(100)
 });
 
-const defaultTierRewards = ["Bronze", "Silver", "Gold", "Platinum", "Diamond"].map(
-  (name) => ({ name, rewardText: "" })
-);
+const defaultTierRewards = ["Bronze", "Silver", "Gold", "Platinum", "Diamond"].map((name) => ({
+  name,
+  rewardText: ""
+}));
 
 export const createTemplateSchema = z.object({
   presetId: idSchema,
