@@ -57,35 +57,51 @@ class InMemoryDeviceRepository implements PassDeviceRepository {
     lastUpdated: null
   };
 
-  private key(device: string, serial: string) {
-    return `${device}:${serial}`;
+  private key(device: string, passType: string, serial: string) {
+    return `${device}:${passType}:${serial}`;
+  }
+
+  /** Mirrors the real primary key: Apple identifies a pass by type AND serial. */
+  private credentialKey(passType: string, serial: string) {
+    return `${passType}:${serial}`;
   }
 
   async saveRegistration(registration: Required<DeviceRegistration>) {
-    const key = this.key(registration.deviceLibraryIdentifier, registration.serialNumber);
+    const key = this.key(
+      registration.deviceLibraryIdentifier,
+      registration.passTypeIdentifier,
+      registration.serialNumber
+    );
     const created = !this.registrations.has(key);
     this.registrations.set(key, registration);
     return { created };
   }
-  async removeRegistration(device: string, serial: string) {
-    return this.registrations.delete(this.key(device, serial));
+  async removeRegistration(device: string, passType: string, serial: string) {
+    return this.registrations.delete(this.key(device, passType, serial));
   }
   async serialsUpdatedSince() {
     return this.updatedSince;
   }
-  async pushTokensFor(serial: string) {
+  async removeRegistrationsByPushToken(pushToken: string) {
+    const doomed = [...this.registrations.entries()].filter(([, r]) => r.pushToken === pushToken);
+    doomed.forEach(([key]) => this.registrations.delete(key));
+    return doomed.length;
+  }
+  async pushTokensFor(passType: string, serial: string) {
     return [...this.registrations.values()]
-      .filter((r) => r.serialNumber === serial)
+      .filter((r) => r.passTypeIdentifier === passType && r.serialNumber === serial)
       .map((r) => r.pushToken);
   }
-  async authenticationTokenFor(serial: string) {
-    return this.tokens.get(serial) ?? null;
+  async authenticationTokenFor(passType: string, serial: string) {
+    return this.tokens.get(this.credentialKey(passType, serial)) ?? null;
   }
-  async setAuthenticationToken(serial: string, token: string) {
-    this.tokens.set(serial, token);
+  async setAuthenticationToken(passType: string, serial: string, token: string) {
+    this.tokens.set(this.credentialKey(passType, serial), token);
   }
-  async passRecordFor(serial: string) {
-    return this.tokens.has(serial) ? { memberId: "member-for-" + serial, lastUpdated: null } : null;
+  async passRecordFor(passType: string, serial: string) {
+    return this.tokens.has(this.credentialKey(passType, serial))
+      ? { memberId: "member-for-" + serial, lastUpdated: null }
+      : null;
   }
 }
 
@@ -136,7 +152,9 @@ describe("AppleWalletProvider", () => {
     it("mints a token, binds it into the pass, and stores it", async () => {
       await provider.issueCard(aureaGoldPass, program);
 
-      const stored = devices.tokens.get(aureaGoldPass.serialNumber);
+      const stored = devices.tokens.get(
+        `${TEST_PASS_TYPE_IDENTIFIER}:${aureaGoldPass.serialNumber}`
+      );
 
       expect(stored).toMatch(/^[A-Za-z0-9_-]{40,}$/);
       expect(build.mock.calls[0][1]).toEqual({
@@ -220,7 +238,10 @@ describe("AppleWalletProvider", () => {
 
     it("rebuilds with the token the pass already has, never a fresh one", async () => {
       // Reissuing a token would lock out every device already registered for this pass.
-      devices.tokens.set(aureaGoldPass.serialNumber, "existing-token");
+      devices.tokens.set(
+        `${TEST_PASS_TYPE_IDENTIFIER}:${aureaGoldPass.serialNumber}`,
+        "existing-token"
+      );
 
       await provider.syncCard(ref, aureaGoldPass);
 
@@ -261,14 +282,16 @@ describe("AppleWalletProvider", () => {
   describe("authenticating a device", () => {
     it("accepts the token stored for that pass", async () => {
       await provider.issueCard(aureaGoldPass, program);
-      const token = devices.tokens.get(aureaGoldPass.serialNumber) as string;
+      const token = devices.tokens.get(
+        `${TEST_PASS_TYPE_IDENTIFIER}:${aureaGoldPass.serialNumber}`
+      ) as string;
 
       expect(await provider.authenticate(aureaGoldPass.serialNumber, token)).toBe(true);
     });
 
     it("rejects a token belonging to a different pass", async () => {
       await provider.issueCard(aureaGoldPass, program);
-      devices.tokens.set("other-serial", "someone-elses-token");
+      devices.tokens.set(`${TEST_PASS_TYPE_IDENTIFIER}:other-serial`, "someone-elses-token");
 
       expect(await provider.authenticate(aureaGoldPass.serialNumber, "someone-elses-token")).toBe(
         false
@@ -277,6 +300,38 @@ describe("AppleWalletProvider", () => {
 
     it("rejects everything for a pass with no stored token", async () => {
       expect(await provider.authenticate("never-issued", "anything")).toBe(false);
+    });
+  });
+
+  /**
+   * The individual Apple account holds pass.ai.voone.giftcard; the SL will hold
+   * pass.ai.voone.loyalty. Serial numbers are derived from the member id, so the same
+   * serial exists under both pass types during the migration — and Apple treats those as
+   * two entirely different passes. Keying on the serial alone made the second issue
+   * overwrite the first one's token, which 401s a pass already sitting in a member's
+   * Wallet, with no way to recover it short of re-issuing.
+   */
+  describe("migrating to a second pass type", () => {
+    const FUTURE_PASS_TYPE = "pass.ai.voone.loyalty";
+
+    it("does not accept a token minted for the same serial under another pass type", async () => {
+      await provider.issueCard(aureaGoldPass, program);
+      devices.tokens.set(`${FUTURE_PASS_TYPE}:${aureaGoldPass.serialNumber}`, "loyalty-token");
+
+      expect(await provider.authenticate(aureaGoldPass.serialNumber, "loyalty-token")).toBe(false);
+    });
+
+    it("leaves the other pass type's token intact when it issues its own", async () => {
+      devices.tokens.set(`${FUTURE_PASS_TYPE}:${aureaGoldPass.serialNumber}`, "loyalty-token");
+
+      await provider.issueCard(aureaGoldPass, program);
+
+      expect(devices.tokens.get(`${FUTURE_PASS_TYPE}:${aureaGoldPass.serialNumber}`)).toBe(
+        "loyalty-token"
+      );
+      expect(
+        devices.tokens.get(`${TEST_PASS_TYPE_IDENTIFIER}:${aureaGoldPass.serialNumber}`)
+      ).not.toBe("loyalty-token");
     });
   });
 

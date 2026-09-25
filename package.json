@@ -16,6 +16,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "copy:pass-assets": "node scripts/copy-pass-assets.mjs",
+    "apple:check": "tsx scripts/check-apple-wallet.ts",
     "worker": "node dist/jobs/wallet-sync.worker.js",
     "worker:dev": "tsx watch src/jobs/wallet-sync.worker.ts"
   },
@@ -29,6 +30,7 @@
     "dotenv": "^17.2.1",
     "express": "^4.19.2",
     "google-auth-library": "^11.0.2",
+    "ioredis": "^5.11.1",
     "jsonwebtoken": "^9.0.3",
     "passkit-generator": "3.6.0",
     "zod": "^4.0.17"

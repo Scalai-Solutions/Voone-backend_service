@@ -11,8 +11,9 @@ export class PrismaPassDeviceRepository implements PassDeviceRepository {
   ): Promise<{ created: boolean }> {
     const existing = await this.prisma.passDeviceRegistration.findUnique({
       where: {
-        deviceLibraryIdentifier_serialNumber: {
+        deviceLibraryIdentifier_passTypeIdentifier_serialNumber: {
           deviceLibraryIdentifier: registration.deviceLibraryIdentifier,
+          passTypeIdentifier: registration.passTypeIdentifier,
           serialNumber: registration.serialNumber
         }
       },
@@ -21,17 +22,16 @@ export class PrismaPassDeviceRepository implements PassDeviceRepository {
 
     await this.prisma.passDeviceRegistration.upsert({
       where: {
-        deviceLibraryIdentifier_serialNumber: {
+        deviceLibraryIdentifier_passTypeIdentifier_serialNumber: {
           deviceLibraryIdentifier: registration.deviceLibraryIdentifier,
+          passTypeIdentifier: registration.passTypeIdentifier,
           serialNumber: registration.serialNumber
         }
       },
       // A re-register carries a rotated push token, which is the whole reason Apple
       // repeats the call. Replace it rather than ignoring the write.
-      update: {
-        pushToken: registration.pushToken,
-        passTypeIdentifier: registration.passTypeIdentifier
-      },
+      // Only the push token moves. The rest of the row is the key.
+      update: { pushToken: registration.pushToken },
       create: registration
     });
 
@@ -40,10 +40,11 @@ export class PrismaPassDeviceRepository implements PassDeviceRepository {
 
   async removeRegistration(
     deviceLibraryIdentifier: string,
+    passTypeIdentifier: string,
     serialNumber: string
   ): Promise<boolean> {
     const { count } = await this.prisma.passDeviceRegistration.deleteMany({
-      where: { deviceLibraryIdentifier, serialNumber }
+      where: { deviceLibraryIdentifier, passTypeIdentifier, serialNumber }
     });
 
     return count > 0;
@@ -82,25 +83,48 @@ export class PrismaPassDeviceRepository implements PassDeviceRepository {
     };
   }
 
-  async pushTokensFor(serialNumber: string): Promise<string[]> {
+  async pushTokensFor(passTypeIdentifier: string, serialNumber: string): Promise<string[]> {
     const rows = await this.prisma.passDeviceRegistration.findMany({
-      where: { serialNumber },
+      where: { passTypeIdentifier, serialNumber },
       select: { pushToken: true }
     });
 
     return rows.map((row) => row.pushToken);
   }
 
-  async authenticationTokenFor(serialNumber: string): Promise<string | null> {
+  async removeRegistrationsByPushToken(pushToken: string): Promise<number> {
+    const { count } = await this.prisma.passDeviceRegistration.deleteMany({
+      where: { pushToken }
+    });
+
+    return count;
+  }
+
+  async authenticationTokenFor(
+    passTypeIdentifier: string,
+    serialNumber: string
+  ): Promise<string | null> {
     const credential = await this.prisma.applePassCredential.findUnique({
-      where: { serialNumber },
+      where: { passTypeIdentifier_serialNumber: { passTypeIdentifier, serialNumber } },
       select: { authenticationToken: true }
     });
 
     return credential?.authenticationToken ?? null;
   }
 
-  async passRecordFor(serialNumber: string): Promise<PassRecord | null> {
+  async passRecordFor(
+    passTypeIdentifier: string,
+    serialNumber: string
+  ): Promise<PassRecord | null> {
+    // WalletObject tracks the member's current card and is not pass-type scoped, so the
+    // credential is what proves this serial belongs to the pass type being asked about.
+    const credential = await this.prisma.applePassCredential.findUnique({
+      where: { passTypeIdentifier_serialNumber: { passTypeIdentifier, serialNumber } },
+      select: { serialNumber: true }
+    });
+
+    if (!credential) return null;
+
     const object = await this.prisma.walletObject.findFirst({
       where: { provider: WalletProviderType.APPLE, externalObjectId: serialNumber },
       select: { memberId: true, lastSyncedAt: true, createdAt: true }
@@ -113,11 +137,15 @@ export class PrismaPassDeviceRepository implements PassDeviceRepository {
     return { memberId: object.memberId, lastUpdated: object.lastSyncedAt ?? object.createdAt };
   }
 
-  async setAuthenticationToken(serialNumber: string, token: string): Promise<void> {
+  async setAuthenticationToken(
+    passTypeIdentifier: string,
+    serialNumber: string,
+    token: string
+  ): Promise<void> {
     await this.prisma.applePassCredential.upsert({
-      where: { serialNumber },
+      where: { passTypeIdentifier_serialNumber: { passTypeIdentifier, serialNumber } },
       update: { authenticationToken: token },
-      create: { serialNumber, authenticationToken: token }
+      create: { passTypeIdentifier, serialNumber, authenticationToken: token }
     });
   }
 }

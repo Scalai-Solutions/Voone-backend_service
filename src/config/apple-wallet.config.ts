@@ -280,3 +280,47 @@ export const isAppleWalletConfigured = (): boolean => {
     return false;
   }
 };
+
+export interface CertificateStatus extends CertificateIdentifiers {
+  validFrom: Date;
+  validTo: Date;
+  /** Negative once expired, which is a state worth being able to report rather than hide. */
+  daysRemaining: number;
+  expiresSoon: boolean;
+}
+
+/**
+ * How long the signing certificate has left.
+ *
+ * Apple issues Pass Type ID certificates for a year and gives no warning before one
+ * lapses. An expired certificate is a total, silent failure: no pass installs, no update
+ * is accepted, and nothing anywhere logs an error except the device — which nobody is
+ * reading. The only way to find out is that members quietly stop seeing their points
+ * change.
+ *
+ * So the expiry is surfaced at boot rather than left to a calendar reminder nobody set.
+ */
+export const RENEWAL_WARNING_DAYS = 30;
+
+const MILLISECONDS_PER_DAY = 86_400_000;
+
+export const certificateStatus = (
+  at: Date = new Date(),
+  config: AppleWalletConfig = getAppleWalletConfig()
+): CertificateStatus => {
+  const leaf = new X509Certificate(config.certificates.signerCert);
+  const validTo = new Date(leaf.validTo);
+
+  // Floored, so "0 days" means it expires today rather than some time in the last
+  // twenty-four hours — the difference matters to whoever is deciding to act now.
+  const daysRemaining = Math.floor((validTo.getTime() - at.getTime()) / MILLISECONDS_PER_DAY);
+
+  return {
+    passTypeIdentifier: config.passTypeIdentifier,
+    teamIdentifier: config.teamIdentifier,
+    validFrom: new Date(leaf.validFrom),
+    validTo,
+    daysRemaining,
+    expiresSoon: daysRemaining < RENEWAL_WARNING_DAYS
+  };
+};

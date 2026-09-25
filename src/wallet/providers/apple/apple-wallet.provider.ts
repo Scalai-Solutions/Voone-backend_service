@@ -72,6 +72,17 @@ export class AppleWalletProvider extends BaseWalletProvider implements PassDevic
     return isAppleWalletConfigured();
   }
 
+  /**
+   * The pass type this provider issues under, read off the signing certificate.
+   *
+   * Every lookup is scoped by it, so swapping the certificate for one under a different
+   * pass type leaves the previous type's passes and registrations untouched — which is
+   * what makes migrating between Apple accounts survivable rather than a hard cutover.
+   */
+  private get passTypeIdentifier(): string {
+    return getAppleWalletConfig().passTypeIdentifier;
+  }
+
   // ── WalletPassProvider ──────────────────────────────────────────────────────────────
 
   /**
@@ -107,7 +118,11 @@ export class AppleWalletProvider extends BaseWalletProvider implements PassDevic
     const authenticationToken = mintAuthenticationToken();
     const install = await this.buildArtifact(card, authenticationToken);
 
-    await this.devices.setAuthenticationToken(card.serialNumber, authenticationToken);
+    await this.devices.setAuthenticationToken(
+      this.passTypeIdentifier,
+      card.serialNumber,
+      authenticationToken
+    );
 
     return { ref, install };
   }
@@ -118,7 +133,10 @@ export class AppleWalletProvider extends BaseWalletProvider implements PassDevic
    * device already registered against that pass.
    */
   protected async doInstallArtifact(ref: CardRef, card: LoyaltyCard): Promise<InstallArtifact> {
-    const existing = await this.devices.authenticationTokenFor(ref.externalId);
+    const existing = await this.devices.authenticationTokenFor(
+      this.passTypeIdentifier,
+      ref.externalId
+    );
 
     return this.buildArtifact(card, existing ?? undefined);
   }
@@ -133,11 +151,17 @@ export class AppleWalletProvider extends BaseWalletProvider implements PassDevic
    * failing to update, which is close to undiagnosable remotely.
    *
    * Then the device is asked to come and fetch. What it fetches is served by the pass web
-   * service; until the APNs client lands the refresh channel is a no-op, so today the
-   * device collects the new version on its own schedule rather than immediately.
+   * service; the refresh channel only shortens the wait. Where a certificate is present
+   * that is a real APNs push and the device collects the new version within seconds;
+   * where it is not, the channel is a no-op and the device collects it on its own
+   * schedule. Either way the published pass is already authoritative, which is why a
+   * failed push is logged rather than failing the sync.
    */
   protected async doSync(ref: CardRef, card: LoyaltyCard): Promise<void> {
-    const token = await this.devices.authenticationTokenFor(ref.externalId);
+    const token = await this.devices.authenticationTokenFor(
+      this.passTypeIdentifier,
+      ref.externalId
+    );
 
     await this.buildArtifact(card, token ?? undefined);
 
@@ -169,6 +193,7 @@ export class AppleWalletProvider extends BaseWalletProvider implements PassDevic
   async unregisterDevice(registration: DeviceRegistration): Promise<void> {
     await this.devices.removeRegistration(
       registration.deviceLibraryIdentifier,
+      registration.passTypeIdentifier,
       registration.serialNumber
     );
   }
@@ -176,7 +201,7 @@ export class AppleWalletProvider extends BaseWalletProvider implements PassDevic
   async serialsUpdatedSince(deviceLibraryIdentifier: string, since?: Date): Promise<string[]> {
     const { serialNumbers } = await this.devices.serialsUpdatedSince(
       deviceLibraryIdentifier,
-      getAppleWalletConfig().passTypeIdentifier,
+      this.passTypeIdentifier,
       since
     );
 
@@ -191,7 +216,10 @@ export class AppleWalletProvider extends BaseWalletProvider implements PassDevic
    * device presenting a token is no.
    */
   async authenticate(serialNumber: string, authenticationToken: string): Promise<boolean> {
-    const expected = await this.devices.authenticationTokenFor(serialNumber);
+    const expected = await this.devices.authenticationTokenFor(
+      this.passTypeIdentifier,
+      serialNumber
+    );
 
     return expected !== null && secretsMatch(authenticationToken, expected);
   }
@@ -204,7 +232,10 @@ export class AppleWalletProvider extends BaseWalletProvider implements PassDevic
    * read, rebuilt from the card every time so it can never be a sync behind the ledger.
    */
   async buildPassFor(card: LoyaltyCard) {
-    const token = await this.devices.authenticationTokenFor(card.serialNumber);
+    const token = await this.devices.authenticationTokenFor(
+      this.passTypeIdentifier,
+      card.serialNumber
+    );
 
     return this.passBuilder().build(
       card,
@@ -214,7 +245,7 @@ export class AppleWalletProvider extends BaseWalletProvider implements PassDevic
 
   /** The tokens to wake for a serial. Used by the APNs client once it exists. */
   async pushTokensFor(serialNumber: string): Promise<string[]> {
-    return this.devices.pushTokensFor(serialNumber);
+    return this.devices.pushTokensFor(this.passTypeIdentifier, serialNumber);
   }
 
   // ── internals ───────────────────────────────────────────────────────────────────────

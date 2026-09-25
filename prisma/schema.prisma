@@ -269,10 +269,20 @@ model WalletObject {
 /// Stored, never derived from the serial: serials travel in URLs and barcodes, so anyone
 /// who saw one could otherwise read or deregister that member's pass.
 model ApplePassCredential {
-  serialNumber        String   @id
+  /// Part of the key, not decoration. Apple identifies a pass by
+  /// (passTypeIdentifier, serialNumber), and our serials are derived from the member so
+  /// they repeat across pass types. Keyed on the serial alone, issuing a pass under a new
+  /// pass type would overwrite the token of the one the member is still carrying, and
+  /// that pass would start failing every web service call immediately.
+  ///
+  /// This is what lets an old and a new pass type coexist while members move across.
+  passTypeIdentifier  String
+  serialNumber        String
   authenticationToken String
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+
+  @@id([passTypeIdentifier, serialNumber])
 }
 
 /// One device's request to be told when one pass changes.
@@ -292,7 +302,11 @@ model PassDeviceRegistration {
 
   /// A device registers a given pass once. Re-registering replaces the push token, which
   /// is what Apple expects when a token is rotated.
-  @@unique([deviceLibraryIdentifier, serialNumber])
+  ///
+  /// Scoped by pass type for the same reason as ApplePassCredential: one device can hold
+  /// the old and the new pass at once during a migration, and those are two registrations,
+  /// not one overwriting the other.
+  @@unique([deviceLibraryIdentifier, passTypeIdentifier, serialNumber])
   /// The updated-serials endpoint filters by both.
   @@index([deviceLibraryIdentifier, passTypeIdentifier])
   /// Fan-out on republish goes the other way: serial to every device holding it.

@@ -1,6 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import type { RequestHandler } from "express";
 
+import { markEdgeVerified } from "../utils/client-ip";
+
 const HEADER = "x-voone-edge";
 
 const matches = (received: string, expected: string): boolean => {
@@ -22,6 +24,10 @@ const matches = (received: string, expected: string): boolean => {
  * Opt-in: with no secret configured this is a no-op, so local development and CI are
  * unaffected and a misconfigured deploy fails open rather than locking everyone out.
  * That trade is deliberate — the alternative is an outage on a forgotten variable.
+ *
+ * It also decides whether CF-Connecting-IP is believed at all: see clientIp. Unset, the
+ * origin is reachable directly and that header is attacker-controlled, so rate limiting
+ * falls back to what the proxy in front of us observed.
  */
 export const createRequireEdge = (secret: string | undefined): RequestHandler => {
   if (!secret) {
@@ -32,6 +38,9 @@ export const createRequireEdge = (secret: string | undefined): RequestHandler =>
     const received = req.headers[HEADER];
 
     if (typeof received === "string" && matches(received, secret)) {
+      // Records that this hop identified itself, which is what makes CF-Connecting-IP
+      // worth believing on this request and on no other.
+      markEdgeVerified(req);
       next();
 
       return;

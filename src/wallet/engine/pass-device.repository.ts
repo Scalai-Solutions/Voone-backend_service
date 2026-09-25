@@ -19,7 +19,11 @@ export interface PassDeviceRepository {
   saveRegistration(registration: Required<DeviceRegistration>): Promise<{ created: boolean }>;
 
   /** Returns whether a registration was actually removed, which is a 200 either way. */
-  removeRegistration(deviceLibraryIdentifier: string, serialNumber: string): Promise<boolean>;
+  removeRegistration(
+    deviceLibraryIdentifier: string,
+    passTypeIdentifier: string,
+    serialNumber: string
+  ): Promise<boolean>;
 
   /**
    * Serials this device holds that changed after `since`, newest change first.
@@ -33,7 +37,18 @@ export interface PassDeviceRepository {
   ): Promise<{ serialNumbers: string[]; lastUpdated: Date | null }>;
 
   /** Every push token registered against a serial, for waking devices on republish. */
-  pushTokensFor(serialNumber: string): Promise<string[]>;
+  pushTokensFor(passTypeIdentifier: string, serialNumber: string): Promise<string[]>;
+
+  /**
+   * Forget every registration holding this push token. Returns how many were removed.
+   *
+   * APNs answers 410 Unregistered when a device token is dead — the pass was deleted, the
+   * app was removed, the device was wiped. That verdict is about the TOKEN, not about one
+   * pass, so it is keyed by token rather than by (device, passType, serial): the same dead
+   * token can be registered against several passes, and leaving the others behind means
+   * pushing to a black hole on every future republish for as long as the rows survive.
+   */
+  removeRegistrationsByPushToken(pushToken: string): Promise<number>;
 
   /**
    * The pass's stored bearer token, or null when the pass is unknown or has none.
@@ -41,10 +56,14 @@ export interface PassDeviceRepository {
    * Compared in constant time by the caller — returning it rather than comparing here
    * keeps the repository free of the auth decision.
    */
-  authenticationTokenFor(serialNumber: string): Promise<string | null>;
+  authenticationTokenFor(passTypeIdentifier: string, serialNumber: string): Promise<string | null>;
 
   /** Attach a freshly minted token to an issued pass. */
-  setAuthenticationToken(serialNumber: string, token: string): Promise<void>;
+  setAuthenticationToken(
+    passTypeIdentifier: string,
+    serialNumber: string,
+    token: string
+  ): Promise<void>;
 
   /**
    * What we know about an issued pass, or null if this serial was never ours.
@@ -58,7 +77,7 @@ export interface PassDeviceRepository {
    * freshly changed and the device's If-Modified-Since could never match — the 304 path
    * would be dead code and every poll would download a full pass.
    */
-  passRecordFor(serialNumber: string): Promise<PassRecord | null>;
+  passRecordFor(passTypeIdentifier: string, serialNumber: string): Promise<PassRecord | null>;
 }
 
 export interface PassRecord {

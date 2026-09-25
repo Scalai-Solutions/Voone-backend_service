@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 
+import { createRepeatingErrorLogger } from "../common/logger/repeating-error-logger";
 import { config } from "../config/env";
 import type { Worker } from "bullmq";
 
@@ -8,13 +9,13 @@ import {
   createWalletSyncWorker,
   type WalletSyncJob
 } from "../infrastructure/queue/bull-wallet-sync.queue";
-import { NoopRefreshChannel } from "./engine/pass-refresh-channel.interface";
 import { WalletProviderRegistry } from "./engine/wallet-provider.registry";
 import { InlineWalletSyncQueue, WalletSyncQueue } from "./engine/wallet-sync.queue";
 import { WalletSyncService } from "./engine/wallet-sync.service";
 import { PrismaLoyaltyCardAssembler } from "./prisma-loyalty-card.assembler";
 import { PrismaPassDeviceRepository } from "./prisma-pass-device.repository";
 import { PrismaWalletSyncRepository } from "./prisma-wallet-sync.repository";
+import { createAppleRefreshChannel } from "./providers/apple/apple-refresh-channel.factory";
 import { createAppleWalletProvider } from "./providers/apple/apple-wallet.provider";
 import { createGoogleWalletProvider } from "./providers/google";
 
@@ -33,13 +34,15 @@ export const buildWalletRegistry = (prisma: PrismaClient): WalletProviderRegistr
   // certificate the Apple adapter is deployed, constructed, and never registered — so
   // nothing resolves it and no business code carries an `if apple`.
   if (config.APPLE_PASS_WEB_SERVICE_URL) {
+    const devices = new PrismaPassDeviceRepository(prisma);
     const registered = registry.register(
       createAppleWalletProvider(
         syncRepo,
-        // Real pushes land with the APNs client. Until then a sync republishes the pass
-        // and the device collects it on its own schedule.
-        new NoopRefreshChannel(),
-        new PrismaPassDeviceRepository(prisma),
+        // A real APNs channel when a certificate is present, a no-op when it is not.
+        // Without it a republished pass sits on the server until the device happens to
+        // poll, which can be hours — the member sees stale points in the meantime.
+        createAppleRefreshChannel(devices),
+        devices,
         config.APPLE_PASS_WEB_SERVICE_URL
       )
     );
@@ -143,9 +146,9 @@ export const startInProcessWalletWorker = (prisma: PrismaClient): Worker<WalletS
     console.error(`[wallet] job ${job?.id ?? "?"} failed:`, error.message);
   });
 
-  worker.on("error", (error) => {
-    console.error("[wallet] worker error:", error.message);
-  });
+  // Throttled: BullMQ reconnects forever, so an unresolvable connection fault repeats as
+  // fast as the event loop allows and would otherwise bury its own first line.
+  worker.on("error", createRepeatingErrorLogger("[wallet] worker error:"));
 
   return worker;
 };
