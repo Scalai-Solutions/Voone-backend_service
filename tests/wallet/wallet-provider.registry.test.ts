@@ -6,6 +6,7 @@ import type {
   PassDeviceRegistry
 } from "../../src/wallet/engine/pass-device-registry.interface";
 import type {
+  InstallArtifact,
   IssuedCard,
   ProgramRef,
   WalletPassProvider
@@ -31,6 +32,10 @@ class StubProvider implements WalletPassProvider {
       ref: { provider: this.provider, externalId: "card", memberId: "m-1" },
       install: { kind: "link", url: "https://example.test/save" }
     };
+  }
+
+  async installArtifact(): Promise<InstallArtifact> {
+    return { kind: "link", url: "https://example.test/save" };
   }
 
   async syncCard(): Promise<void> {}
