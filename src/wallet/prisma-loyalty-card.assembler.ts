@@ -7,15 +7,18 @@ import { LoyaltyCard, loyaltyCardSchema } from "./engine/loyalty-card";
 import { deriveRedemptionCode } from "./engine/redemption-code";
 
 /**
- * Assembles a card from Member.pointsBalance.
+ * Assembles a card from Member.pointsBalance and Member.tier.
  *
- * **Temporary, and only in its points source.** That column is written by nothing today,
- * so every card currently reports zero. When the points ledger lands, this class is
- * replaced by one that derives the balance — and the tier — from the ledger, and no
- * adapter changes: that swap is the entire reason LoyaltyCardAssembler is an interface.
+ * No longer temporary. Those columns are a CACHE of the points ledger, maintained by
+ * PointsService on every movement and rebuildable at any time with
+ * `npm run points:recompute`. Reading them here rather than summing the ledger is
+ * deliberate: a pass is rebuilt on issue, on every sync and on every device fetch, and
+ * a member with years of visits should not cost a full history scan each time.
  *
- * Everything else here is not temporary. The clinic, the template and the member's own
- * details come from the authoritative rows and will read the same way afterwards.
+ * The consequence to know: if a process dies between the ledger append and the cache
+ * write, a card can render one movement behind until the next movement or a recompute.
+ * The ledger is always right; the card can briefly be stale. That trade is the reason
+ * the recompute script exists.
  */
 export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
   constructor(
