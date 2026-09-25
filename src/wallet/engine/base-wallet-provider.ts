@@ -36,6 +36,12 @@ export abstract class BaseWalletProvider implements WalletPassProvider {
    * programme, because the provider-side id is what every issued card points at.
    */
   async provisionProgram(template: ProgramTemplate): Promise<ProgramRef> {
+    const existing = await this.repo.findProgram(template.templateId, this.provider);
+
+    if (existing) {
+      return existing;
+    }
+
     const ref = await this.doProvision(template);
 
     await this.repo.recordProgram(template.templateId, ref);

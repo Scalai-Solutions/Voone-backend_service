@@ -22,8 +22,12 @@ vi.mock("../../src/infrastructure/database/prisma-client", () => ({
   prisma: { $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({})) }
 }));
 
+const walletPassEngine = { createClassForTemplate: vi.fn() };
+
 vi.mock("../../src/wallet/engine/wallet-pass.engine", () => ({
-  walletPassEngine: { createClassForTemplate: vi.fn() }
+  WalletPassEngine: vi.fn(function WalletPassEngine() {
+    return walletPassEngine;
+  })
 }));
 
 vi.mock("../../src/common/logger/logger", () => ({
@@ -32,7 +36,6 @@ vi.mock("../../src/common/logger/logger", () => ({
 
 const { templatesRepository, treatmentsRepository } =
   await import("../../src/modules/templates/templates.repository");
-const { walletPassEngine } = await import("../../src/wallet/engine/wallet-pass.engine");
 const { templatesService } = await import("../../src/modules/templates/templates.service");
 const { ConflictError } = await import("../../src/common/errors/conflict-error");
 
