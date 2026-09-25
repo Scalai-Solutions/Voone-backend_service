@@ -9,7 +9,6 @@ import { logger } from "../../common/logger/logger";
 import { isUniqueViolation } from "../../common/utils/prisma-errors";
 import { WalletPassEngine } from "../../wallet/engine/wallet-pass.engine";
 import { buildWalletRegistry } from "../../wallet/wallet.composition";
-import { generateTemporaryPassword, hashPassword } from "./onboarding-credentials.service";
 import {
   templatesRepository,
   treatmentsRepository,
@@ -112,17 +111,13 @@ export const provisionClinic = async (
             update: {
               clinicId: clinic.id,
               name: input.ownerName || null,
-              role: "OWNER",
-              passwordHash: hashPassword(generateTemporaryPassword()),
-              onboardingPasswordGeneratedAt: new Date()
+              role: "OWNER"
             },
             create: {
               clinicId: clinic.id,
               name: input.ownerName || null,
               email: input.ownerEmail,
-              role: "OWNER",
-              passwordHash: hashPassword(generateTemporaryPassword()),
-              onboardingPasswordGeneratedAt: new Date()
+              role: "OWNER"
             }
           });
         }
