@@ -16,6 +16,7 @@ import { createPointsRouter } from "./points.route";
 import { CardIssuer } from "../../modules/wallet/card-issuer";
 import { buildWalletRegistry } from "../../wallet/wallet.composition";
 import { createMemberPassRouter } from "./member-pass.route";
+import { PrismaPassClaimService } from "../../modules/members/pass-claim.service";
 import { MemberDirectoryService } from "../../modules/members/member-directory.service";
 import { createMemberDirectoryRouter } from "./member-directory.route";
 import { certificateStatus, isAppleWalletConfigured } from "../../config/apple-wallet.config";
@@ -139,6 +140,7 @@ if (config.CARD_REDEMPTION_SECRET) {
           };
         }
       ),
+      memberForClaim: (token) => new PrismaPassClaimService(prisma).resolve(token),
       memberExists: async (memberId) => {
         const member = await prisma.member.findUnique({
           where: { id: memberId },

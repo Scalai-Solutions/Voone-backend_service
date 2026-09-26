@@ -46,11 +46,24 @@ const uniqueViolation = () =>
 const db = (member: Record<string, unknown>) => ({ member }) as unknown as PrismaClient;
 
 describe("signUpMember", () => {
+  it("returns no member id for a number that already existed", async () => {
+    // Load-bearing, not a convenience. The route mints a pass claim only when memberId
+    // is present, so this null is what stops someone typing a stranger's number at the
+    // QR form and being handed that person's card.
+    const create = vi.fn().mockRejectedValue(uniqueViolation());
+    const update = vi.fn().mockResolvedValue({});
+
+    const result = await signUpMember(db({ create, update }), AUREA, INPUT, "qr_signup", NOW);
+
+    expect(result.memberId).toBeNull();
+  });
+
   it("stores the canonical submission against the clinic", async () => {
-    const create = vi.fn().mockResolvedValue({});
+    const create = vi.fn().mockResolvedValue({ id: "m-new" });
 
     await expect(signUpMember(db({ create }), AUREA, INPUT, "qr_signup", NOW)).resolves.toEqual({
-      created: true
+      created: true,
+      memberId: "m-new"
     });
 
     expect(create).toHaveBeenCalledWith({
@@ -98,7 +111,8 @@ describe("signUpMember", () => {
       await expect(
         signUpMember(db({ create, update }), AUREA, INPUT, "qr_signup", NOW)
       ).resolves.toEqual({
-        created: false
+        created: false,
+        memberId: null
       });
 
       expect(update).toHaveBeenCalledWith({

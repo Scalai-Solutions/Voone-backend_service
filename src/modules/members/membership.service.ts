@@ -16,6 +16,14 @@ export type SignupSource = z.infer<typeof signupSourceSchema>;
 export interface SignUpResult {
   /** False when the number was already a member. Not exposed — see the route. */
   created: boolean;
+  /**
+   * The new member, and null when the number already existed.
+   *
+   * Null is load-bearing rather than a convenience: it is what stops the route minting
+   * a pass claim for someone else's member. Typing a stranger's number must not hand
+   * over their card.
+   */
+  memberId: string | null;
 }
 
 /**
@@ -34,7 +42,7 @@ export const signUpMember = async (
   now: Date = new Date()
 ): Promise<SignUpResult> => {
   try {
-    await db.member.create({
+    const created = await db.member.create({
       data: {
         clinicId: clinic.id,
         name: input.name,
@@ -56,7 +64,7 @@ export const signUpMember = async (
       }
     });
 
-    return { created: true };
+    return { created: true, memberId: created.id };
   } catch (error) {
     if (!isUniqueViolation(error, ["clinicId", "phone"])) {
       throw error;
@@ -81,6 +89,6 @@ export const signUpMember = async (
       throw error;
     }
 
-    return { created: false };
+    return { created: false, memberId: null };
   }
 };
