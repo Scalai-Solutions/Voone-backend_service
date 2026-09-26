@@ -1,5 +1,5 @@
 import { Prisma, TemplateStatus } from "@prisma/client";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   ClinicSlugTakenError,
@@ -21,6 +21,33 @@ const VALID = {
   presetId: "p1",
   programName: "Nova Beauty Club"
 };
+
+const GOOGLE_WALLET_ENV_KEYS = [
+  "GOOGLE_WALLET_ISSUER_ID",
+  "GOOGLE_WALLET_SERVICE_ACCOUNT_KEY",
+  "GOOGLE_WALLET_SERVICE_ACCOUNT_EMAIL",
+  "GOOGLE_WALLET_ALLOWED_ORIGIN"
+] as const;
+
+const originalGoogleWalletEnv = new Map<string, string | undefined>();
+
+beforeEach(() => {
+  for (const key of GOOGLE_WALLET_ENV_KEYS) {
+    originalGoogleWalletEnv.set(key, process.env[key]);
+    delete process.env[key];
+  }
+});
+
+afterEach(() => {
+  for (const key of GOOGLE_WALLET_ENV_KEYS) {
+    const value = originalGoogleWalletEnv.get(key);
+
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+
+  originalGoogleWalletEnv.clear();
+});
 
 const db = (over: Record<string, unknown> = {}) => {
   const clinicCreate = vi.fn().mockResolvedValue({ id: "c1", slug: VALID.slug });
@@ -71,7 +98,7 @@ const db = (over: Record<string, unknown> = {}) => {
             })
           : fn
       ),
-      walletClass: { upsert: vi.fn() },
+      walletClass: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn() },
       clinicTemplate: {
         update: vi.fn().mockResolvedValue({ ...template, status: TemplateStatus.FAILED }),
         findUnique: vi.fn().mockResolvedValue({ ...template, status: TemplateStatus.FAILED })
