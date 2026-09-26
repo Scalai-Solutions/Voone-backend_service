@@ -2,7 +2,10 @@ import { WalletProviderType, WalletSyncStatus } from "@prisma/client";
 import { Router, type RequestHandler } from "express";
 import { z } from "zod";
 
-import { MemberNotFoundError, MembershipValidationError } from "../../common/errors/membership.errors";
+import {
+  MemberNotFoundError,
+  MembershipValidationError
+} from "../../common/errors/membership.errors";
 import { WalletConfigurationError } from "../../common/errors/wallet.errors";
 import { asyncHandler } from "../../common/middleware/async-handler";
 import { createFixedWindowLimiter } from "../../common/middleware/rate-limit";
@@ -16,13 +19,20 @@ import { clientIp } from "../../common/utils/client-ip";
 import { config } from "../../config/env";
 import { prisma } from "../../infrastructure/database/prisma-client";
 import { findClinicBySlug } from "../../modules/clinics/clinic.service";
-import { MEMBER_NAME_MAX, MEMBER_NAME_MIN, cleanMemberName } from "../../modules/members/member-name";
+import {
+  MEMBER_NAME_MAX,
+  MEMBER_NAME_MIN,
+  cleanMemberName
+} from "../../modules/members/member-name";
 import { membershipSignupSchema } from "../../modules/members/membership.schema";
 import { signUpMember } from "../../modules/members/membership.service";
 import { normalizeSpanishMobile } from "../../modules/members/phone-es";
 import { buildWalletRegistry, buildWalletSyncQueue } from "../../wallet/wallet.composition";
 import { LoyaltyCard } from "../../wallet/engine/loyalty-card";
-import { InstallArtifact, ProgramTemplate } from "../../wallet/engine/wallet-pass-provider.interface";
+import {
+  InstallArtifact,
+  ProgramTemplate
+} from "../../wallet/engine/wallet-pass-provider.interface";
 import { deriveRedemptionCode } from "../../wallet/engine/redemption-code";
 import { PrismaLoyaltyCardAssembler } from "../../wallet/prisma-loyalty-card.assembler";
 
@@ -211,7 +221,9 @@ const issueWalletPasses = async (memberId: string) => {
   const template = member.clinic.template;
 
   if (!template) {
-    throw new MembershipValidationError("template: la clínica no tiene una plantilla Wallet activa");
+    throw new MembershipValidationError(
+      "template: la clínica no tiene una plantilla Wallet activa"
+    );
   }
 
   const code = deriveRedemptionCode(member.id, config.CARD_REDEMPTION_SECRET);
@@ -543,7 +555,9 @@ membersRouter.get(
 
     const assembler = new PrismaLoyaltyCardAssembler(prisma, config.CARD_REDEMPTION_SECRET);
     const card = await assembler.assemble(member.id);
-    const programRef = await provider.provisionProgram(toProgramTemplate(card, member.clinic.template.id));
+    const programRef = await provider.provisionProgram(
+      toProgramTemplate(card, member.clinic.template.id)
+    );
     const issued = await provider.issueCard(card, programRef);
 
     if (issued.install.kind !== "file") {

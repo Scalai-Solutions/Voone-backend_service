@@ -133,9 +133,7 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
             }
           ]
         : []),
-      ...(patch.tier !== undefined
-        ? [{ id: "tier", header: "Tier", body: patch.tier }]
-        : [])
+      ...(patch.tier !== undefined ? [{ id: "tier", header: "Tier", body: patch.tier }] : [])
     ]);
   }
 

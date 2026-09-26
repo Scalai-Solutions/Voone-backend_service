@@ -74,7 +74,10 @@ type AdminClinicSummaryUser = {
   passwordSetupTokens?: Array<{ id: string; expiresAt: Date }>;
 };
 
-type AdminClinicSummaryInput = Omit<Awaited<ReturnType<typeof listAdminClinics>>[number], "users"> & {
+type AdminClinicSummaryInput = Omit<
+  Awaited<ReturnType<typeof listAdminClinics>>[number],
+  "users"
+> & {
   users: AdminClinicSummaryUser[];
 };
 
@@ -333,7 +336,10 @@ adminClinicsRouter.get(
     });
 
     if (!setupToken) {
-      res.status(404).json({ code: "PASSWORD_SETUP_LINK_INVALID", message: "Password setup link is invalid or expired" });
+      res.status(404).json({
+        code: "PASSWORD_SETUP_LINK_INVALID",
+        message: "Password setup link is invalid or expired"
+      });
       return;
     }
 
@@ -364,7 +370,10 @@ adminClinicsRouter.post(
     });
 
     if (!setupToken) {
-      res.status(404).json({ code: "PASSWORD_SETUP_LINK_INVALID", message: "Password setup link is invalid or expired" });
+      res.status(404).json({
+        code: "PASSWORD_SETUP_LINK_INVALID",
+        message: "Password setup link is invalid or expired"
+      });
       return;
     }
 
