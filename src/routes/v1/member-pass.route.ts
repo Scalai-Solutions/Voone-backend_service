@@ -9,6 +9,8 @@ import type { CardIssuer } from "../../modules/wallet/card-issuer";
 
 export interface MemberPassRouterDeps {
   issuer: CardIssuer;
+  /** The member a claim token is good for, or null if it is unknown or expired. */
+  memberForClaim: (token: string) => Promise<string | null>;
   /** Refuses a member who does not exist or has been erased, before anything is issued. */
   memberExists: (memberId: string) => Promise<boolean>;
 }
@@ -55,6 +57,50 @@ export const createMemberPassRouter = (deps: MemberPassRouterDeps): Router => {
         // A pass is personal and short-lived in the way a cache would get wrong: the
         // points inside it change.
         .set("Cache-Control", "no-store")
+        .send(artifact.buffer);
+    })
+  );
+
+  /**
+   * PUBLIC. The member's own browser exchanges the claim it was handed at sign-up.
+   *
+   * No staff key, because the caller is the member on their phone — which is the point:
+   * they scanned a QR, filled in a form, and the card should appear. Authorisation is
+   * the token itself, which is 32 random bytes, stored only as a SHA-256 hash, valid
+   * for fifteen minutes, and issued only to a browser that just created the member.
+   *
+   * Under /pass-claims rather than /passes on purpose: /passes/:passTypeIdentifier/
+   * :serialNumber is Apple's device web service and has the same segment count, so a
+   * claim would be ambiguous with a pass fetch depending on mount order.
+   */
+  router.get(
+    "/pass-claims/:token",
+    asyncHandler(async (req, res) => {
+      const memberId = await deps.memberForClaim(req.params.token);
+
+      // Unknown, expired and belonging-to-nobody are one answer. Distinguishing them
+      // would turn this into an oracle for which tokens ever existed.
+      if (!memberId) {
+        res.status(404).json({ code: "CLAIM_NOT_FOUND", message: "Not found" });
+
+        return;
+      }
+
+      const artifact = await deps.issuer.artifactFor(memberId, WalletProviderType.APPLE);
+
+      if (artifact.kind !== "file") {
+        res.status(200).json({ kind: artifact.kind, url: artifact.url });
+
+        return;
+      }
+
+      res
+        .status(200)
+        .type(artifact.contentType)
+        .set("Content-Disposition", `attachment; filename="${artifact.fileName}"`)
+        // Never cached: the bytes are personal, and a shared cache holding one member's
+        // pass is the worst version of this endpoint going wrong.
+        .set("Cache-Control", "no-store, private")
         .send(artifact.buffer);
     })
   );

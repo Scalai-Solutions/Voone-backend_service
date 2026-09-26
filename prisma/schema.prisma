@@ -69,12 +69,12 @@ model User {
 }
 
 model PasswordSetupToken {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   @@index([userId])
   @@index([expiresAt])
@@ -243,6 +243,7 @@ model Member {
 
   walletObjects WalletObject[]
   pointsLedger  PointsTransaction[]
+  passClaims    PassClaim[]
 
   @@unique([clinicId, phone])
   @@index([clinicId])
@@ -442,4 +443,39 @@ model TierThreshold {
   /// whichever one the planner happened to return.
   @@unique([clinicId, code])
   @@index([clinicId, minLifetimePoints])
+}
+
+/// A short-lived permission to download one member's pass, handed to the browser that
+/// just created that member.
+///
+/// Exists because the QR sign-up page must hand over the card at the moment the member
+/// is standing there, and the staff-key route cannot be used from a member's phone.
+///
+/// The token is stored HASHED. A claim URL ends up in browser history and in whatever
+/// the phone syncs, so the row must not be enough to mint a pass if the database leaks.
+///
+/// Issued only when the member was newly CREATED. An existing phone number gets no
+/// claim, which is what stops someone typing a stranger's number and receiving their
+/// name and points. See docs/superpowers/specs and VOO-102.
+model PassClaim {
+  id        String @id @default(uuid())
+  /// SHA-256 of the token. Unique so a collision is a database error, not a silent swap.
+  tokenHash String @unique
+
+  memberId String
+  member   Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  /// Minutes, not days. The window is the real control: it is short enough that a URL
+  /// left in history is worthless long before anyone finds it.
+  expiresAt DateTime
+
+  /// First use. Recorded rather than enforced as single-use on purpose — a member whose
+  /// "Add to Wallet" fails must be able to tap again, and re-submitting the form would
+  /// return "already a member" and no new token.
+  claimedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  /// For the sweep that deletes expired rows.
+  @@index([expiresAt])
 }

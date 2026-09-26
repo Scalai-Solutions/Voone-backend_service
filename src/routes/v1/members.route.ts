@@ -21,6 +21,7 @@ import { clientIp } from "../../common/utils/client-ip";
 import { config } from "../../config/env";
 import { prisma } from "../../infrastructure/database/prisma-client";
 import { findClinicBySlug } from "../../modules/clinics/clinic.service";
+import { PrismaPassClaimService } from "../../modules/members/pass-claim.service";
 import { PointsService } from "../../modules/points/points.service";
 import {
   PrismaMemberPointsCache,
@@ -53,6 +54,8 @@ const walletSyncQueue = buildWalletSyncQueue(prisma);
  * the wallet subsystem unusable. The endpoint answers 503 rather than writing points
  * that nothing could ever render onto a card.
  */
+const passClaims = new PrismaPassClaimService(prisma);
+
 const pointsService = walletSyncQueue
   ? new PointsService(
       new PrismaPointsLedgerRepository(prisma),
@@ -649,13 +652,33 @@ membersRouter.post(
     // The default lives here rather than in the schema or the service: it is an API
     // default, so an omitted field means the public form, while the staff surface states
     // itself explicitly.
-    await signUpMember(prisma, clinic, parsed.data, parsed.data.consentSource ?? "qr_signup");
+    const result = await signUpMember(
+      prisma,
+      clinic,
+      parsed.data,
+      parsed.data.consentSource ?? "qr_signup"
+    );
 
-    // Byte-identical whether the member was created or already existed. A 201/200
-    // distinction would tell anyone who can POST whether a given phone number belongs
-    // to a member of a named aesthetic clinic; echoing the stored name would be worse
-    // still, because a foreign visitor's national number can normalize onto an existing
-    // Spanish member and would show her a stranger's record. Nothing here needs an id.
-    res.status(200).json({ status: "ok" });
+    /**
+     * A claim ONLY when the member was newly created.
+     *
+     * This is the one place the response is allowed to differ, and the difference is
+     * deliberate (VOO-102). Handing the card over here is the whole product: the member
+     * scanned a QR with their camera, so they are already in a browser on the phone the
+     * card is for, and that is the best moment there will ever be.
+     *
+     * An existing number gets nothing back. That is what stops someone typing a
+     * stranger's number and receiving their name and points — which an immediate pass
+     * for everyone would do. What remains is a weaker signal: the shape of the response
+     * reveals whether a number is already a member. Accepted knowingly, because the
+     * alternative taxes every legitimate member forever to close a targeted case that
+     * also requires already knowing the number, and the rate limiter bounds bulk
+     * probing. The stored name and balance are never exposed either way.
+     *
+     * Still never a 201: the status code stays 200 for both.
+     */
+    const claimToken = result.memberId ? await passClaims.mint(result.memberId) : undefined;
+
+    res.status(200).json({ status: "ok", claimToken });
   })
 );
