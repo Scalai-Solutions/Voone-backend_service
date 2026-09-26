@@ -61,7 +61,7 @@ export class BullWalletSyncQueue implements WalletSyncQueue {
         { memberId },
         // Deduplicates a burst into one job. A job already running is not replaced —
         // the next change enqueues again, so nothing is dropped.
-        { jobId: `member:${memberId}` }
+        { jobId: `member-${memberId}` }
       );
     } catch (cause) {
       // Enqueueing must never fail the caller: Redis being unreachable is an operational
