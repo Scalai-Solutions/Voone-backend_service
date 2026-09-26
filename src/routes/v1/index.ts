@@ -1,3 +1,5 @@
+import { timingSafeEqual } from "node:crypto";
+
 import { Router } from "express";
 
 import { prisma } from "../../infrastructure/database/prisma-client";
@@ -18,6 +20,7 @@ import { buildWalletRegistry } from "../../wallet/wallet.composition";
 import { createMemberPassRouter } from "./member-pass.route";
 import { MemberDirectoryService } from "../../modules/members/member-directory.service";
 import { createMemberDirectoryRouter } from "./member-directory.route";
+import { deriveRedemptionCode } from "../../wallet/engine/redemption-code";
 import { certificateStatus, isAppleWalletConfigured } from "../../config/apple-wallet.config";
 import { DashboardService } from "../../modules/dashboard/dashboard.service";
 import { createDashboardRouter } from "./dashboard.route";
@@ -173,6 +176,48 @@ v1Router.use(
       });
 
       return clinic?.id ?? null;
+    },
+    /**
+     * Reversing the barcode.
+     *
+     * The code is HMAC-derived from the member id and deliberately not stored, so there
+     * is nothing to index: the only way back is to derive it for each candidate and
+     * compare. That is one HMAC per member of ONE clinic, which is microseconds at any
+     * size a clinic actually reaches — but it is linear, so if a single clinic ever
+     * holds tens of thousands of members this becomes the place to add a stored,
+     * indexed digest rather than the place to be surprised.
+     *
+     * Compared in constant time so the loop cannot be used to recover a code character
+     * by character.
+     */
+    memberIdForCode: async (clinicId, code) => {
+      if (!config.CARD_REDEMPTION_SECRET) {
+        throw new WalletConfigurationError(
+          "No redemption secret is configured, so no barcode could have been issued."
+        );
+      }
+
+      const members = await prisma.member.findMany({
+        where: { clinicId, erasedAt: null },
+        select: { id: true }
+      });
+
+      const wanted = Buffer.from(code);
+      let found: string | null = null;
+
+      for (const member of members) {
+        const candidate = Buffer.from(
+          deriveRedemptionCode(member.id, config.CARD_REDEMPTION_SECRET)
+        );
+
+        // No early return: leaving the loop on the first match would make the response
+        // time depend on where in the list the member sits.
+        if (candidate.length === wanted.length && timingSafeEqual(candidate, wanted)) {
+          found = member.id;
+        }
+      }
+
+      return found;
     },
     treatmentsFor: async (clinicId) => {
       const treatments = await prisma.clinicTreatment.findMany({

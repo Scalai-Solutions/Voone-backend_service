@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import {
   ClinicNotFoundError,
+  MemberNotFoundError,
   MembershipValidationError
 } from "../../common/errors/membership.errors";
 import { asyncHandler } from "../../common/middleware/async-handler";
@@ -14,6 +15,12 @@ export interface MemberDirectoryRouterDeps {
   directory: MemberDirectoryService;
   /** Resolves a public clinic slug to its id, or null when there is no such clinic. */
   clinicIdForSlug: (slug: string) => Promise<string | null>;
+  /**
+   * Resolves the code on a member's barcode back to that member, within one clinic.
+   * Null when nothing matches. Throws when no redemption secret is configured, because
+   * then no code could ever have been issued.
+   */
+  memberIdForCode: (clinicId: string, code: string) => Promise<string | null>;
   treatmentsFor: (
     clinicId: string
   ) => Promise<Array<{ id: string; name: string; priceEuro: number | null; points: number }>>;
@@ -37,6 +44,16 @@ const listQuery = z.object({
 });
 
 const clinicQuery = z.object({ clinicId: z.string().min(1, "clinicId is required") });
+
+/** Base32, the alphabet deriveRedemptionCode emits. Length is not assumed here. */
+const lookupQuery = z.object({
+  code: z
+    .string()
+    .trim()
+    .min(8, "code is required")
+    .max(64)
+    .transform((value) => value.toUpperCase())
+});
 
 const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
   const parsed = schema.safeParse(value);
@@ -107,6 +124,33 @@ export const createMemberDirectoryRouter = (deps: MemberDirectoryRouterDeps): Ro
       const { q, limit, offset } = parse(listQuery.omit({ clinicId: true }), req.query);
 
       res.json(await deps.directory.list({ clinicId, query: q, limit, offset }));
+    })
+  );
+
+  /**
+   * What the scanner calls after reading a pass.
+   *
+   * The barcode carries the redemption code, not the member id — deliberately, so that
+   * a photographed card does not hand over an identifier the API is addressed by. This
+   * is the only place that mapping is reversed, and it is staff-only.
+   */
+  router.get(
+    "/clinics/:slug/members/lookup",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const clinicId = await deps.clinicIdForSlug(req.params.slug);
+
+      if (!clinicId) throw new ClinicNotFoundError(req.params.slug);
+
+      const { code } = parse(lookupQuery, req.query);
+      const memberId = await deps.memberIdForCode(clinicId, code);
+
+      // A code that belongs to another clinic's member is indistinguishable from one
+      // that belongs to nobody, which is the correct answer to both: staff at one
+      // clinic must not learn that a card is valid somewhere else.
+      if (!memberId) throw new MemberNotFoundError(code);
+
+      res.json(await deps.directory.get(memberId));
     })
   );
 

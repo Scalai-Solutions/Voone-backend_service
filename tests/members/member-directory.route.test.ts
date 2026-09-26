@@ -44,6 +44,8 @@ const buildApp = () => {
     createMemberDirectoryRouter({
       directory,
       clinicIdForSlug: async (slug) => (slug === "aurea" ? CLINIC : null),
+      memberIdForCode: async (clinicId, code) =>
+        clinicId === CLINIC && code === "DMMLVQU2PFI2YPFXGPRXAMYOIO" ? "m-1" : null,
       treatmentsFor: async (clinicId) => {
         calls.push({ treatmentsFor: clinicId });
 
@@ -179,6 +181,63 @@ describe("GET /clinics/:slug/members", () => {
     await get(app, "/api/v1/clinics/aurea/members?q=nav&limit=10&offset=5");
 
     expect(calls[0]).toMatchObject({ query: "nav", limit: 10, offset: 5 });
+  });
+});
+
+describe("GET /clinics/:slug/members/lookup", () => {
+  it("resolves a scanned code to the member", async () => {
+    const { app } = buildApp();
+
+    const res = await get(
+      app,
+      "/api/v1/clinics/aurea/members/lookup?code=DMMLVQU2PFI2YPFXGPRXAMYOIO"
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe("m-1");
+  });
+
+  it("uppercases the code, because a scanner or a keyboard may not", async () => {
+    const { app } = buildApp();
+
+    const res = await get(
+      app,
+      "/api/v1/clinics/aurea/members/lookup?code=dmmlvqu2pfi2ypfxgprxamyoio"
+    );
+
+    expect(res.status).toBe(200);
+  });
+
+  it("404s a code belonging to nobody", async () => {
+    const { app } = buildApp();
+
+    expect(
+      (await get(app, "/api/v1/clinics/aurea/members/lookup?code=AAAAAAAAAAAAAAAA")).status
+    ).toBe(404);
+  });
+
+  it("404s a code from another clinic the same way", async () => {
+    // Indistinguishable on purpose: staff at one clinic must not learn that a card is
+    // valid somewhere else.
+    const { app } = buildApp();
+    const res = await get(app, "/api/v1/clinics/aurea/members/lookup?code=AAAAAAAAAAAAAAAA");
+
+    expect(res.status).toBe(404);
+    expect(JSON.stringify(res.body)).not.toContain("AAAAAAAA");
+  });
+
+  it("requires a code", async () => {
+    const { app } = buildApp();
+
+    expect((await get(app, "/api/v1/clinics/aurea/members/lookup")).status).toBe(422);
+  });
+
+  it("404s an unknown clinic before looking anything up", async () => {
+    const { app } = buildApp();
+
+    expect(
+      (await get(app, "/api/v1/clinics/nope/members/lookup?code=DMMLVQU2PFI2YPFXGPRXAMYOIO")).status
+    ).toBe(404);
   });
 });
 
