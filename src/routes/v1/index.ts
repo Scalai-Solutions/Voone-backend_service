@@ -16,6 +16,8 @@ import { createPointsRouter } from "./points.route";
 import { CardIssuer } from "../../modules/wallet/card-issuer";
 import { buildWalletRegistry } from "../../wallet/wallet.composition";
 import { createMemberPassRouter } from "./member-pass.route";
+import { MemberDirectoryService } from "../../modules/members/member-directory.service";
+import { createMemberDirectoryRouter } from "./member-directory.route";
 import { createAppleRefreshChannel } from "../../wallet/providers/apple/apple-refresh-channel.factory";
 import { createAppleWalletProvider } from "../../wallet/providers/apple/apple-wallet.provider";
 import { adminClinicsRouter } from "./admin-clinics.route";
@@ -145,6 +147,40 @@ if (config.CARD_REDEMPTION_SECRET) {
     })
   );
 }
+
+/**
+ * The clinic dashboard's reads. Unconditional: these are plain database queries and do
+ * not need a wallet, a certificate or a redemption secret, so hiding them behind wallet
+ * configuration would make the members page depend on something unrelated.
+ */
+v1Router.use(
+  createMemberDirectoryRouter({
+    directory: new MemberDirectoryService(prisma, () => {
+      // Asked per request rather than captured once: the registry reflects what is
+      // configured at boot, and reporting a provider as available when it is not would
+      // have staff chasing members to add a card that cannot exist.
+      const registry = buildWalletRegistry(prisma);
+
+      return new Set(registry.enabled().map((provider) => provider.provider));
+    }),
+    treatmentsFor: async (clinicId) => {
+      const treatments = await prisma.clinicTreatment.findMany({
+        where: { clinicId },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true, priceEuro: true, pointsAllotted: true }
+      });
+
+      return treatments.map((t) => ({
+        id: t.id,
+        name: t.name,
+        priceEuro: t.priceEuro,
+        // Renamed at the boundary: the dashboard calls it `points`, the schema calls it
+        // pointsAllotted. Neither has to move for the other.
+        points: t.pointsAllotted
+      }));
+    }
+  })
+);
 
 if (process.env.NODE_ENV !== "production") {
   v1Router.use(walletTestRouter);
