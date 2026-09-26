@@ -43,6 +43,7 @@ const buildApp = () => {
     "/api/v1",
     createMemberDirectoryRouter({
       directory,
+      clinicIdForSlug: async (slug) => (slug === "aurea" ? CLINIC : null),
       treatmentsFor: async (clinicId) => {
         calls.push({ treatmentsFor: clinicId });
 
@@ -148,6 +149,36 @@ describe("GET /members/:id", () => {
     await get(app, `/api/v1/members?clinicId=${CLINIC}`);
 
     expect(calls[0]).toMatchObject({ clinicId: CLINIC });
+  });
+});
+
+describe("GET /clinics/:slug/members", () => {
+  it("scopes by the slug the staff session carries, with no query needed", async () => {
+    // The shape the dashboard actually reaches for: its Next handler holds the staff key
+    // and derives the clinic from the session, and the session carries the slug. In the
+    // path, a caller cannot omit it.
+    const { app, calls } = buildApp();
+
+    const res = await get(app, "/api/v1/clinics/aurea/members");
+
+    expect(res.status).toBe(200);
+    expect(calls[0]).toMatchObject({ clinicId: CLINIC });
+  });
+
+  it("404s an unknown slug rather than returning an empty list", async () => {
+    // An unknown clinic and a clinic with no members are different things, and
+    // conflating them hides a misconfigured dashboard.
+    const { app } = buildApp();
+
+    expect((await get(app, "/api/v1/clinics/nope/members")).status).toBe(404);
+  });
+
+  it("still honours search and paging", async () => {
+    const { app, calls } = buildApp();
+
+    await get(app, "/api/v1/clinics/aurea/members?q=nav&limit=10&offset=5");
+
+    expect(calls[0]).toMatchObject({ query: "nav", limit: 10, offset: 5 });
   });
 });
 

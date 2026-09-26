@@ -1,7 +1,10 @@
 import { Router } from "express";
 import { z } from "zod";
 
-import { MembershipValidationError } from "../../common/errors/membership.errors";
+import {
+  ClinicNotFoundError,
+  MembershipValidationError
+} from "../../common/errors/membership.errors";
 import { asyncHandler } from "../../common/middleware/async-handler";
 import { createRequireStaffKey } from "../../common/middleware/staff-key";
 import { config } from "../../config/env";
@@ -9,6 +12,8 @@ import type { MemberDirectoryService } from "../../modules/members/member-direct
 
 export interface MemberDirectoryRouterDeps {
   directory: MemberDirectoryService;
+  /** Resolves a public clinic slug to its id, or null when there is no such clinic. */
+  clinicIdForSlug: (slug: string) => Promise<string | null>;
   treatmentsFor: (
     clinicId: string
   ) => Promise<Array<{ id: string; name: string; priceEuro: number | null; points: number }>>;
@@ -75,6 +80,33 @@ export const createMemberDirectoryRouter = (deps: MemberDirectoryRouterDeps): Ro
     requireStaff,
     asyncHandler(async (req, res) => {
       res.json(await deps.directory.get(req.params.memberId));
+    })
+  );
+
+  /**
+   * The same list, scoped by the clinic's public slug.
+   *
+   * This is the shape the dashboard actually reaches for. Its Next route handler holds
+   * the staff key server-side and derives the clinic from the signed-in session, and the
+   * session carries the SLUG — so putting the clinic in the path means a caller cannot
+   * omit it, and the handler never has to translate. It also matches the existing
+   * POST /clinics/:slug/members used by staff entry.
+   *
+   * The ?clinicId= variant above stays for callers that already hold an id.
+   */
+  router.get(
+    "/clinics/:slug/members",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const clinicId = await deps.clinicIdForSlug(req.params.slug);
+
+      // 404 rather than an empty list: an unknown slug is a different thing from a
+      // clinic with no members, and conflating them hides a misconfigured dashboard.
+      if (!clinicId) throw new ClinicNotFoundError(req.params.slug);
+
+      const { q, limit, offset } = parse(listQuery.omit({ clinicId: true }), req.query);
+
+      res.json(await deps.directory.list({ clinicId, query: q, limit, offset }));
     })
   );
 

@@ -166,6 +166,14 @@ v1Router.use(
 
       return new Set(registry.enabled().map((provider) => provider.provider));
     }),
+    clinicIdForSlug: async (slug) => {
+      const clinic = await prisma.clinic.findFirst({
+        where: { slug, isActive: true },
+        select: { id: true }
+      });
+
+      return clinic?.id ?? null;
+    },
     treatmentsFor: async (clinicId) => {
       const treatments = await prisma.clinicTreatment.findMany({
         where: { clinicId },
