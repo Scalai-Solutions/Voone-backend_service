@@ -18,6 +18,9 @@ import { buildWalletRegistry } from "../../wallet/wallet.composition";
 import { createMemberPassRouter } from "./member-pass.route";
 import { MemberDirectoryService } from "../../modules/members/member-directory.service";
 import { createMemberDirectoryRouter } from "./member-directory.route";
+import { certificateStatus, isAppleWalletConfigured } from "../../config/apple-wallet.config";
+import { DashboardService } from "../../modules/dashboard/dashboard.service";
+import { createDashboardRouter } from "./dashboard.route";
 import { createAppleRefreshChannel } from "../../wallet/providers/apple/apple-refresh-channel.factory";
 import { createAppleWalletProvider } from "../../wallet/providers/apple/apple-wallet.provider";
 import { adminClinicsRouter } from "./admin-clinics.route";
@@ -179,6 +182,29 @@ v1Router.use(
         points: t.pointsAllotted
       }));
     }
+  })
+);
+
+v1Router.use(
+  createDashboardRouter({
+    dashboard: new DashboardService(
+      prisma,
+      () => {
+        // Reads the certificate rather than a configured date, so the panel cannot
+        // disagree with the material that actually signs the passes. Unconfigured is a
+        // real state and is reported as such instead of throwing.
+        if (!isAppleWalletConfigured()) return { expiresAt: null, enabled: false };
+
+        try {
+          return { expiresAt: certificateStatus().validTo, enabled: true };
+        } catch {
+          // Present but unusable — a wrong passphrase, a mismatched key. Enabled is
+          // false because no pass can be signed, which is what the panel is asking.
+          return { expiresAt: null, enabled: false };
+        }
+      },
+      () => config.GOOGLE_WALLET_PUBLISHING_STATUS
+    )
   })
 );
 

@@ -17,12 +17,27 @@ const withEnv = async <T>(
 ): Promise<T> => {
   const original = { ...process.env };
 
+  // The base env src/config/env.ts requires at import. Supplied by the harness rather
+  // than inherited, because mocking dotenv away leaves nothing behind it: the suite
+  // would then pass only on CI, which sets these at job level, and fail on every
+  // developer machine. A test that behaves differently in the two places is worse than
+  // no test.
+  Object.assign(process.env, {
+    DATABASE_URL: "postgresql://voone:voone@localhost:5432/voone?schema=public",
+    REDIS_URL: "redis://localhost:6379",
+    PORT: "4000",
+    FRONTEND_URL: "http://localhost:3000"
+  });
+
   Object.entries(overrides).forEach(([key, value]) => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   });
 
   vi.resetModules();
+  // dotenv is mocked so a developer's .env cannot leak in and re-supply a variable this
+  // harness is deliberately unsetting — without it, "CARD_REDEMPTION_SECRET is missing"
+  // is untestable on any machine that has one.
   vi.doMock("dotenv", () => ({
     default: { config: vi.fn() },
     config: vi.fn()
