@@ -110,7 +110,12 @@ describe("sign-up against a real database", () => {
       }
     });
 
-    await expect(signUpMember(db, aurea, input(), "qr_signup")).resolves.toEqual({ created: true });
+    const result = await signUpMember(db, aurea, input(), "qr_signup");
+
+    // A real id, not just created:true — the route mints a pass claim from it, so an
+    // erased member registering again must get a claim like anyone else.
+    expect(result.created).toBe(true);
+    expect(result.memberId).toEqual(expect.any(String));
     expect(await db.member.count({ where: { clinicId: aurea.id } })).toBe(2);
   });
 });
