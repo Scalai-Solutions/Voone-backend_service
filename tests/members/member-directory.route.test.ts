@@ -12,6 +12,7 @@ const summary = {
   id: "m-1",
   name: "Verónica Navarro",
   identity: "+34612345678",
+  email: null,
   templateId: "tpl-1",
   templateName: "AURÉA Clinic Club",
   points: 500,

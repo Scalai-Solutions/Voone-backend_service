@@ -1,4 +1,6 @@
-import { WalletProviderType, WalletSyncStatus } from "@prisma/client";
+import { PointsTransactionKind, WalletProviderType, WalletSyncStatus } from "@prisma/client";
+import { timingSafeEqual } from "node:crypto";
+
 import { Router, type RequestHandler } from "express";
 import { z } from "zod";
 
@@ -19,6 +21,11 @@ import { clientIp } from "../../common/utils/client-ip";
 import { config } from "../../config/env";
 import { prisma } from "../../infrastructure/database/prisma-client";
 import { findClinicBySlug } from "../../modules/clinics/clinic.service";
+import { PointsService } from "../../modules/points/points.service";
+import {
+  PrismaMemberPointsCache,
+  PrismaPointsLedgerRepository
+} from "../../modules/points/prisma-points-ledger.repository";
 import {
   MEMBER_NAME_MAX,
   MEMBER_NAME_MIN,
@@ -40,6 +47,19 @@ export const membersRouter = Router();
 
 const requireStaff = createRequireStaffKey(config.STAFF_API_KEY);
 const walletSyncQueue = buildWalletSyncQueue(prisma);
+
+/**
+ * Null when no redemption secret is configured, which is the same condition that makes
+ * the wallet subsystem unusable. The endpoint answers 503 rather than writing points
+ * that nothing could ever render onto a card.
+ */
+const pointsService = walletSyncQueue
+  ? new PointsService(
+      new PrismaPointsLedgerRepository(prisma),
+      new PrismaMemberPointsCache(prisma),
+      walletSyncQueue
+    )
+  : null;
 
 const emptyWalletStatus = {
   google: "not_added",
@@ -123,7 +143,12 @@ const staffMemberSchema = z
 const creditSchema = z.object({
   points: z.coerce.number().int().min(1).max(1_000_000),
   label: z.string().trim().min(1).max(120),
-  referralCode: z.string().trim().max(80).optional()
+  referralCode: z.string().trim().max(80).optional(),
+  /**
+   * Required, and minted by the caller. A key generated here would differ on every
+   * retry, which does not merely fail to stop double-crediting — it guarantees it.
+   */
+  idempotencyKey: z.string().min(8, "idempotencyKey is required").max(128)
 });
 
 const codeSchema = z.string().trim().min(16).max(128);
@@ -288,11 +313,21 @@ const resolveMemberByRedemptionCode = async (code: string, clinicId?: string) =>
     select: { id: true }
   });
 
-  const match = members.find(
-    (member) => deriveRedemptionCode(member.id, config.CARD_REDEMPTION_SECRET!) === code
-  );
+  // Constant-time, and deliberately without an early return: `find` with `===` leaks
+  // the code character by character through comparison timing, and stopping at the
+  // first hit makes the response time depend on where the member sits in the list.
+  const wanted = Buffer.from(code);
+  let match: string | null = null;
 
-  return match ? findMemberForSummary(match.id) : null;
+  for (const member of members) {
+    const candidate = Buffer.from(deriveRedemptionCode(member.id, config.CARD_REDEMPTION_SECRET!));
+
+    if (candidate.length === wanted.length && timingSafeEqual(candidate, wanted)) {
+      match = member.id;
+    }
+  }
+
+  return match ? findMemberForSummary(match) : null;
 };
 
 /**
@@ -328,23 +363,14 @@ const rateLimitAnonymous: RequestHandler = (req, res, next) => {
 // origin directly, so guarding /health on an edge header would fail every probe.
 const requireEdge = createRequireEdge(config.EDGE_SHARED_SECRET);
 
-membersRouter.get(
-  "/clinics/:slug/members",
-  requireStaff,
-  asyncHandler(async (req, res) => {
-    const clinic = await findClinicBySlug(prisma, req.params.slug);
-    const members = await prisma.member.findMany({
-      where: { clinicId: clinic.id, erasedAt: null },
-      include: {
-        clinic: { include: { template: true } },
-        walletObjects: true
-      },
-      orderBy: { createdAt: "desc" }
-    });
-
-    res.json(members.map(toMemberSummary));
-  })
-);
+/**
+ * GET /clinics/:slug/members lives in member-directory.route.ts.
+ *
+ * There were two implementations of it. This router mounts first, so this one won —
+ * and its summary hardcoded `history: []`, which meant the member detail page showed
+ * no history at all while a ledger-backed implementation sat unreachable behind it.
+ * One route, one implementation.
+ */
 
 membersRouter.post(
   "/clinics/:slug/members/pass",
@@ -484,21 +510,39 @@ membersRouter.post(
       throw new MembershipValidationError(details);
     }
 
-    const updated = await prisma.member.updateMany({
+    if (!pointsService) {
+      throw new WalletConfigurationError(
+        "No redemption secret is configured, so points cannot be recorded."
+      );
+    }
+
+    const member = await prisma.member.findFirst({
       where: { id: req.params.memberId, clinicId: clinic.id, erasedAt: null },
-      data: { pointsBalance: { increment: parsed.data.points } }
+      select: { id: true }
     });
 
-    if (updated.count === 0) {
+    if (!member) {
       res.status(404).json({ code: "MEMBER_NOT_FOUND", message: "Member not found" });
       return;
     }
 
-    await walletSyncQueue?.enqueueMemberSync(req.params.memberId);
+    // Through the ledger, never straight at the cached column. This used to do
+    // `pointsBalance: { increment }`, which wrote no PointsTransaction row — so the
+    // movement had no audit trail, no idempotency, and never moved the member's
+    // lifetime total or tier. Worse, `npm run points:recompute` rebuilds that column
+    // FROM the ledger, so running the reconciliation tool would have silently erased
+    // every point credited this way.
+    await pointsService.credit({
+      memberId: member.id,
+      clinicId: clinic.id,
+      points: parsed.data.points,
+      kind: PointsTransactionKind.EARN,
+      reason: parsed.data.label,
+      sourceRef: parsed.data.referralCode,
+      idempotencyKey: parsed.data.idempotencyKey
+    });
 
-    const member = await findMemberForSummary(req.params.memberId);
-
-    res.json(toMemberSummary(member));
+    res.json(toMemberSummary(await findMemberForSummary(member.id)));
   })
 );
 
