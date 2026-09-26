@@ -30,6 +30,11 @@ interface GoogleLoyaltyObject {
   accountId?: string;
   loyaltyPoints?: GoogleLoyaltyPoints;
   state?: LoyaltyObjectState;
+  textModulesData?: Array<{
+    id: string;
+    header: string;
+    body: string;
+  }>;
   messages?: GoogleMessage[];
   rewardsTier?: string;
   classReference?: {
@@ -112,6 +117,26 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
   const client = getAuthenticatedClient();
   const body: GoogleLoyaltyObjectPatchRequest = {};
 
+  if (patch.loyaltyPointsBalance !== undefined || patch.tier !== undefined) {
+    const existingObject = await client.request<GoogleLoyaltyObject>(
+      `/loyaltyObject/${encodeURIComponent(objectId)}`
+    );
+    const existingTextModules = existingObject.textModulesData ?? [];
+
+    body.textModulesData = upsertTextModules(existingTextModules, [
+      ...(patch.loyaltyPointsBalance !== undefined
+        ? [
+            {
+              id: "points",
+              header: existingObject.loyaltyPoints?.label ?? "Points",
+              body: String(patch.loyaltyPointsBalance)
+            }
+          ]
+        : []),
+      ...(patch.tier !== undefined ? [{ id: "tier", header: "Tier", body: patch.tier }] : [])
+    ]);
+  }
+
   if (patch.loyaltyPointsBalance !== undefined) {
     body.loyaltyPoints = {
       balance: {
@@ -145,6 +170,25 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
     method: "PATCH",
     body
   });
+};
+
+const upsertTextModules = (
+  existingModules: NonNullable<GoogleLoyaltyObject["textModulesData"]>,
+  updates: Array<{ id: string; header: string; body: string }>
+) => {
+  const nextModules = [...existingModules];
+
+  for (const update of updates) {
+    const index = nextModules.findIndex((module) => module.id === update.id);
+
+    if (index >= 0) {
+      nextModules[index] = { ...nextModules[index], ...update };
+    } else {
+      nextModules.push(update);
+    }
+  }
+
+  return nextModules;
 };
 
 export const getObject = async (objectId: string): Promise<LoyaltyObjectInput | null> => {

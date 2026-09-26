@@ -1,8 +1,12 @@
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import type { PrismaClient } from "@prisma/client";
 
 import { config } from "../../config/env";
 
 const SCRYPT_KEY_LENGTH = 64;
+const PASSWORD_SETUP_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+type DatabaseClient = PrismaClient;
 
 export const generateTemporaryPassword = (): string => {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
@@ -31,14 +35,36 @@ export const verifyPassword = (password: string, storedHash: string | null): boo
   return expected.length === received.length && timingSafeEqual(expected, received);
 };
 
-export const sendOnboardingCredentialsEmail = async ({
+export const passwordSetupUrl = (token: string): string =>
+  `${config.FRONTEND_URL.replace(/\/$/, "")}/set-password/${encodeURIComponent(token)}`;
+
+export const createPasswordSetupLink = async (
+  db: DatabaseClient,
+  userId: string,
+  now: Date = new Date()
+): Promise<{ token: string; url: string; expiresAt: Date }> => {
+  const expiresAt = new Date(now.getTime() + PASSWORD_SETUP_TOKEN_TTL_MS);
+
+  await db.passwordSetupToken.updateMany({
+    where: { userId, usedAt: null, expiresAt: { gt: now } },
+    data: { usedAt: now }
+  });
+
+  const setupToken = await db.passwordSetupToken.create({
+    data: { userId, expiresAt }
+  });
+
+  return { token: setupToken.id, url: passwordSetupUrl(setupToken.id), expiresAt };
+};
+
+export const sendPasswordSetupEmail = async ({
   to,
   clinicName,
-  password
+  setupUrl
 }: {
   to: string;
   clinicName: string;
-  password: string;
+  setupUrl: string;
 }): Promise<void> => {
   if (!config.SENDGRID_API_KEY || !config.SENDGRID_FROM_EMAIL) {
     throw new Error("SendGrid is not configured");
@@ -61,16 +87,16 @@ export const sendOnboardingCredentialsEmail = async ({
           value: [
             `Your Voone account for ${clinicName} is ready.`,
             "",
-            `Login: ${loginUrl}`,
+            `Set your password: ${setupUrl}`,
+            `Login after setup: ${loginUrl}`,
             `Email: ${to}`,
-            `Temporary password: ${password}`,
             "",
-            "Please sign in and change this password after your first access."
+            "This link can be used once."
           ].join("\n")
         },
         {
           type: "text/html",
-          value: `<p>Your Voone account for <strong>${clinicName}</strong> is ready.</p><p><a href="${loginUrl}">Open Voone</a></p><p><strong>Email:</strong> ${to}<br/><strong>Temporary password:</strong> ${password}</p><p>Please sign in and change this password after your first access.</p>`
+          value: `<p>Your Voone account for <strong>${clinicName}</strong> is ready.</p><p><a href="${setupUrl}">Set your password</a></p><p><strong>Email:</strong> ${to}</p><p>This link can be used once. After setup, sign in at <a href="${loginUrl}">Voone</a>.</p>`
         }
       ]
     })

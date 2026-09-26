@@ -23,10 +23,15 @@ const withEnv = async <T>(
   });
 
   vi.resetModules();
+  vi.doMock("dotenv", () => ({
+    default: { config: vi.fn() },
+    config: vi.fn()
+  }));
 
   try {
     return await run(await import("../../src/wallet/wallet.composition"));
   } finally {
+    vi.doUnmock("dotenv");
     process.env = original;
     vi.resetModules();
   }
