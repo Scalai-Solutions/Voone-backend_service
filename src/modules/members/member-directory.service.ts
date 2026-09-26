@@ -10,6 +10,8 @@ export interface MemberSummary {
   name: string;
   /** Phone if we have one, otherwise email. What reception uses to recognise someone. */
   identity: string;
+  /** Carried separately from identity, which collapses to one of the two. */
+  email: string | null;
   templateId: string;
   templateName: string;
   points: number;
@@ -144,6 +146,7 @@ export class MemberDirectoryService {
       id: member.id,
       name: member.name,
       identity: member.phone ?? member.email ?? "",
+      email: member.email,
       // A clinic with no template yet is a real state — it is provisioned before its card
       // is designed — so this reports empty rather than refusing to list the member.
       templateId: member.clinic.template?.id ?? "",
