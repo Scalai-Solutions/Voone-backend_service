@@ -38,6 +38,11 @@ class ServerSideProvider implements WalletPassProvider {
     };
   }
 
+  async installArtifact(): Promise<InstallArtifact> {
+    // Google can re-hand the same save link: the object lives on their servers.
+    return { kind: "link", url: "https://pay.google.com/gp/v/save/token" };
+  }
+
   async syncCard(): Promise<void> {}
 
   async revokeCard(): Promise<void> {}
@@ -55,6 +60,17 @@ class DeviceBoundProvider implements WalletPassProvider, PassDeviceRegistry {
 
   async provisionProgram(): Promise<ProgramRef> {
     return { provider: this.provider, externalId: "pass.com.voone.loyalty" };
+  }
+
+  async installArtifact(): Promise<InstallArtifact> {
+    // Apple rebuilds the file. It must reuse the token the pass already carries — a
+    // fresh one would lock out every device already registered against that pass.
+    return {
+      kind: "file",
+      buffer: Buffer.from("rebuilt"),
+      fileName: "card.pkpass",
+      contentType: "application/vnd.apple.pkpass"
+    };
   }
 
   async syncCard(): Promise<void> {}

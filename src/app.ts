@@ -1,8 +1,8 @@
 import cors from "cors";
-import express, { ErrorRequestHandler, RequestHandler } from "express";
+import express, { RequestHandler } from "express";
 import path from "node:path";
 
-import { isAppError } from "./common/errors/app-error";
+import { errorHandler } from "./common/middleware/error-handler";
 import { config } from "./config/env";
 import { v1Router } from "./routes/v1";
 
@@ -21,24 +21,6 @@ export const buildApp = () => {
 
   const notFoundHandler: RequestHandler = (_req, res) => {
     res.status(404).json({ message: "Not found" });
-  };
-
-  const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
-    if (isAppError(error)) {
-      if (!error.expose) {
-        console.error(`[${error.code}] ${error.message}`);
-      }
-
-      res.status(error.statusCode).json({
-        code: error.code,
-        message: error.expose ? error.message : "Internal server error"
-      });
-      return;
-    }
-
-    const message = error instanceof Error ? error.message : "Internal server error";
-
-    res.status(500).json({ message });
   };
 
   app.use(notFoundHandler);

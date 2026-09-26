@@ -30,6 +30,16 @@ export interface WalletPassProvider {
   issueCard(card: LoyaltyCard, program: ProgramRef): Promise<IssuedCard>;
 
   /**
+   * Rebuilds the installable artifact for a card that ALREADY exists.
+   *
+   * Distinct from issueCard, and the distinction matters: issuing again would mint a new
+   * authentication token, and for Apple that locks out every device already registered
+   * against the pass. This is the "my phone died, give me my card again" path, and it
+   * must reuse what the pass already has.
+   */
+  installArtifact(ref: CardRef, card: LoyaltyCard): Promise<InstallArtifact>;
+
+  /**
    * Make the card's current state authoritative and propagate it as far as this provider
    * can reach.
    *

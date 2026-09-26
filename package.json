@@ -18,7 +18,8 @@
     "copy:pass-assets": "node scripts/copy-pass-assets.mjs",
     "apple:check": "tsx scripts/check-apple-wallet.ts",
     "worker": "node dist/jobs/wallet-sync.worker.js",
-    "worker:dev": "tsx watch src/jobs/wallet-sync.worker.ts"
+    "worker:dev": "tsx watch src/jobs/wallet-sync.worker.ts",
+    "points:recompute": "tsx scripts/recompute-points.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
