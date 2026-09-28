@@ -19,7 +19,8 @@
     "apple:check": "tsx scripts/check-apple-wallet.ts",
     "worker": "node dist/jobs/wallet-sync.worker.js",
     "worker:dev": "tsx watch src/jobs/wallet-sync.worker.ts",
-    "points:recompute": "tsx scripts/recompute-points.ts"
+    "points:recompute": "tsx scripts/recompute-points.ts",
+    "points:backfill": "tsx scripts/backfill-points-ledger.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
