@@ -184,8 +184,8 @@ describe("provisionClinic", () => {
         benefitsText: "Priority booking and birthday rewards.",
         infoText: "Show this pass before payment.",
         tierRewards: [
-          { name: "Bronze", rewardText: "Welcome reward" },
-          { name: "Gold", rewardText: "Priority booking" }
+          { name: "Bronze", rewardText: "Welcome reward", minLifetimePoints: 0 },
+          { name: "Gold", rewardText: "Priority booking", minLifetimePoints: 3000 }
         ],
         milestoneRewards: {
           milestoneCount: 10,
@@ -204,8 +204,9 @@ describe("provisionClinic", () => {
       benefitsText: "Priority booking and birthday rewards.",
       infoText: "Show this pass before payment.",
       tierRewards: [
-        { name: "Bronze", rewardText: "Welcome reward" },
-        { name: "Gold", rewardText: "Priority booking" }
+        // Defaults fill in the milestone rhythm; the floors are what the clinic chose.
+        { name: "Bronze", rewardText: "Welcome reward", minLifetimePoints: 0 },
+        { name: "Gold", rewardText: "Priority booking", minLifetimePoints: 3000 }
       ],
       milestoneRewards: {
         milestoneCount: 10,
