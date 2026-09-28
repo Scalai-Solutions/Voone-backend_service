@@ -20,7 +20,8 @@
     "worker": "node dist/jobs/wallet-sync.worker.js",
     "worker:dev": "tsx watch src/jobs/wallet-sync.worker.ts",
     "points:recompute": "tsx scripts/recompute-points.ts",
-    "points:backfill": "tsx scripts/backfill-points-ledger.ts"
+    "points:backfill": "tsx scripts/backfill-points-ledger.ts",
+    "tiers:backfill": "tsx scripts/backfill-tier-points.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
