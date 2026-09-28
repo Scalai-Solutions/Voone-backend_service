@@ -8,6 +8,7 @@ import type {
   PointsLedgerRepository,
   SpendOutcome
 } from "./points-ledger.repository";
+import { tierRewardsSchema } from "../templates/templates.schema";
 import type { TierDefinition } from "./tier-engine";
 
 /** Postgres unique violation, surfaced by Prisma as P2002. */
@@ -77,15 +78,44 @@ export class PrismaPointsLedgerRepository implements PointsLedgerRepository {
     };
   }
 
+  /**
+   * The tiers the clinic authored during onboarding.
+   *
+   * Read from ClinicTemplate.tierRewards rather than a table of its own. There used to
+   * be both: a TierThreshold table this method queried, and the tierRewards JSON the
+   * wizard actually writes. The table was never populated by anything, so every card
+   * showed no tier while the wizard appeared to have configured five — two models of
+   * one concept, neither able to rank a member.
+   *
+   * One source now, and it is the one a clinic edits. A scale is at most twenty rows
+   * and the template is already loaded wherever a card is built, so a separate indexed
+   * table bought nothing and cost a synchronisation path — which is exactly what
+   * produced the other duplications this month.
+   */
   async tierScaleFor(clinicId: string): Promise<TierDefinition[]> {
-    const own = await this.read({ clinicId });
+    const template = await this.prisma.clinicTemplate.findUnique({
+      where: { clinicId },
+      select: { tierRewards: true }
+    });
 
-    // All of a clinic's tiers or none of them. Merging a partial clinic scale over the
-    // global one would produce a third scale that nobody authored and nobody could
-    // predict from either source.
-    if (own.length > 0) return own;
+    const parsed = tierRewardsSchema.safeParse(template?.tierRewards ?? []);
 
-    return this.read({ clinicId: null });
+    if (!parsed.success) {
+      // A template authored before tiers carried points, or hand-edited into something
+      // unusable. Reported and treated as no scale: putting a member in a tier derived
+      // from a scale we could not read would be worse than showing none.
+      console.warn(`[points] clinic ${clinicId} has an unreadable tier scale; no tier applied.`);
+
+      return [];
+    }
+
+    return parsed.data.map((tier) => ({
+      // The name is the code: it is what the clinic typed, what the pass shows, and
+      // there is no second identifier for a clinic owner to keep in step.
+      code: tier.name,
+      label: tier.name,
+      minLifetimePoints: tier.minLifetimePoints
+    }));
   }
 
   async appendSpend(entry: PointsEntry): Promise<SpendOutcome> {
@@ -146,16 +176,6 @@ export class PrismaPointsLedgerRepository implements PointsLedgerRepository {
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
     );
-  }
-
-  private async read(where: { clinicId: string | null }): Promise<TierDefinition[]> {
-    const rows = await this.prisma.tierThreshold.findMany({
-      where,
-      orderBy: { minLifetimePoints: "asc" },
-      select: { code: true, label: true, minLifetimePoints: true }
-    });
-
-    return rows;
   }
 }
 

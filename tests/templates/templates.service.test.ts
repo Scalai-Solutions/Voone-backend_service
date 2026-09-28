@@ -50,11 +50,41 @@ const INPUT = {
   benefitsText: "Acumula puntos en cada visita.",
   infoText: "Presenta tu pase en recepción.",
   tierRewards: [
-    { name: "Bronze", rewardText: "" },
-    { name: "Silver", rewardText: "" },
-    { name: "Gold", rewardText: "" },
-    { name: "Platinum", rewardText: "" },
-    { name: "Diamond", rewardText: "" }
+    {
+      name: "Bronze",
+      rewardText: "",
+      minLifetimePoints: 0,
+      milestoneCount: 5,
+      pointsToNextMilestone: 200
+    },
+    {
+      name: "Silver",
+      rewardText: "",
+      minLifetimePoints: 1000,
+      milestoneCount: 5,
+      pointsToNextMilestone: 400
+    },
+    {
+      name: "Gold",
+      rewardText: "",
+      minLifetimePoints: 3000,
+      milestoneCount: 5,
+      pointsToNextMilestone: 800
+    },
+    {
+      name: "Platinum",
+      rewardText: "",
+      minLifetimePoints: 7000,
+      milestoneCount: 5,
+      pointsToNextMilestone: 1600
+    },
+    {
+      name: "Diamond",
+      rewardText: "",
+      minLifetimePoints: 15000,
+      milestoneCount: 5,
+      pointsToNextMilestone: 3000
+    }
   ],
   milestoneRewards: {
     milestoneCount: 10,

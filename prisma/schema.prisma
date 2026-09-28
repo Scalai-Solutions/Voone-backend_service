@@ -43,12 +43,11 @@ model Clinic {
   notificationsMonthlyQuota  Int @default(8)
   notificationsUsedThisMonth Int @default(0)
 
-  users          User[]
-  treatments     ClinicTreatment[]
-  template       ClinicTemplate?
-  members        Member[]
-  pointsLedger   PointsTransaction[]
-  tierThresholds TierThreshold[]
+  users        User[]
+  treatments   ClinicTreatment[]
+  template     ClinicTemplate?
+  members      Member[]
+  pointsLedger PointsTransaction[]
 }
 
 model User {
@@ -406,43 +405,6 @@ model PointsTransaction {
   @@index([memberId, createdAt])
   /// Metrics go the other way: a clinic's movements over a period.
   @@index([clinicId, createdAt])
-}
-
-/// A tier and the lifetime points it takes to reach it.
-///
-/// Rows with a clinicId belong to that clinic; rows without are the global default that
-/// every clinic falls back to. That shape costs one nullable column today and means the
-/// second clinic wanting its own scale is a config change rather than a migration of a
-/// live table whose values already determine real members' tiers.
-///
-/// Driven by LIFETIME points earned, never by the spendable balance: redeeming a reward
-/// must not demote anyone. That is the whole reason the two balances are separate.
-model TierThreshold {
-  id       String  @id @default(uuid())
-  clinicId String?
-
-  /// Cascade, NOT Prisma's default of SET NULL for a nullable relation. SET NULL would
-  /// turn a deleted clinic's bespoke tiers into GLOBAL defaults, silently rewriting the
-  /// scale for every other clinic on the platform.
-  clinic Clinic? @relation(fields: [clinicId], references: [id], onDelete: Cascade)
-
-  /// Stable key used in code and in the pass. Display text belongs in the template.
-  code  String
-  /// What a member is shown, in the clinic's language.
-  label String
-
-  /// Inclusive floor. The tier a member holds is the highest one they have reached.
-  minLifetimePoints Int
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  /// Postgres treats NULLs as distinct, so this constrains per-clinic rows only. The
-  /// global rows are constrained by a partial unique index in the migration — without
-  /// it, two conflicting global defaults could coexist and the fallback would be
-  /// whichever one the planner happened to return.
-  @@unique([clinicId, code])
-  @@index([clinicId, minLifetimePoints])
 }
 
 /// A short-lived permission to download one member's pass, handed to the browser that
