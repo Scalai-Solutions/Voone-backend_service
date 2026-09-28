@@ -92,5 +92,9 @@ export interface PointsLedgerRepository {
  * appending to an immutable record.
  */
 export interface MemberPointsCache {
-  write(memberId: string, spendable: number, tierCode: string | null): Promise<void>;
+  write(
+    memberId: string,
+    balance: { spendable: number; lifetime: number },
+    tierCode: string | null
+  ): Promise<void>;
 }

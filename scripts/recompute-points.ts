@@ -43,7 +43,7 @@ const main = async (): Promise<void> => {
       erasedAt: null,
       ...(onlyClinic ? { clinicId: onlyClinic } : {})
     },
-    select: { id: true, clinicId: true, pointsBalance: true, tier: true }
+    select: { id: true, clinicId: true, pointsBalance: true, lifetimePoints: true, tier: true }
   });
 
   // One scale per clinic rather than per member: a clinic with a thousand members would
@@ -63,18 +63,23 @@ const main = async (): Promise<void> => {
     const tier = tierFor(balance.lifetime, scale);
     const tierCode = tier?.code ?? null;
 
-    if (member.pointsBalance === balance.spendable && member.tier === tierCode) {
+    if (
+      member.pointsBalance === balance.spendable &&
+      member.lifetimePoints === balance.lifetime &&
+      member.tier === tierCode
+    ) {
       continue;
     }
 
     drifted += 1;
     console.log(
       `  ${member.id}  points ${member.pointsBalance} -> ${balance.spendable}` +
+        `  lifetime ${member.lifetimePoints} -> ${balance.lifetime}` +
         `  tier ${member.tier ?? "none"} -> ${tierCode ?? "none"}`
     );
 
     if (apply) {
-      await cache.write(member.id, balance.spendable, tierCode);
+      await cache.write(member.id, balance, tierCode);
     }
   }
 

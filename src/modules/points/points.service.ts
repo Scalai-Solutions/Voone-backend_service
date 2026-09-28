@@ -165,7 +165,7 @@ export class PointsService {
 
     const tier = tierFor(balance.lifetime, scale);
 
-    await this.cache.write(memberId, balance.spendable, tier?.code ?? null);
+    await this.cache.write(memberId, balance, tier?.code ?? null);
 
     // Never awaited for its result and never allowed to throw: the member is standing at
     // reception, and a wallet outage must not look like a failed transaction.

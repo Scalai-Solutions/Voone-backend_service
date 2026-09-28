@@ -182,9 +182,18 @@ model Member {
   phone String?
 
   email         String?
-  pointsBalance Int      @default(0)
+  pointsBalance Int     @default(0)
   tier          String?
-  createdAt     DateTime @default(now())
+
+  /// Lifetime points earned, cached alongside pointsBalance and for the same reason:
+  /// a pass is rebuilt on issue, on every sync and on every device fetch, and a member
+  /// with years of visits must not cost a full ledger scan each time.
+  ///
+  /// Distinct from pointsBalance, which is spendable. This one never decreases when a
+  /// member redeems, which is what stops spending a reward demoting them — and it is
+  /// what the milestone and tier engines read.
+  lifetimePoints Int      @default(0)
+  createdAt      DateTime @default(now())
 
   /// The submission verbatim. Without it, changing the normalization rules is data loss
   /// rather than a backfill.

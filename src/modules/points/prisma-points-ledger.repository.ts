@@ -188,10 +188,21 @@ export class PrismaPointsLedgerRepository implements PointsLedgerRepository {
 export class PrismaMemberPointsCache implements MemberPointsCache {
   constructor(private readonly prisma: PrismaClient) {}
 
-  async write(memberId: string, spendable: number, tierCode: string | null): Promise<void> {
+  async write(
+    memberId: string,
+    balance: { spendable: number; lifetime: number },
+    tierCode: string | null
+  ): Promise<void> {
     await this.prisma.member.update({
       where: { id: memberId },
-      data: { pointsBalance: spendable, tier: tierCode }
+      // All three together: a pass reads the balance, the tier and the milestone
+      // rhythm in one go, and writing them separately would let a card render a tier
+      // the lifetime total does not justify.
+      data: {
+        pointsBalance: balance.spendable,
+        lifetimePoints: balance.lifetime,
+        tier: tierCode
+      }
     });
   }
 }
