@@ -5,6 +5,8 @@ import { WalletConfigurationError } from "../common/errors/wallet.errors";
 import { LoyaltyCardAssembler } from "./engine/loyalty-card-assembler";
 import { LoyaltyCard, loyaltyCardSchema } from "./engine/loyalty-card";
 import { deriveRedemptionCode } from "./engine/redemption-code";
+import { milestoneProgress } from "../modules/points/milestone-engine";
+import { tierRewardsSchema } from "../modules/templates/templates.schema";
 
 /**
  * Assembles a card from Member.pointsBalance and Member.tier.
@@ -20,6 +22,44 @@ import { deriveRedemptionCode } from "./engine/redemption-code";
  * The ledger is always right; the card can briefly be stale. That trade is the reason
  * the recompute script exists.
  */
+/**
+ * "PRÓXIMA RECOMPENSA" on the pass, and the progress bar beside it.
+ *
+ * Undefined rather than a placeholder when it cannot be computed — the pass builder
+ * omits both fields entirely, which is the honest rendering of "this clinic has not
+ * configured a ladder yet". A zeroed bar would look like a member who has earned
+ * nothing.
+ */
+const rewardFor = (
+  member: { tier: string | null; lifetimePoints: number },
+  tierRewards: unknown
+): { description: string; progressPercent: number } | undefined => {
+  if (!member.tier) return undefined;
+
+  const parsed = tierRewardsSchema.safeParse(tierRewards);
+
+  if (!parsed.success) return undefined;
+
+  const tier = parsed.data.find((candidate) => candidate.name === member.tier);
+
+  if (!tier) return undefined;
+
+  const progress = milestoneProgress(member.lifetimePoints, tier);
+
+  // The clinic's own words where it wrote them, and a plain count where it did not.
+  // Never a treatment name: tierRewards is marketing copy the clinic authored, and the
+  // ledger it is derived from holds no treatments.
+  const description = tier.rewardText?.trim()
+    ? tier.rewardText.trim()
+    : `Recompensa ${Math.min(progress.reached + 1, progress.total)} de ${progress.total}`;
+
+  return {
+    // The pass caps this at 120 characters, and a clinic can type more than that.
+    description: description.slice(0, 120),
+    progressPercent: progress.progressPercent
+  };
+};
+
 export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
   constructor(
     private readonly prisma: PrismaClient,
@@ -47,6 +87,12 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
       );
     }
 
+    // The clinic's authored ladder, and where this member stands on it. Parsed rather
+    // than trusted: a template written before tiers carried points yields a scale that
+    // cannot rank anybody, and a card with no reward is better than one showing
+    // progress against a tier the member is not in.
+    const reward = rewardFor(member, template.tierRewards);
+
     const card = {
       memberId: member.id,
       serialNumber: `voone-member-${member.id}`,
@@ -58,6 +104,7 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
         memberSince: member.memberSince ? String(member.memberSince) : undefined
       },
       points: member.pointsBalance,
+      reward,
       template: {
         programName: template.programName,
         backgroundColor: template.hexBackgroundColor,

@@ -68,10 +68,19 @@ class Ledger implements PointsLedgerRepository {
 }
 
 class Cache implements MemberPointsCache {
-  writes: { memberId: string; spendable: number; tierCode: string | null }[] = [];
+  writes: {
+    memberId: string;
+    spendable: number;
+    lifetime: number;
+    tierCode: string | null;
+  }[] = [];
 
-  async write(memberId: string, spendable: number, tierCode: string | null) {
-    this.writes.push({ memberId, spendable, tierCode });
+  async write(
+    memberId: string,
+    balance: { spendable: number; lifetime: number },
+    tierCode: string | null
+  ) {
+    this.writes.push({ memberId, ...balance, tierCode });
   }
 
   get last() {
@@ -120,7 +129,12 @@ describe("PointsService", () => {
     it("resolves the tier from lifetime points", async () => {
       await credit(2100, "visit-1");
 
-      expect(cache.last).toEqual({ memberId: MEMBER, spendable: 2100, tierCode: "gold" });
+      expect(cache.last).toEqual({
+        memberId: MEMBER,
+        spendable: 2100,
+        lifetime: 2100,
+        tierCode: "gold"
+      });
     });
 
     it("asks the wallets to catch up", async () => {
@@ -230,7 +244,12 @@ describe("PointsService", () => {
         idempotencyKey: "undo-oops"
       });
 
-      expect(cache.last).toEqual({ memberId: MEMBER, spendable: 0, tierCode: "bronze" });
+      expect(cache.last).toEqual({
+        memberId: MEMBER,
+        spendable: 0,
+        lifetime: 0,
+        tierCode: "bronze"
+      });
     });
   });
 
