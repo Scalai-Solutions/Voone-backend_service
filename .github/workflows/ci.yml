@@ -64,3 +64,9 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      # The certificate watch is green for a year at a time, so its own logic is never
+      # exercised by the scheduled run until the month it finally matters. These feed it
+      # dates directly instead.
+      - name: Certificate watch logic
+        run: bash tests/shell/certificate-expiry.test.sh

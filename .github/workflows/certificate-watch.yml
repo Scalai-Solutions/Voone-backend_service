@@ -1,0 +1,56 @@
+# Turns "somebody has to remember" into something that fails on its own.
+#
+# The Apple Pass Type ID certificate expires once a year. When it lapses, Voone cannot
+# sign a .pkpass at all: no new member can be issued a card, and no existing card can be
+# updated again. There is no degraded mode and no error a member would see — passes simply
+# stop changing — so the failure is silent until a clinic notices points are not moving.
+#
+# The alternative control was a calendar entry 13 months out, which is the weakest kind:
+# it depends on one person still being here, still using that calendar, and still
+# connecting the reminder to what it was for.
+name: Certificate watch
+
+on:
+  schedule:
+    # Mondays, 08:00 UTC. A weekly cadence is enough for something measured in months, and
+    # a weekday morning means the failure email lands when somebody can act on it.
+    - cron: "0 8 * * 1"
+  # So the renewal can be verified immediately afterwards rather than next Monday.
+  workflow_dispatch:
+
+# A read-only probe of our own API. Checkout is only for the script below.
+permissions:
+  contents: read
+
+jobs:
+  apple-certificate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check what the Apple pass certificate has left
+        env:
+          # Overridable so a staging deployment can be watched with the same workflow.
+          API_BASE: ${{ vars.VOONE_API_BASE || 'https://api.voone.ai' }}
+          STAFF_KEY: ${{ secrets.STAFF_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          # A missing secret must fail, not pass. The whole point of this job is to be the
+          # thing that notices, and a watch that goes quiet when its own configuration
+          # breaks is worse than no watch — it reports "fine" forever.
+          if [ -z "${STAFF_KEY}" ]; then
+            echo "::error::STAFF_API_KEY is not set, so the certificate cannot be checked."
+            exit 1
+          fi
+
+          # --fail-with-body so an HTTP error is both fatal and readable. Without it curl
+          # exits 0 on a 401 and the body would be interpreted as a wallet payload.
+          # ||true keeps the body for the script to explain, rather than dying here with
+          # curl's exit code and no message.
+          response="$(curl --silent --show-error --fail-with-body --max-time 30 \
+            -H "x-voone-staff-key: ${STAFF_KEY}" \
+            "${API_BASE}/api/v1/admin/wallet" || true)"
+
+          printf '%s' "${response}" | bash scripts/check-certificate-expiry.sh
