@@ -13,7 +13,7 @@ export const aureaGoldPass: LoyaltyCard = {
   redemptionCode: "MFRGGZDFMZTWQ2LKNNWG23Q",
   tier: "Gold",
   clinic: { name: "AURÉA" },
-  member: { fullName: "Verónica Navarro", memberSince: "2026" },
+  member: { fullName: "Verónica Navarro", code: "K7M2Q", memberSince: "2026" },
   points: 1250,
   template: {
     programName: "Clinic Club",
@@ -38,7 +38,7 @@ export const brandNewMemberPass: LoyaltyCard = {
   serialNumber: "voone-member-000999",
   redemptionCode: "GEZDGNBVGY3TQOJQGEZDGNA",
   clinic: { name: "AURÉA" },
-  member: { fullName: "Nueva Socia" },
+  member: { fullName: "Nueva Socia", code: "T4XBN" },
   points: 0,
   template: {
     programName: "Clinic Club",
@@ -46,4 +46,15 @@ export const brandNewMemberPass: LoyaltyCard = {
     pointsLabel: "Saldo Beauty",
     tierLabel: "Nivel"
   }
+};
+
+/**
+ * A member who signed up before Member.code existed and has not been backfilled yet.
+ *
+ * The only case in which a card falls back to printing the pass serial number, so it has
+ * a fixture of its own rather than being spelled out at each call site.
+ */
+export const uncodedMemberPass: LoyaltyCard = {
+  ...aureaGoldPass,
+  member: { fullName: "Socia Antigua", memberSince: "2024" }
 };

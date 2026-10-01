@@ -4,9 +4,16 @@ import { MEMBER_NAME_MAX, MEMBER_NAME_MIN, cleanMemberName, isPlausibleName } fr
 import { normalizeSpanishMobile } from "./phone-es";
 
 /**
- * Lowercase, hyphen-separated, no leading, trailing or doubled hyphen. Rejects path
- * traversal, uppercase (Postgres unique is case-sensitive, and a slug is typed off a
- * poster), and Cyrillic homoglyphs before any of it reaches a query.
+ * A slug ARRIVING from a poster, which is a different question from a slug being created.
+ *
+ * Deliberately still permissive: lowercase, hyphen-separated, up to 64 characters. New
+ * clinics get a five-character slug (see newClinicSlugSchema), but the clinics
+ * provisioned before that have long ones printed on posters hanging in their waiting
+ * rooms. Narrowing this schema to five would 404 every one of those.
+ *
+ * So this one only ever widens. It rejects path traversal, uppercase (Postgres unique is
+ * case-sensitive, and a slug is typed off a poster) and Cyrillic homoglyphs before any of
+ * it reaches a query — nothing about length.
  */
 export const clinicSlugSchema = z
   .string()
@@ -17,6 +24,26 @@ export const clinicSlugSchema = z
     // which is noise to someone typing a clinic name; when this schema only ever saw slugs
     // from a URL the message was never read by anyone.
     "Usa minúsculas, números y guiones (por ejemplo: clinica-nova)"
+  );
+
+/**
+ * A slug being CREATED for a new clinic. Exactly five characters, and the authority.
+ *
+ * It is printed on a QR poster and typed off that poster by hand, so length is the whole
+ * point: `voone.ai/alta/k7m2q` can be read across a reception desk and
+ * `voone.ai/alta/clinica-aurea` cannot.
+ *
+ * No hyphens, because a separator inside five characters only costs legibility. The
+ * alphabet is wider than the generator's — the generator avoids i/l/o/0/1 so its output
+ * survives being read aloud, but an operator who deliberately types one of those for a
+ * clinic that wants a recognisable slug is making a choice, not a mistake, and nothing
+ * downstream cares.
+ */
+export const newClinicSlugSchema = z
+  .string()
+  .regex(
+    /^[a-z0-9]{5}$/,
+    "El identificador debe tener exactamente 5 caracteres: minúsculas y números (por ejemplo: k7m2q)"
   );
 
 /** Kept in step with SignupSource in membership.service.ts. */

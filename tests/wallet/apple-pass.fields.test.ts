@@ -10,7 +10,8 @@ import {
 import {
   aureaGoldPass,
   brandNewMemberPass,
-  fullyPopulatedPass
+  fullyPopulatedPass,
+  uncodedMemberPass
 } from "../fixtures/loyalty-card.fixture";
 
 const allKeys = (fields: ReturnType<typeof buildStoreCardFields>): string[] =>
@@ -62,13 +63,36 @@ describe("buildStoreCardFields", () => {
     expect(back.info).toContain("recepción");
   });
 
-  it("repeats the redemption code and serial on the back as readable fallbacks", () => {
+  it("prints the member's own number on the back, not the pass serial", () => {
+    // What reception asks for out loud, and what a member reads off their card. The
+    // serial is `voone-member-<uuid>`: 49 characters, and nobody has ever read one out.
     const back = Object.fromEntries(
       buildStoreCardFields(aureaGoldPass).backFields.map((f) => [f.key, f.value])
     );
 
     expect(back.redemptionCode).toBe(aureaGoldPass.redemptionCode);
-    expect(back.serialNumber).toBe(aureaGoldPass.serialNumber);
+    expect(back.memberCode).toBe("K7M2Q");
+    expect(back.serialNumber).toBeUndefined();
+  });
+
+  it("falls back to the serial for a member the backfill has not reached", () => {
+    // Members who signed up before Member.code existed. The long serial is poor, but a
+    // card with no identifier on it at all is worse — reception would have nothing to
+    // look them up by if the barcode will not scan.
+    const back = Object.fromEntries(
+      buildStoreCardFields(uncodedMemberPass).backFields.map((f) => [f.key, f.value])
+    );
+
+    expect(back.memberCode).toBeUndefined();
+    expect(back.serialNumber).toBe(uncodedMemberPass.serialNumber);
+  });
+
+  it("never prints both numbers, which would read as two different identities", () => {
+    for (const card of [aureaGoldPass, uncodedMemberPass]) {
+      const keys = buildStoreCardFields(card).backFields.map((f) => f.key);
+
+      expect(keys.filter((key) => key === "memberCode" || key === "serialNumber")).toHaveLength(1);
+    }
   });
 
   it("omits credit and reward when no column backs them", () => {

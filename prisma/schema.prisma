@@ -185,6 +185,23 @@ model Member {
   pointsBalance Int     @default(0)
   tier          String?
 
+  /// The number printed on the member's card and read aloud at reception.
+  ///
+  /// Five characters, unique within the clinic rather than globally: every lookup is
+  /// already clinic-scoped, and a per-clinic namespace keeps five characters viable
+  /// however many clinics Voone signs.
+  ///
+  /// Not the pass serial number, which stays derived from this row's id — that serial is
+  /// half of Apple's (passTypeIdentifier, serialNumber) key, so changing it on an issued
+  /// pass orphans the copy already installed on the member's phone.
+  ///
+  /// Not the barcode either: the barcode is a credential and lives in redemption-code.ts
+  /// at 130 bits. This is an identifier, and is expected to be legible.
+  ///
+  /// Nullable because members created before it existed have none. Postgres treats NULLs
+  /// as distinct in a unique index, so the index below holds while the backfill runs.
+  code String?
+
   /// Lifetime points earned, cached alongside pointsBalance and for the same reason:
   /// a pass is rebuilt on issue, on every sync and on every device fetch, and a member
   /// with years of visits must not cost a full ledger scan each time.
@@ -254,6 +271,7 @@ model Member {
   passClaims    PassClaim[]
 
   @@unique([clinicId, phone])
+  @@unique([clinicId, code])
   @@index([clinicId])
 }
 

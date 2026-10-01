@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   clinicSlugSchema,
-  membershipSignupSchema
+  membershipSignupSchema,
+  newClinicSlugSchema
 } from "../../src/modules/members/membership.schema";
 
 const VALID = {
@@ -183,6 +184,49 @@ describe("clinicSlugSchema", () => {
     ]) {
       expect(clinicSlugSchema.safeParse(slug).success, JSON.stringify(slug)).toBe(false);
     }
+  });
+});
+
+describe("clinicSlugSchema, against the clinics that already exist", () => {
+  it("still resolves a slug longer than five characters", () => {
+    // THE regression guard for the five-character cap. New clinics get five characters,
+    // but the clinics onboarded before that have "clinica-aurea" printed on a QR poster
+    // hanging in their waiting room. Narrowing this schema to match the new rule would
+    // 404 every one of those posters — which is why there are two schemas and not one.
+    for (const slug of ["clinica-aurea", "lumiere", "med-skin-2", "a".repeat(64)]) {
+      expect(clinicSlugSchema.safeParse(slug).success, slug).toBe(true);
+    }
+  });
+});
+
+describe("newClinicSlugSchema", () => {
+  it("takes exactly five lowercase characters", () => {
+    for (const slug of ["k7m2q", "aurea", "77777", "a1b2c"]) {
+      expect(newClinicSlugSchema.safeParse(slug).success, slug).toBe(true);
+    }
+  });
+
+  it("rejects anything a poster could not carry in five characters", () => {
+    for (const slug of [
+      "aure",
+      "aurea7",
+      "AUREA",
+      "au rea",
+      "au-ea",
+      "aure/",
+      "clinica-aurea",
+      "аurea",
+      ""
+    ]) {
+      expect(newClinicSlugSchema.safeParse(slug).success, JSON.stringify(slug)).toBe(false);
+    }
+  });
+
+  it("explains the rule, and says five, because an operator reads this", () => {
+    const result = newClinicSlugSchema.safeParse("clinica-aurea");
+
+    expect(result.success).toBe(false);
+    expect(result.success === false && result.error.issues[0].message).toContain("5");
   });
 });
 

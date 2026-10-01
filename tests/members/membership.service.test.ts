@@ -46,6 +46,16 @@ const uniqueViolation = () =>
 const db = (member: Record<string, unknown>) => ({ member }) as unknown as PrismaClient;
 
 describe("signUpMember", () => {
+  it("gives the new member the code that goes on their card", async () => {
+    // The number reception asks for out loud. Assigned at insert rather than later, so
+    // there is never a member whose card has no identifier on it.
+    const create = vi.fn().mockResolvedValue({ id: "m1" });
+
+    await signUpMember(db({ create }), AUREA, INPUT, "qr_signup", NOW);
+
+    expect(create.mock.calls[0][0].data.code).toMatch(/^[A-HJ-KM-NP-Z2-9]{5}$/);
+  });
+
   it("returns no member id for a number that already existed", async () => {
     // Load-bearing, not a convenience. The route mints a pass claim only when memberId
     // is present, so this null is what stops someone typing a stranger's number at the
@@ -74,6 +84,9 @@ describe("signUpMember", () => {
         phone: "+34612345678",
         phoneRaw: "612 34 56 78",
         phoneRegionAssumed: true,
+        // Generated, so only its presence is asserted here. Its shape is owned by the
+        // test above and by tests/common/short-code.test.ts.
+        code: expect.any(String),
         normalizerVersion: 1,
         memberSince: 2026,
         consentMarketing: true,

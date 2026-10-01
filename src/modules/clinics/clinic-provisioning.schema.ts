@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { clinicSlugSchema } from "../members/membership.schema";
+import { newClinicSlugSchema } from "../members/membership.schema";
 import { createTemplateSchema } from "../templates/templates.schema";
 
 /**
@@ -25,9 +25,19 @@ const DEFAULT_INFO_TEXT = "Presenta tu pase en recepción para sumar puntos.";
  * design and then make clinic-specific edits before the first Wallet class is created.
  */
 export const provisionClinicSchema = z.object({
-  // Written down, never derived from the name: this becomes a URL printed on a physical
-  // poster, so renaming the clinic must not invalidate it.
-  slug: clinicSlugSchema,
+  /**
+   * Optional, and generated when absent.
+   *
+   * Never derived from the clinic's name, for two reasons. It becomes a URL printed on a
+   * physical poster, so renaming the clinic must not invalidate it — and at five
+   * characters a name-derived slug cannot be distinct anyway: half the clinics in Spain
+   * would want "clini".
+   *
+   * An operator may still type one, for a clinic that wants a slug it recognises. A typed
+   * slug that is already taken is reported back to them; a generated one is simply
+   * regenerated. See provisionClinic.
+   */
+  slug: newClinicSlugSchema.optional(),
 
   name: z.string().trim().min(2, "Añade el nombre de la clínica").max(48),
   addressLine: z.string().trim().min(2, "Añade la dirección").max(120),

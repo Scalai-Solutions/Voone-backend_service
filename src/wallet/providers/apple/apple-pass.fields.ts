@@ -92,9 +92,25 @@ export const buildStoreCardFields = (data: LoyaltyCard): StoreCardFields => {
   }
 
   // Readable fallbacks for reception when the barcode will not scan.
+  backFields.push({
+    key: "redemptionCode",
+    label: PASS_LABELS.redemptionCode,
+    value: data.redemptionCode
+  });
+
+  // The member's own number, which is the one reception asks for out loud.
+  //
+  // The serial number is the fallback rather than the other way round, and it is only
+  // reached by a member who signed up before Member.code existed and has not yet been
+  // backfilled. It is `voone-member-<uuid>` — 49 characters nobody can read off a phone
+  // screen — but it is still better than a card with no identifier on it at all. It
+  // cannot simply be shortened: Apple identifies an installed pass by
+  // (passTypeIdentifier, serialNumber), so changing it orphans the copy already on the
+  // member's phone.
   backFields.push(
-    { key: "redemptionCode", label: PASS_LABELS.redemptionCode, value: data.redemptionCode },
-    { key: "serialNumber", label: PASS_LABELS.serialNumber, value: data.serialNumber }
+    data.member.code
+      ? { key: "memberCode", label: PASS_LABELS.memberCode, value: data.member.code }
+      : { key: "serialNumber", label: PASS_LABELS.serialNumber, value: data.serialNumber }
   );
 
   return {

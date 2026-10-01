@@ -101,6 +101,7 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
       clinic: { name: member.clinic.name },
       member: {
         fullName: member.name,
+        code: member.code ?? undefined,
         memberSince: member.memberSince ? String(member.memberSince) : undefined
       },
       points: member.pointsBalance,
