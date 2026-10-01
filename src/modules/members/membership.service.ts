@@ -1,7 +1,8 @@
-import type { Clinic, PrismaClient } from "@prisma/client";
+import type { Clinic, Member, PrismaClient } from "@prisma/client";
 import type { z } from "zod";
 
 import { isUniqueViolation } from "../../common/utils/prisma-errors";
+import { withMemberCode } from "./member-code";
 import { madridYear } from "./member-since";
 import type { MembershipSignupInput, signupSourceSchema } from "./membership.schema";
 import { NORMALIZER_VERSION } from "./phone-es";
@@ -41,30 +42,10 @@ export const signUpMember = async (
   source: SignupSource,
   now: Date = new Date()
 ): Promise<SignUpResult> => {
-  try {
-    const created = await db.member.create({
-      data: {
-        clinicId: clinic.id,
-        name: input.name,
-        email: input.email,
-        phone: input.phone,
-        phoneRaw: input.phoneRaw,
-        phoneRegionAssumed: input.phoneRegionAssumed,
-        birthYear: input.birthYear,
-        sex: input.sex,
-        normalizerVersion: NORMALIZER_VERSION,
-        memberSince: madridYear(now),
-        consentMarketing: input.consentMarketing,
-        consentMarketingAt: input.consentMarketing ? now : null,
-        consentSource: source,
-        // Snapshot, not a reference: the evidence is which notice the member was shown,
-        // and a foreign key to an editable row would destroy it.
-        privacyPolicyVersion: clinic.privacyPolicyVersion,
-        lastSignupAt: now
-      }
-    });
+  let created: Member | null;
 
-    return { created: true, memberId: created.id };
+  try {
+    created = await insertMember(db, clinic, input, source, now);
   } catch (error) {
     if (!isUniqueViolation(error, ["clinicId", "phone"])) {
       throw error;
@@ -91,4 +72,45 @@ export const signUpMember = async (
 
     return { created: false, memberId: null };
   }
+
+  return { created: true, memberId: created.id };
 };
+
+/**
+ * Inserts the member.
+ *
+ * A conflict on the phone number is deliberately NOT handled here: that one means a
+ * re-scan at reception, which is an ordinary event handled by signUpMember. Only the
+ * generated code is retried, inside withMemberCode.
+ */
+const insertMember = (
+  db: PrismaClient,
+  clinic: Clinic,
+  input: MembershipSignupInput,
+  source: SignupSource,
+  now: Date
+): Promise<Member> =>
+  withMemberCode((code) =>
+    db.member.create({
+      data: {
+        clinicId: clinic.id,
+        name: input.name,
+        email: input.email,
+        phone: input.phone,
+        phoneRaw: input.phoneRaw,
+        phoneRegionAssumed: input.phoneRegionAssumed,
+        birthYear: input.birthYear,
+        sex: input.sex,
+        code,
+        normalizerVersion: NORMALIZER_VERSION,
+        memberSince: madridYear(now),
+        consentMarketing: input.consentMarketing,
+        consentMarketingAt: input.consentMarketing ? now : null,
+        consentSource: source,
+        // Snapshot, not a reference: the evidence is which notice the member was shown,
+        // and a foreign key to an editable row would destroy it.
+        privacyPolicyVersion: clinic.privacyPolicyVersion,
+        lastSignupAt: now
+      }
+    })
+  );

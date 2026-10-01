@@ -120,6 +120,71 @@ describe("sign-up against a real database", () => {
   });
 });
 
+describe("the member code, against a real unique index", () => {
+  it("gives a new member a five-character code", async () => {
+    const { memberId } = await signUpMember(db, aurea, input(), "qr_signup");
+    const member = await db.member.findUniqueOrThrow({ where: { id: memberId as string } });
+
+    expect(member.code).toMatch(/^[A-HJ-KM-NP-Z2-9]{5}$/);
+  });
+
+  it("lets two clinics hand out the SAME code to different members", async () => {
+    // Why the index is [clinicId, code] and not a global unique. Every lookup is already
+    // clinic-scoped, and a per-clinic namespace is what keeps five characters viable
+    // however many clinics Voone signs — a global one would start colliding in earnest
+    // at a few thousand members in total.
+    const first = await signUpMember(db, aurea, input(), "qr_signup");
+    const mine = await db.member.findUniqueOrThrow({ where: { id: first.memberId as string } });
+
+    const second = await signUpMember(db, lumiere, input(), "qr_signup");
+
+    await db.member.update({
+      where: { id: second.memberId as string },
+      data: { code: mine.code }
+    });
+
+    expect(
+      await db.member.count({
+        where: { code: mine.code, clinicId: { in: [aurea.id, lumiere.id] } }
+      })
+    ).toBe(2);
+  });
+
+  it("refuses the same code twice within ONE clinic", async () => {
+    const first = await signUpMember(db, aurea, input(), "qr_signup");
+    const mine = await db.member.findUniqueOrThrow({ where: { id: first.memberId as string } });
+
+    const second = await signUpMember(
+      db,
+      aurea,
+      input({ phone: "622222222", name: "Otra Socia" }),
+      "qr_signup"
+    );
+
+    await expect(
+      db.member.update({ where: { id: second.memberId as string }, data: { code: mine.code } })
+    ).rejects.toMatchObject({ code: "P2002" });
+  });
+
+  it("holds while members still have no code, because NULLs are distinct", async () => {
+    // What makes the column nullable and the backfill separable: the unique index has to
+    // be satisfiable the moment the migration creates it, with every existing row NULL.
+    const first = await signUpMember(db, aurea, input(), "qr_signup");
+    const second = await signUpMember(
+      db,
+      aurea,
+      input({ phone: "622222222", name: "Otra Socia" }),
+      "qr_signup"
+    );
+
+    for (const id of [first.memberId, second.memberId]) {
+      await db.member.update({ where: { id: id as string }, data: { code: null } });
+    }
+
+    expect(await db.member.count({ where: { clinicId: aurea.id, code: null } })).toBe(2);
+  });
+});
+
 describe("database constraints", () => {
   it("rejects a phone that was never normalized", async () => {
     // The unique index only detects duplicates if every writer agrees on the canonical

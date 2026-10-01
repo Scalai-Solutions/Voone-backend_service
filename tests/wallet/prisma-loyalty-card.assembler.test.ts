@@ -21,6 +21,7 @@ const member = {
   name: "Verónica Navarro",
   pointsBalance: 1250,
   tier: "Gold",
+  code: "K7M2Q",
   memberSince: 2026,
   erasedAt: null,
   clinic: { id: "clinic-1", name: "AURÉA", template }
@@ -61,6 +62,20 @@ describe("PrismaLoyaltyCardAssembler", () => {
     const card = await assemblerFor({ ...member, tier: null }).assemble(member.id);
 
     expect(card.tier).toBeUndefined();
+  });
+
+  it("carries the member's own number onto the card", async () => {
+    const card = await assemblerFor(member).assemble(member.id);
+
+    expect(card.member.code).toBe("K7M2Q");
+  });
+
+  it("omits the code for a member the backfill has not reached", async () => {
+    // Nullable in the database, optional on the card. The pass falls back to the serial
+    // number rather than printing nothing — see apple-pass.fields.ts.
+    const card = await assemblerFor({ ...member, code: null }).assemble(member.id);
+
+    expect(card.member.code).toBeUndefined();
   });
 
   it("omits the join year when none was recorded", async () => {

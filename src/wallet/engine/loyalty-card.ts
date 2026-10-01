@@ -68,6 +68,24 @@ export const loyaltyCardSchema = z
 
     member: z.object({
       fullName: z.string().min(1).max(64),
+      /**
+       * The number the member reads off their own card, and reads aloud at reception.
+       *
+       * Deliberately separate from serialNumber, which is a key rather than a number a
+       * person uses: Apple identifies an installed pass by (passTypeIdentifier,
+       * serialNumber), so that one is derived from Member.id and can never be shortened
+       * without orphaning passes already on members' phones.
+       *
+       * Optional because members who signed up before Member.code existed have none
+       * until the backfill reaches them, and a card is still perfectly usable without it.
+       */
+      // Exactly MEMBER_CODE_ALPHABET: no I, L, O, 0 or 1, because it gets read aloud.
+      // Spelled as a range rather than imported so this file keeps its rule that nothing
+      // provider- or infrastructure-specific reaches the domain shape.
+      code: z
+        .string()
+        .regex(/^[A-HJ-KM-NP-Z2-9]{5}$/, "must be five unambiguous uppercase characters")
+        .optional(),
       // Member stores only createdAt, so the year is derived and may be absent.
       memberSince: z
         .string()

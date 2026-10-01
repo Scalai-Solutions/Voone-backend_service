@@ -8,6 +8,13 @@ export type ProviderStatus = "added" | "not_added" | "unavailable" | "failed";
 export interface MemberSummary {
   id: string;
   name: string;
+  /**
+   * The five-character number printed on the member's card.
+   *
+   * Null for members who signed up before Member.code existed and have not been
+   * backfilled. See scripts/backfill-member-codes.ts.
+   */
+  code: string | null;
   /** Phone if we have one, otherwise email. What reception uses to recognise someone. */
   identity: string;
   /** Carried separately from identity, which collapses to one of the two. */
@@ -74,6 +81,12 @@ export class MemberDirectoryService {
           ? {
               OR: [
                 { name: { contains: q, mode: "insensitive" as const } },
+                // The number on the member's card. Matched exactly rather than by
+                // substring, and case-insensitively because the code is printed
+                // uppercase and nobody types it that way: five characters are short
+                // enough that `contains` would make "K7M2Q" match on fragments of
+                // unrelated codes, which is the opposite of what a reception desk needs.
+                { code: { equals: q, mode: "insensitive" as const } },
                 { phone: { contains: q } },
                 { email: { contains: q, mode: "insensitive" as const } }
               ]
@@ -106,6 +119,7 @@ export class MemberDirectoryService {
     return {
       id: true,
       name: true,
+      code: true,
       phone: true,
       email: true,
       pointsBalance: true,
@@ -124,6 +138,7 @@ export class MemberDirectoryService {
   private toSummary(member: {
     id: string;
     name: string;
+    code: string | null;
     phone: string | null;
     email: string | null;
     pointsBalance: number;
@@ -145,6 +160,11 @@ export class MemberDirectoryService {
     return {
       id: member.id,
       name: member.name,
+      // The number on the member's card, which is what reception asks for out loud.
+      // Null for anyone the backfill has not reached — rendered as absent rather than
+      // substituted, because an identifier that is sometimes a different kind of thing
+      // is worse than one that is sometimes missing.
+      code: member.code,
       identity: member.phone ?? member.email ?? "",
       email: member.email,
       // A clinic with no template yet is a real state — it is provisioned before its card

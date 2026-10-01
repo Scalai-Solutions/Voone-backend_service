@@ -21,6 +21,7 @@ import { clientIp } from "../../common/utils/client-ip";
 import { config } from "../../config/env";
 import { prisma } from "../../infrastructure/database/prisma-client";
 import { findClinicBySlug } from "../../modules/clinics/clinic.service";
+import { withMemberCode } from "../../modules/members/member-code";
 import { PrismaPassClaimService } from "../../modules/members/pass-claim.service";
 import { PointsService } from "../../modules/points/points.service";
 import {
@@ -82,6 +83,9 @@ const providerStatus = (status: WalletSyncStatus) =>
 const toMemberSummary = (member: Awaited<ReturnType<typeof findMemberForSummary>>) => ({
   id: member.id,
   name: member.name,
+  // The number on the member's card. Null for anyone the backfill has not reached, so
+  // the dashboard has to render its absence rather than assume it.
+  code: member.code,
   identity: member.phone ?? member.email ?? member.id,
   email: member.email,
   templateId: member.clinic.template?.id ?? "",
@@ -418,21 +422,24 @@ membersRouter.post(
             lastSignupAt: new Date()
           }
         })
-      : await prisma.member.create({
-          data: {
-            clinicId: clinic.id,
-            name: parsed.data.name,
-            email: parsed.data.email,
-            phone: parsed.data.phone,
-            phoneRaw: parsed.data.phoneRaw,
-            phoneRegionAssumed: parsed.data.phoneRegionAssumed,
-            memberSince: new Date().getFullYear(),
-            consentMarketing: false,
-            consentSource: "staff_entry",
-            privacyPolicyVersion: clinic.privacyPolicyVersion,
-            lastSignupAt: new Date()
-          }
-        });
+      : await withMemberCode((code) =>
+          prisma.member.create({
+            data: {
+              clinicId: clinic.id,
+              name: parsed.data.name,
+              email: parsed.data.email,
+              phone: parsed.data.phone,
+              phoneRaw: parsed.data.phoneRaw,
+              phoneRegionAssumed: parsed.data.phoneRegionAssumed,
+              code,
+              memberSince: new Date().getFullYear(),
+              consentMarketing: false,
+              consentSource: "staff_entry",
+              privacyPolicyVersion: clinic.privacyPolicyVersion,
+              lastSignupAt: new Date()
+            }
+          })
+        );
 
     const wallet = await issueWalletPasses(member.id);
     const summary = await findMemberForSummary(member.id);

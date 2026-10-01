@@ -14,7 +14,7 @@ import {
 const PRESET = { id: "p1", name: "Classic Gold", hexBackgroundColor: "#ead0bd" };
 
 const VALID = {
-  slug: "clinica-nova",
+  slug: "nova7",
   name: "Clínica Nova",
   addressLine: "Carrer de Balmes 12",
   pincode: "08007",
@@ -141,10 +141,29 @@ describe("provisionClinicSchema", () => {
     expect(parsed.hexBackgroundColor).toBe("#ff0000");
   });
 
-  it("applies the same slug rules as the public URL", () => {
-    for (const slug of ["Clinica-Nova", "clinica nova", "clinica/nova", "-nova", ""]) {
+  it("takes exactly five characters, and nothing else", () => {
+    // Deliberately STRICTER than the slug rules for an incoming URL. A slug is printed on
+    // a QR poster and typed off it by hand, so the length is the feature; the clinics
+    // provisioned before this cap still have long slugs on posters in their waiting
+    // rooms, which is why clinicSlugSchema stays permissive — see its own test.
+    for (const slug of ["nova", "nova77", "Nova7", "nov a", "nov/a", "no-va", "clinica-nova", ""]) {
       expect(provisionClinicSchema.safeParse({ ...VALID, slug }).success, slug).toBe(false);
     }
+
+    expect(provisionClinicSchema.safeParse({ ...VALID, slug: "nova7" }).success).toBe(true);
+    expect(provisionClinicSchema.safeParse({ ...VALID, slug: "77777" }).success).toBe(true);
+  });
+
+  it("accepts no slug at all, because one gets generated", () => {
+    // What the onboarding wizard sends by default. At five characters there is no slug
+    // derivable from a clinic's name that stays distinct, so nobody is asked to invent
+    // one on an onboarding call.
+    const { slug, ...withoutSlug } = VALID;
+    const parsed = provisionClinicSchema.safeParse(withoutSlug);
+
+    expect(slug).toBeDefined();
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.slug).toBeUndefined();
   });
 
   it("rejects a clinic name longer than the pass can carry", () => {
@@ -246,6 +265,58 @@ describe("provisionClinic", () => {
 
     await expect(attempt).rejects.toThrow(ClinicSlugTakenError);
     await expect(attempt).rejects.toMatchObject({ statusCode: 409, expose: true });
+  });
+
+  it("generates a slug when the operator did not choose one", async () => {
+    const { handle, clinicCreate } = db();
+    const { slug, ...withoutSlug } = VALID;
+
+    await provisionClinic(handle as never, provisionClinicSchema.parse(withoutSlug));
+
+    expect(slug).toBeDefined();
+    expect(clinicCreate.mock.calls[0][0].data.slug).toMatch(/^[a-z0-9]{5}$/);
+  });
+
+  it("picks another slug when a GENERATED one is already taken", async () => {
+    // A collision the operator did not cause and cannot resolve: one in 28.6 million,
+    // and asking someone on an onboarding call to pick again would be absurd.
+    const taken = new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+      code: "P2002",
+      clientVersion: Prisma.prismaVersion.client,
+      meta: { target: ["slug"] }
+    });
+    const { handle, clinicCreate } = db();
+
+    clinicCreate.mockRejectedValueOnce(taken);
+
+    const { slug, ...withoutSlug } = VALID;
+    await provisionClinic(handle as never, provisionClinicSchema.parse(withoutSlug));
+
+    expect(slug).toBeDefined();
+    expect(clinicCreate).toHaveBeenCalledTimes(2);
+    // A fresh slug, not the same one retried — which would collide forever.
+    expect(clinicCreate.mock.calls[1][0].data.slug).not.toBe(
+      clinicCreate.mock.calls[0][0].data.slug
+    );
+  });
+
+  it("does not quietly re-slug a clinic whose slug the operator TYPED", async () => {
+    // The other half of the rule above. A typed slug is a decision, so a collision is
+    // the operator's to resolve: silently giving the clinic a different one would mean
+    // the poster they are about to print says something else.
+    const taken = new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+      code: "P2002",
+      clientVersion: Prisma.prismaVersion.client,
+      meta: { target: ["slug"] }
+    });
+    const { handle, clinicCreate } = db();
+
+    clinicCreate.mockRejectedValueOnce(taken);
+
+    await expect(
+      provisionClinic(handle as never, provisionClinicSchema.parse(VALID))
+    ).rejects.toThrow(ClinicSlugTakenError);
+    expect(clinicCreate).toHaveBeenCalledOnce();
   });
 
   it("does not disguise an unrelated database failure as a slug conflict", async () => {

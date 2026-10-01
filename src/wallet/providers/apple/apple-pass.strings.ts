@@ -15,6 +15,7 @@ export const PASS_LABELS = {
   info: "INFORMACIÓN",
   memberSince: "SOCIA DESDE",
   redemptionCode: "CÓDIGO DE CANJE",
+  memberCode: "NÚMERO DE SOCIA",
   serialNumber: "NÚMERO DE PASE",
   pointsChangeMessage: "Tu saldo ahora es %@",
   tierChangeMessage: "Ahora eres nivel %@"
@@ -31,6 +32,7 @@ export const PASS_TRANSLATIONS: Record<string, Record<string, string>> = {
     INFORMACIÓN: "INFORMATION",
     "SOCIA DESDE": "MEMBER SINCE",
     "CÓDIGO DE CANJE": "REDEMPTION CODE",
+    "NÚMERO DE SOCIA": "MEMBER NUMBER",
     "NÚMERO DE PASE": "PASS NUMBER",
     "Tu saldo ahora es %@": "Your balance is now %@",
     "Ahora eres nivel %@": "You are now %@ tier"
