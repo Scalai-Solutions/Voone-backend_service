@@ -9,20 +9,32 @@
  * generator and one alphabet. A second implementation in SQL would be free to drift, and
  * the thing it would drift on is which characters a person can read aloud.
  *
- *   npm run members:backfill-codes              # report only
- *   npm run members:backfill-codes -- --apply   # write
+ *   npm run members:backfill-codes                       # report only
+ *   npm run members:backfill-codes -- --apply            # write, and refresh passes
+ *   npm run members:backfill-codes -- --apply --no-sync  # write only
  *
  * Safe to re-run: members who already have a code are skipped, never reassigned. A code
  * is printed on a card a member is holding, so changing one is not a backfill.
+ *
+ * Writing the column is NOT enough to get the code onto a phone. A device asks for
+ * "serials updated since <t>", which serialsUpdatedSince answers from
+ * WalletObject.lastSyncedAt — a column this script does not touch. So an installed pass
+ * would keep showing the old back indefinitely, and not even an APNs push would fix it,
+ * because the device's follow-up query would come back empty. Hence the sync.
  */
 
 import { PrismaClient } from "@prisma/client";
 
 import { isUniqueViolation } from "../src/common/utils/prisma-errors";
 import { generateMemberCode } from "../src/common/utils/short-code";
+import { buildWalletSyncQueue } from "../src/wallet/wallet.composition";
 
 const prisma = new PrismaClient();
-const apply = process.argv.slice(2).includes("--apply");
+const args = process.argv.slice(2);
+const apply = args.includes("--apply");
+
+/** For a run that only wants the column written — a large backfill split from its sync. */
+const skipSync = args.includes("--no-sync");
 
 /** Mirrors withMemberCode. Not shared with it because that one wraps a create. */
 const ATTEMPTS = 5;
@@ -63,7 +75,7 @@ const main = async (): Promise<void> => {
     return;
   }
 
-  let assigned = 0;
+  const assigned: string[] = [];
 
   for (const member of pending) {
     if (!apply) {
@@ -79,19 +91,59 @@ const main = async (): Promise<void> => {
     }
 
     console.log(`  ${member.clinicId}  ${member.name}: ${code}`);
-    assigned += 1;
+    assigned.push(member.id);
   }
 
   console.log(
     `\n  ${total} member(s), ${pending.length} without a code, ` +
-      (apply ? `${assigned} assigned.` : "none written. Re-run with --apply.")
+      (apply ? `${assigned.length} assigned.` : "none written. Re-run with --apply.")
   );
 
-  if (apply && assigned > 0) {
-    // The code is a field on the pass, so a card already installed shows the old back
-    // until it refreshes.
-    console.log("  Members' passes pick the code up on their next wallet sync.");
+  if (apply && assigned.length > 0) {
+    await refreshPasses(assigned);
   }
+};
+
+/**
+ * Rebuilds each member's pass, so the code reaches the card rather than only the column.
+ *
+ * Reports rather than throws when no queue is configured: the column is written either
+ * way, and a run that cannot reach Redis should say the passes are stale, not undo its
+ * own work.
+ */
+const refreshPasses = async (memberIds: string[]): Promise<void> => {
+  if (skipSync) {
+    console.log(`  --no-sync: ${memberIds.length} pass(es) still show the old back.`);
+    console.log("  Re-run without --no-sync, or credit each member, to refresh them.");
+
+    return;
+  }
+
+  const wallets = buildWalletSyncQueue(prisma);
+
+  if (!wallets) {
+    console.log("  No wallet sync configured, so no pass was refreshed.");
+    console.log("  Set CARD_REDEMPTION_SECRET (and WALLET_SYNC_MODE) and re-run.");
+
+    return;
+  }
+
+  let synced = 0;
+
+  for (const memberId of memberIds) {
+    try {
+      await wallets.enqueueMemberSync(memberId);
+      synced += 1;
+    } catch (error) {
+      // One member's wallet failing must not abandon the rest: the column is already
+      // written, and a missed sync is recoverable by re-running.
+      console.log(`  ${memberId}: sync failed — ${(error as Error).message}`);
+    }
+  }
+
+  await wallets.close();
+
+  console.log(`  ${synced} of ${memberIds.length} pass(es) queued for refresh.`);
 };
 
 main()
