@@ -84,9 +84,11 @@ const db = (over: Record<string, unknown> = {}) => {
   const templateCreate = vi.fn().mockResolvedValue(template);
   const treatmentDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
   const treatmentCreateMany = vi.fn().mockResolvedValue({ count: 1 });
+  const clinicFindUnique = vi.fn().mockResolvedValue(null);
 
   return {
     handle: {
+      clinic: { findUnique: clinicFindUnique },
       templatePreset: { findUnique: vi.fn().mockResolvedValue(PRESET) },
       // Runs the callback inline: the transaction is here for atomicity, not control flow.
       $transaction: vi.fn(async (fn: (tx: unknown) => unknown) =>
@@ -108,7 +110,8 @@ const db = (over: Record<string, unknown> = {}) => {
     clinicCreate,
     templateCreate,
     treatmentDeleteMany,
-    treatmentCreateMany
+    treatmentCreateMany,
+    clinicFindUnique
   };
 };
 

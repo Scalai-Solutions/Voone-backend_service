@@ -1,6 +1,9 @@
 import { WalletProviderType } from "@prisma/client";
 
-import { WalletSyncError } from "../../common/errors/wallet.errors";
+import {
+  WalletNotificationNotImplementedError,
+  WalletSyncError
+} from "../../common/errors/wallet.errors";
 import { LoyaltyCard } from "./loyalty-card";
 import {
   CardRef,
@@ -8,7 +11,12 @@ import {
   IssuedCard,
   ProgramRef,
   ProgramTemplate,
-  WalletPassProvider
+  WalletMerchantLocation,
+  WalletMessageInput,
+  WalletMessageRef,
+  WalletMessageTarget,
+  WalletPassProvider,
+  WalletPointsPatch
 } from "./wallet-pass-provider.interface";
 import { WalletSyncRepository } from "./wallet-sync.repository";
 
@@ -99,6 +107,26 @@ export abstract class BaseWalletProvider implements WalletPassProvider {
     await this.repo.forgetCard(ref);
   }
 
+  patchPoints(objectId: string, patch: WalletPointsPatch): Promise<void> {
+    return this.doPatchPoints(objectId, patch);
+  }
+
+  addObjectMessage(objectId: string, message: WalletMessageInput): Promise<WalletMessageRef> {
+    return this.doAddObjectMessage(objectId, message);
+  }
+
+  addClassMessage(classId: string, message: WalletMessageInput): Promise<WalletMessageRef> {
+    return this.doAddClassMessage(classId, message);
+  }
+
+  removeMessage(target: WalletMessageTarget, messageId: string): Promise<void> {
+    return this.doRemoveMessage(target, messageId);
+  }
+
+  setLocations(classId: string, locations: WalletMerchantLocation[]): Promise<void> {
+    return this.doSetLocations(classId, locations);
+  }
+
   protected abstract doProvision(template: ProgramTemplate): Promise<ProgramRef>;
 
   protected abstract doIssue(card: LoyaltyCard, program: ProgramRef): Promise<IssuedCard>;
@@ -106,6 +134,50 @@ export abstract class BaseWalletProvider implements WalletPassProvider {
   protected abstract doSync(ref: CardRef, card: LoyaltyCard): Promise<void>;
 
   protected abstract doRevoke(ref: CardRef): Promise<void>;
+
+  protected doPatchPoints(objectId: string, patch: WalletPointsPatch): Promise<void> {
+    void objectId;
+    void patch;
+
+    throw new WalletNotificationNotImplementedError();
+  }
+
+  protected doAddObjectMessage(
+    objectId: string,
+    message: WalletMessageInput
+  ): Promise<WalletMessageRef> {
+    void objectId;
+    void message;
+
+    throw new WalletNotificationNotImplementedError();
+  }
+
+  protected doAddClassMessage(
+    classId: string,
+    message: WalletMessageInput
+  ): Promise<WalletMessageRef> {
+    void classId;
+    void message;
+
+    throw new WalletNotificationNotImplementedError();
+  }
+
+  protected doRemoveMessage(target: WalletMessageTarget, messageId: string): Promise<void> {
+    void target;
+    void messageId;
+
+    throw new WalletNotificationNotImplementedError();
+  }
+
+  protected doSetLocations(
+    classId: string,
+    locations: WalletMerchantLocation[]
+  ): Promise<void> {
+    void classId;
+    void locations;
+
+    throw new WalletNotificationNotImplementedError();
+  }
 
   /**
    * How a member installs a card that already exists.

@@ -11,6 +11,7 @@ import {
   PrismaPointsLedgerRepository
 } from "../../modules/points/prisma-points-ledger.repository";
 import { PointsService } from "../../modules/points/points.service";
+import { buildNotificationService } from "../../modules/notifications/notification.composition";
 import { buildWalletSyncQueue } from "../../wallet/wallet.composition";
 import { createPointsRouter } from "./points.route";
 import { CardIssuer } from "../../modules/wallet/card-issuer";
@@ -29,16 +30,19 @@ import { createApplePassesRouter } from "./apple-passes.route";
 import { clinicsRouter } from "./clinics.route";
 import { healthRouter } from "./health.route";
 import { membersRouter } from "./members.route";
+import { createNotificationsRouter } from "./notifications.route";
 import { templatesRouter } from "./templates.route";
 import { walletTestRouter } from "./wallet-test.route";
 
 export const v1Router = Router();
+const notificationService = buildNotificationService(prisma);
 
 v1Router.use(healthRouter);
 v1Router.use(adminClinicsRouter);
 v1Router.use(clinicsRouter);
 v1Router.use(membersRouter);
 v1Router.use(templatesRouter);
+v1Router.use(createNotificationsRouter({ notifications: notificationService }));
 
 /**
  * Apple's pass web service.
@@ -80,7 +84,8 @@ if (walletSyncQueue) {
       points: new PointsService(
         new PrismaPointsLedgerRepository(prisma),
         new PrismaMemberPointsCache(prisma),
-        walletSyncQueue
+        walletSyncQueue,
+        notificationService
       ),
       // Resolved from the member rather than trusted from the body: a staff caller must
       // not be able to attribute a movement to a clinic that is not the member's.

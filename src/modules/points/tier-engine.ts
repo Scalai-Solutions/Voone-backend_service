@@ -14,6 +14,9 @@ export interface TierDefinition {
   label: string;
   /** Inclusive floor, in LIFETIME points earned. */
   minLifetimePoints: number;
+  /** Optional reward ladder metadata used for milestone notifications. */
+  milestoneCount?: number;
+  pointsToNextMilestone?: number;
 }
 
 /**

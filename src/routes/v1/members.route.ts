@@ -22,7 +22,6 @@ import { config } from "../../config/env";
 import { prisma } from "../../infrastructure/database/prisma-client";
 import { findClinicBySlug } from "../../modules/clinics/clinic.service";
 import { withMemberCode } from "../../modules/members/member-code";
-import { PrismaPassClaimService } from "../../modules/members/pass-claim.service";
 import { PointsService } from "../../modules/points/points.service";
 import {
   PrismaMemberPointsCache,
@@ -49,13 +48,6 @@ export const membersRouter = Router();
 
 const requireStaff = createRequireStaffKey(config.STAFF_API_KEY);
 const walletSyncQueue = buildWalletSyncQueue(prisma);
-
-/**
- * Null when no redemption secret is configured, which is the same condition that makes
- * the wallet subsystem unusable. The endpoint answers 503 rather than writing points
- * that nothing could ever render onto a card.
- */
-const passClaims = new PrismaPassClaimService(prisma);
 
 const pointsService = walletSyncQueue
   ? new PointsService(
@@ -684,8 +676,8 @@ membersRouter.post(
      *
      * Still never a 201: the status code stays 200 for both.
      */
-    const claimToken = result.memberId ? await passClaims.mint(result.memberId) : undefined;
+    const wallet = result.memberId ? await issueWalletPasses(result.memberId) : undefined;
 
-    res.status(200).json({ status: "ok", claimToken });
+    res.status(200).json({ status: "ok", wallet });
   })
 );

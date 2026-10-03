@@ -53,6 +53,43 @@ export interface WalletPassProvider {
 
   /** Void a card, e.g. after erasure. Idempotent: revoking twice is not an error. */
   revokeCard(ref: CardRef): Promise<void>;
+
+  patchPoints?(objectId: string, patch: WalletPointsPatch): Promise<void>;
+
+  addObjectMessage?(objectId: string, message: WalletMessageInput): Promise<WalletMessageRef>;
+
+  addClassMessage?(classId: string, message: WalletMessageInput): Promise<WalletMessageRef>;
+
+  removeMessage?(target: WalletMessageTarget, messageId: string): Promise<void>;
+
+  setLocations?(classId: string, locations: WalletMerchantLocation[]): Promise<void>;
+}
+
+export interface WalletPointsPatch {
+  points: number;
+  tier?: string;
+  notify: boolean;
+}
+
+export interface WalletMessageInput {
+  header: string;
+  body: string;
+  notify: boolean;
+  actionUrl?: string;
+}
+
+export interface WalletMessageRef {
+  messageId: string;
+}
+
+export type WalletMessageTarget =
+  | { kind: "class"; id: string }
+  | { kind: "object"; id: string };
+
+export interface WalletMerchantLocation {
+  name: string;
+  latitude: number;
+  longitude: number;
 }
 
 /**

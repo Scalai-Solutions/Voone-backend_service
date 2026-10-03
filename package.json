@@ -12,6 +12,7 @@
     "format:check": "prettier --check .",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "tsx prisma/seed.ts",
+    "geo:set-test": "tsx scripts/set-test-geo.ts",
     "wallet:verify-class-links": "tsx scripts/verify-google-wallet-class-links.ts",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -19,10 +20,11 @@
     "apple:check": "tsx scripts/check-apple-wallet.ts",
     "worker": "node dist/jobs/wallet-sync.worker.js",
     "worker:dev": "tsx watch src/jobs/wallet-sync.worker.ts",
+    "notifications:worker": "node dist/jobs/notifications.worker.js",
+    "notifications:worker:dev": "tsx watch src/jobs/notifications.worker.ts",
     "points:recompute": "tsx scripts/recompute-points.ts",
     "points:backfill": "tsx scripts/backfill-points-ledger.ts",
-    "tiers:backfill": "tsx scripts/backfill-tier-points.ts",
-    "members:backfill-codes": "tsx scripts/backfill-member-codes.ts"
+    "tiers:backfill": "tsx scripts/backfill-tier-points.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

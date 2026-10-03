@@ -8,7 +8,8 @@ import { findClinicBySlug, toPublicClinic } from "../../modules/clinics/clinic.s
 export const clinicsRouter = Router();
 
 /**
- * Resolves the slug on a QR poster to the branding the sign-up form renders with.
+ * Resolves the public key on a QR poster to the branding the sign-up form renders with.
+ * New posters use clinic UUIDs; old slug posters still resolve.
  *
  * Read-only and public: the form has to show the clinic's own name and colour before
  * anyone submits anything, and hardcoding the list in the frontend would mean a deploy

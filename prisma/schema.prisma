@@ -43,11 +43,15 @@ model Clinic {
   notificationsMonthlyQuota  Int @default(8)
   notificationsUsedThisMonth Int @default(0)
 
-  users        User[]
-  treatments   ClinicTreatment[]
-  template     ClinicTemplate?
-  members      Member[]
-  pointsLedger PointsTransaction[]
+  users                 User[]
+  treatments            ClinicTreatment[]
+  template              ClinicTemplate?
+  members               Member[]
+  pointsLedger          PointsTransaction[]
+  notifications         Notification[]
+  notificationSettings  ClinicNotificationSettings?
+  notificationLocations ClinicLocation[]
+  notificationAuditLogs NotificationAuditLog[]
 }
 
 model User {
@@ -185,23 +189,6 @@ model Member {
   pointsBalance Int     @default(0)
   tier          String?
 
-  /// The number printed on the member's card and read aloud at reception.
-  ///
-  /// Five characters, unique within the clinic rather than globally: every lookup is
-  /// already clinic-scoped, and a per-clinic namespace keeps five characters viable
-  /// however many clinics Voone signs.
-  ///
-  /// Not the pass serial number, which stays derived from this row's id — that serial is
-  /// half of Apple's (passTypeIdentifier, serialNumber) key, so changing it on an issued
-  /// pass orphans the copy already installed on the member's phone.
-  ///
-  /// Not the barcode either: the barcode is a credential and lives in redemption-code.ts
-  /// at 130 bits. This is an identifier, and is expected to be legible.
-  ///
-  /// Nullable because members created before it existed have none. Postgres treats NULLs
-  /// as distinct in a unique index, so the index below holds while the backfill runs.
-  code String?
-
   /// Lifetime points earned, cached alongside pointsBalance and for the same reason:
   /// a pass is rebuilt on issue, on every sync and on every device fetch, and a member
   /// with years of visits must not cost a full ledger scan each time.
@@ -266,12 +253,12 @@ model Member {
   /// unique index satisfiable and lets the person register again later.
   erasedAt DateTime?
 
-  walletObjects WalletObject[]
-  pointsLedger  PointsTransaction[]
-  passClaims    PassClaim[]
+  walletObjects          WalletObject[]
+  pointsLedger           PointsTransaction[]
+  passClaims             PassClaim[]
+  notificationDeliveries NotificationDelivery[]
 
   @@unique([clinicId, phone])
-  @@unique([clinicId, code])
   @@index([clinicId])
 }
 
@@ -366,6 +353,116 @@ enum WalletSyncStatus {
   PENDING
   SYNCED
   FAILED
+}
+
+enum NotificationType {
+  BROADCAST
+  SEGMENT
+  SINGLE
+  POINTS
+  TIER
+}
+
+enum NotificationStatus {
+  QUEUED
+  PROCESSING
+  SENT
+  PARTIAL_FAILED
+  FAILED
+  CANCELLED
+}
+
+enum NotificationDeliveryStatus {
+  QUEUED
+  SENT
+  DOWNGRADED
+  FAILED
+  SKIPPED
+}
+
+enum ClinicNotifyOnCredit {
+  NEVER
+  MILESTONE_AND_TIER
+  ALWAYS
+}
+
+model Notification {
+  id                String             @id @default(uuid())
+  clinicId          String
+  clinic            Clinic             @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  type              NotificationType
+  header            String
+  body              String
+  actionUrl         String?
+  notify            Boolean
+  segmentJson       Json?
+  status            NotificationStatus @default(QUEUED)
+  scheduledAt       DateTime?
+  createdBy         String?
+  createdAt         DateTime           @default(now())
+  providerMessageId String?
+  idempotencyKey    String?
+
+  deliveries NotificationDelivery[]
+  auditLogs  NotificationAuditLog[]
+
+  @@unique([clinicId, idempotencyKey])
+  @@index([clinicId, createdAt])
+}
+
+model NotificationDelivery {
+  id                String                     @id @default(uuid())
+  notificationId    String
+  notification      Notification               @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  memberId          String
+  member            Member                     @relation(fields: [memberId], references: [id], onDelete: Restrict)
+  provider          WalletProviderType
+  status            NotificationDeliveryStatus @default(QUEUED)
+  errorCode         String?
+  sentAt            DateTime?
+  providerMessageId String?
+
+  @@index([notificationId, status])
+  @@index([memberId])
+}
+
+model ClinicNotificationSettings {
+  id               String               @id @default(uuid())
+  clinicId         String               @unique
+  clinic           Clinic               @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  notifyOnCredit   ClinicNotifyOnCredit @default(MILESTONE_AND_TIER)
+  marketingEnabled Boolean              @default(true)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+}
+
+model ClinicLocation {
+  id        String   @id @default(uuid())
+  clinicId  String
+  clinic    Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  name      String
+  latitude  Float
+  longitude Float
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clinicId])
+}
+
+model NotificationAuditLog {
+  id             String        @id @default(uuid())
+  notificationId String?
+  notification   Notification? @relation(fields: [notificationId], references: [id], onDelete: SetNull)
+  clinicId       String
+  clinic         Clinic        @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  actorId        String?
+  action         String
+  recipientCount Int
+  payloadJson    Json?
+  createdAt      DateTime      @default(now())
+
+  @@index([clinicId, createdAt])
+  @@index([notificationId])
 }
 
 /// Why points moved. The set is closed on purpose: "some other reason" is what turns a

@@ -1,5 +1,12 @@
+import { randomUUID } from "node:crypto";
+
 import { assertIssuerScopedId, getAuthenticatedClient, GoogleWalletApiError } from "./client";
-import type { LoyaltyObjectInput, LoyaltyObjectPatch, LoyaltyObjectState } from "./types";
+import type {
+  LoyaltyMessageInput,
+  LoyaltyObjectInput,
+  LoyaltyObjectPatch,
+  LoyaltyObjectState
+} from "./types";
 
 interface GoogleLoyaltyPointsBalance {
   string?: string;
@@ -12,9 +19,11 @@ interface GoogleLoyaltyPoints {
   balance?: GoogleLoyaltyPointsBalance;
 }
 
-interface GoogleMessage {
+export interface GoogleMessage {
+  id?: string;
   header: string;
   body: string;
+  messageType?: "TEXT" | "TEXT_AND_NOTIFY";
 }
 
 interface GoogleBarcode {
@@ -81,6 +90,11 @@ interface GoogleLoyaltyObjectPatchRequest {
   }>;
   rewardsTier?: string;
   messages?: GoogleMessage[];
+  notifyPreference?: "notifyOnUpdate";
+}
+
+interface GoogleAddMessageRequest {
+  message: GoogleMessage;
 }
 
 export const createObject = async (input: LoyaltyObjectInput): Promise<void> => {
@@ -155,11 +169,8 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
     body.rewardsTier = patch.tier;
   }
 
-  if (patch.message) {
-    const existingObject = await client.request<GoogleLoyaltyObject>(
-      `/loyaltyObject/${encodeURIComponent(objectId)}`
-    );
-    body.messages = [...(existingObject.messages ?? []), patch.message].slice(-10);
+  if (patch.notify) {
+    body.notifyPreference = "notifyOnUpdate";
   }
 
   if (Object.keys(body).length === 0) {
@@ -169,6 +180,43 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
   await client.request<unknown>(`/loyaltyObject/${encodeURIComponent(objectId)}`, {
     method: "PATCH",
     body
+  });
+};
+
+export const addObjectMessage = async (
+  objectId: string,
+  message: Omit<LoyaltyMessageInput, "id"> & { id?: string }
+): Promise<string> => {
+  assertIssuerScopedId(objectId, "objectId");
+
+  const messageId = message.id ?? randomUUID();
+  const body: GoogleAddMessageRequest = {
+    message: toGoogleMessage({ ...message, id: messageId })
+  };
+
+  await getAuthenticatedClient().request<unknown>(
+    `/loyaltyObject/${encodeURIComponent(objectId)}/addMessage`,
+    {
+      method: "POST",
+      body
+    }
+  );
+
+  return messageId;
+};
+
+export const removeObjectMessage = async (objectId: string, messageId: string): Promise<void> => {
+  assertIssuerScopedId(objectId, "objectId");
+
+  const client = getAuthenticatedClient();
+  const existingObject = await client.request<GoogleLoyaltyObject>(
+    `/loyaltyObject/${encodeURIComponent(objectId)}`
+  );
+  const messages = (existingObject.messages ?? []).filter((message) => message.id !== messageId);
+
+  await client.request<unknown>(`/loyaltyObject/${encodeURIComponent(objectId)}`, {
+    method: "PATCH",
+    body: { messages }
   });
 };
 
@@ -190,6 +238,13 @@ const upsertTextModules = (
 
   return nextModules;
 };
+
+const toGoogleMessage = (message: LoyaltyMessageInput): GoogleMessage => ({
+  id: message.id,
+  header: message.header,
+  body: message.body,
+  messageType: message.notify ? "TEXT_AND_NOTIFY" : "TEXT"
+});
 
 export const getObject = async (objectId: string): Promise<LoyaltyObjectInput | null> => {
   assertIssuerScopedId(objectId, "objectId");

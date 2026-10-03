@@ -81,6 +81,14 @@ type AdminClinicSummaryInput = Omit<
   users: AdminClinicSummaryUser[];
 };
 
+type AdminClinicDetail = AdminClinicSummaryInput | null;
+
+const ADMIN_CLINIC_DETAIL_CACHE_MS = 10_000;
+const adminClinicDetailCache = new Map<
+  string,
+  { expiresAt: number; clinic: AdminClinicDetail }
+>();
+
 const toAdminClinicSummary = (clinic: AdminClinicSummaryInput) => ({
   id: clinic.id,
   slug: clinic.slug,
@@ -184,6 +192,26 @@ const listAdminClinics = () =>
     orderBy: { createdAt: "desc" }
   });
 
+const getAdminClinic = (clinicId: string) =>
+  prisma.clinic.findUnique({
+    where: { id: clinicId },
+    include: {
+      users: {
+        orderBy: { createdAt: "asc" },
+        include: {
+          passwordSetupTokens: {
+            where: { usedAt: null, expiresAt: { gt: new Date() } },
+            orderBy: { createdAt: "desc" },
+            take: 1
+          }
+        }
+      },
+      treatments: { orderBy: { createdAt: "asc" } },
+      template: { include: { walletClasses: true } },
+      _count: { select: { members: true } }
+    }
+  });
+
 const listAdminClinicsWithoutSetupTokens = () =>
   prisma.clinic.findMany({
     include: {
@@ -193,6 +221,17 @@ const listAdminClinicsWithoutSetupTokens = () =>
       _count: { select: { members: true } }
     },
     orderBy: { createdAt: "desc" }
+  });
+
+const getAdminClinicWithoutSetupTokens = (clinicId: string) =>
+  prisma.clinic.findUnique({
+    where: { id: clinicId },
+    include: {
+      users: { orderBy: { createdAt: "asc" } },
+      treatments: { orderBy: { createdAt: "asc" } },
+      template: { include: { walletClasses: true } },
+      _count: { select: { members: true } }
+    }
   });
 
 const listAdminClinicsSafe = async () => {
@@ -210,6 +249,47 @@ const listAdminClinicsSafe = async () => {
       );
 
       return listAdminClinicsWithoutSetupTokens();
+    }
+
+    throw error;
+  }
+};
+
+const getAdminClinicSafe = async (clinicId: string) => {
+  const cached = adminClinicDetailCache.get(clinicId);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.clinic;
+  }
+
+  try {
+    const clinic = await getAdminClinic(clinicId);
+
+    adminClinicDetailCache.set(clinicId, {
+      expiresAt: Date.now() + ADMIN_CLINIC_DETAIL_CACHE_MS,
+      clinic
+    });
+
+    return clinic;
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code?: string }).code === "P2021"
+    ) {
+      console.warn(
+        "[admin] PasswordSetupToken table is missing; returning clinic details without setup links. Run the password setup migration."
+      );
+
+      const clinic = await getAdminClinicWithoutSetupTokens(clinicId);
+
+      adminClinicDetailCache.set(clinicId, {
+        expiresAt: Date.now() + ADMIN_CLINIC_DETAIL_CACHE_MS,
+        clinic
+      });
+
+      return clinic;
     }
 
     throw error;
@@ -457,8 +537,7 @@ adminClinicsRouter.get(
   "/admin/clinics/:clinicId",
   createRequireStaffKey(config.STAFF_API_KEY),
   asyncHandler(async (req, res) => {
-    const clinics = await listAdminClinicsSafe();
-    const clinic = clinics.find((item) => item.id === req.params.clinicId);
+    const clinic = await getAdminClinicSafe(req.params.clinicId);
 
     if (!clinic) {
       res.status(404).json({ message: "Clinic not found" });

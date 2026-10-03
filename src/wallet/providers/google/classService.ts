@@ -1,7 +1,13 @@
 import { inspect } from "node:util";
+import { randomUUID } from "node:crypto";
 
 import { assertIssuerScopedId, getAuthenticatedClient, GoogleWalletApiError } from "./client";
-import type { LoyaltyClassInput } from "./types";
+import type {
+  LoyaltyClassInput,
+  LoyaltyMerchantLocationInput,
+  LoyaltyMessageInput
+} from "./types";
+import type { GoogleMessage } from "./objectService";
 
 interface GoogleImage {
   sourceUri: {
@@ -66,6 +72,8 @@ interface GoogleLoyaltyClassRequest {
   appLinkData?: GoogleAppLinkData;
   rewardsTierLabel?: string;
   rewardsTier?: string;
+  merchantLocations?: GoogleMerchantLocation[];
+  messages?: GoogleMessage[];
   classTemplateInfo: {
     cardTemplateOverride: {
       cardRowTemplateInfos: GoogleCardRowTemplateInfo[];
@@ -76,6 +84,21 @@ interface GoogleLoyaltyClassRequest {
       }>;
     };
   };
+}
+
+interface GoogleAddMessageRequest {
+  message: GoogleMessage;
+}
+
+interface GoogleMerchantLocation {
+  address?: string;
+  latitude: number;
+  longitude: number;
+}
+
+export interface GoogleLoyaltyClassLocations {
+  id: string;
+  merchantLocations?: GoogleMerchantLocation[];
 }
 
 type GoogleCardRowTemplateInfo =
@@ -157,6 +180,76 @@ export const getLoyaltyClassLinkFields = async (
     appLinkData: classResponse.appLinkData,
     linksModuleData: classResponse.linksModuleData
   };
+};
+
+export const getLoyaltyClassLocations = async (
+  classId: string
+): Promise<GoogleLoyaltyClassLocations> => {
+  assertIssuerScopedId(classId, "classId");
+
+  return getAuthenticatedClient().request<GoogleLoyaltyClassLocations>(
+    `/loyaltyClass/${encodeURIComponent(classId)}`
+  );
+};
+
+export const addClassMessage = async (
+  classId: string,
+  message: Omit<LoyaltyMessageInput, "id"> & { id?: string }
+): Promise<string> => {
+  assertIssuerScopedId(classId, "classId");
+
+  const messageId = message.id ?? randomUUID();
+  const body: GoogleAddMessageRequest = {
+    message: toGoogleMessage({ ...message, id: messageId })
+  };
+
+  await getAuthenticatedClient().request<unknown>(
+    `/loyaltyClass/${encodeURIComponent(classId)}/addMessage`,
+    {
+      method: "POST",
+      body
+    }
+  );
+
+  return messageId;
+};
+
+export const removeClassMessage = async (classId: string, messageId: string): Promise<void> => {
+  assertIssuerScopedId(classId, "classId");
+
+  const client = getAuthenticatedClient();
+  const existingClass = await client.request<{ messages?: GoogleMessage[] }>(
+    `/loyaltyClass/${encodeURIComponent(classId)}`
+  );
+  const messages = (existingClass.messages ?? []).filter((message) => message.id !== messageId);
+
+  await client.request<unknown>(`/loyaltyClass/${encodeURIComponent(classId)}`, {
+    method: "PATCH",
+    body: { messages }
+  });
+};
+
+export const setClassLocations = async (
+  classId: string,
+  locations: LoyaltyMerchantLocationInput[]
+): Promise<void> => {
+  assertIssuerScopedId(classId, "classId");
+
+  if (locations.length > 10) {
+    throw new Error("Google Wallet MerchantLocations cannot exceed 10 per class");
+  }
+
+  await getAuthenticatedClient().request<unknown>(`/loyaltyClass/${encodeURIComponent(classId)}`, {
+    method: "PATCH",
+    body: {
+      reviewStatus: "UNDER_REVIEW",
+      merchantLocations: locations.map((location) => ({
+        address: location.name,
+        latitude: location.latitude,
+        longitude: location.longitude
+      }))
+    }
+  });
 };
 
 const toGoogleLoyaltyClassBody = (input: LoyaltyClassInput): GoogleLoyaltyClassRequest => ({
@@ -258,6 +351,13 @@ const toGoogleImage = (uri: string, description?: string): GoogleImage => ({
         }
       }
     : {})
+});
+
+const toGoogleMessage = (message: LoyaltyMessageInput): GoogleMessage => ({
+  id: message.id,
+  header: message.header,
+  body: message.body,
+  messageType: message.notify ? "TEXT_AND_NOTIFY" : "TEXT"
 });
 
 const toTemplateItem = (fieldPath: string): GoogleTemplateItem => ({

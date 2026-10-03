@@ -2,6 +2,7 @@ import type { Clinic, ClinicTemplate, PrismaClient } from "@prisma/client";
 
 import { ClinicNotFoundError } from "../../common/errors/membership.errors";
 import { clinicSlugSchema } from "../members/membership.schema";
+import { z } from "zod";
 
 export type ClinicWithTemplate = Clinic & { template: ClinicTemplate | null };
 
@@ -24,33 +25,40 @@ export interface PublicClinic {
   template: PublicClinicTemplate;
 }
 
+const clinicPublicKeySchema = z.union([z.string().uuid(), clinicSlugSchema]);
+
 /**
- * Resolves the slug from a QR poster, or throws a 404.
+ * Resolves the public key from a QR poster, or throws a 404.
  *
- * A malformed slug, an unseeded slug and an inactive clinic are all the same 404: a slug
- * that fails the format could never have been seeded, and an inactive clinic must not be
- * confirmed to exist. Validating first also keeps junk out of the query entirely.
+ * New QR posters carry the opaque clinic UUID, while older links may still carry the
+ * human slug. A malformed key, an unseeded key and an inactive clinic are all the same
+ * 404: the response must not confirm that a clinic ever existed. Validating first also
+ * keeps junk out of the query entirely.
  *
  * The template is included rather than fetched separately because every caller needs it —
  * the page for its branding, the sign-up for the privacy notice version.
  */
 export const findClinicBySlug = async (
   db: PrismaClient,
-  slug: string
+  publicKey: string
 ): Promise<ClinicWithTemplate> => {
-  const parsed = clinicSlugSchema.safeParse(slug);
+  const parsed = clinicPublicKeySchema.safeParse(publicKey);
 
   if (!parsed.success) {
-    throw new ClinicNotFoundError(slug);
+    throw new ClinicNotFoundError(publicKey);
   }
 
+  const where = parsed.data.includes("-") && z.string().uuid().safeParse(parsed.data).success
+    ? { id: parsed.data }
+    : { slug: parsed.data };
+
   const clinic = await db.clinic.findUnique({
-    where: { slug: parsed.data },
+    where,
     include: { template: true }
   });
 
   if (!clinic || !clinic.isActive) {
-    throw new ClinicNotFoundError(slug);
+    throw new ClinicNotFoundError(publicKey);
   }
 
   return clinic;
