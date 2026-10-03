@@ -5,7 +5,7 @@ import { ClinicNotFoundError } from "../../src/common/errors/membership.errors";
 import { findClinicBySlug, toPublicClinic } from "../../src/modules/clinics/clinic.service";
 
 const AUREA = {
-  id: "c1",
+  id: "00000000-0000-4000-8000-0000000a0001",
   slug: "aurea",
   name: "AURÉA",
   addressLine: "Calle de Serrano 21",
@@ -51,7 +51,15 @@ const db = (findUnique: ReturnType<typeof vi.fn>) =>
   ({ clinic: { findUnique } }) as unknown as PrismaClient;
 
 describe("findClinicBySlug", () => {
-  it("returns the clinic a QR poster points at", async () => {
+  it("returns the clinic a UUID QR poster points at", async () => {
+    const clinic = { ...AUREA, template: TEMPLATE };
+
+    await expect(findClinicBySlug(db(vi.fn().mockResolvedValue(clinic)), AUREA.id)).resolves.toBe(
+      clinic
+    );
+  });
+
+  it("keeps old slug posters working", async () => {
     const clinic = { ...AUREA, template: TEMPLATE };
 
     await expect(findClinicBySlug(db(vi.fn().mockResolvedValue(clinic)), "aurea")).resolves.toBe(
@@ -60,6 +68,17 @@ describe("findClinicBySlug", () => {
   });
 
   it("fetches the template in the same query, since every caller needs it", async () => {
+    const findUnique = vi.fn().mockResolvedValue({ ...AUREA, template: TEMPLATE });
+
+    await findClinicBySlug(db(findUnique), AUREA.id);
+
+    expect(findUnique).toHaveBeenCalledWith({
+      where: { id: AUREA.id },
+      include: { template: true }
+    });
+  });
+
+  it("fetches legacy slugs by slug", async () => {
     const findUnique = vi.fn().mockResolvedValue({ ...AUREA, template: TEMPLATE });
 
     await findClinicBySlug(db(findUnique), "aurea");

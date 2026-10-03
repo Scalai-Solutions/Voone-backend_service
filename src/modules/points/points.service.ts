@@ -49,6 +49,14 @@ export interface PointsOutcome {
   tier: TierDefinition | null;
 }
 
+export interface PointsNotificationPort {
+  onPointsCredited(
+    memberId: string,
+    newBalance: number,
+    flags: { milestoneReached: boolean; tierChanged: boolean }
+  ): Promise<void>;
+}
+
 /** Re-exported so callers of the service need not know where the error is declared. */
 export { InsufficientPointsError };
 
@@ -71,7 +79,8 @@ export class PointsService {
   constructor(
     private readonly ledger: PointsLedgerRepository,
     private readonly cache: MemberPointsCache,
-    private readonly wallets: WalletSyncQueue
+    private readonly wallets: WalletSyncQueue,
+    private readonly notifications?: PointsNotificationPort
   ) {}
 
   async credit(request: CreditRequest): Promise<PointsOutcome> {
@@ -162,6 +171,7 @@ export class PointsService {
       this.ledger.balanceFor(memberId),
       this.ledger.tierScaleFor(clinicId)
     ]);
+    const previous = applied && this.cache.read ? await this.cache.read(memberId) : null;
 
     const tier = tierFor(balance.lifetime, scale);
 
@@ -171,6 +181,37 @@ export class PointsService {
     // reception, and a wallet outage must not look like a failed transaction.
     await this.wallets.enqueueMemberSync(memberId);
 
+    if (applied && this.notifications) {
+      this.notifications
+        .onPointsCredited(memberId, balance.spendable, {
+          milestoneReached: previous
+            ? this.crossedMilestone(previous.lifetimePoints, balance.lifetime, tier)
+            : false,
+          tierChanged: previous ? previous.tier !== (tier?.code ?? null) : false
+        })
+        .catch((error) => {
+          console.error("[notifications] could not enqueue points credit notification", {
+            memberId,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        });
+    }
+
     return { applied, balance, tier };
+  }
+
+  private crossedMilestone(
+    previousLifetime: number,
+    nextLifetime: number,
+    tier: TierDefinition | null
+  ): boolean {
+    if (!tier?.milestoneCount || !tier.pointsToNextMilestone) return false;
+
+    const step = Math.max(1, Math.trunc(tier.pointsToNextMilestone));
+    const total = Math.max(1, Math.trunc(tier.milestoneCount));
+    const progress = (lifetime: number) =>
+      Math.min(total, Math.floor(Math.max(0, lifetime - tier.minLifetimePoints) / step));
+
+    return progress(nextLifetime) > progress(previousLifetime);
   }
 }

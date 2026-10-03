@@ -35,6 +35,19 @@ export interface LoyaltyAppLinkInput {
   description?: string;
 }
 
+export interface LoyaltyMerchantLocationInput {
+  name: string;
+  latitude: number;
+  longitude: number;
+}
+
+export interface LoyaltyMessageInput {
+  id: string;
+  header: string;
+  body: string;
+  notify: boolean;
+}
+
 export type LoyaltyObjectState = "ACTIVE" | "INACTIVE";
 
 export interface LoyaltyObjectInput {
@@ -52,8 +65,5 @@ export interface LoyaltyObjectInput {
 export type LoyaltyObjectPatch = Partial<
   Pick<LoyaltyObjectInput, "loyaltyPointsBalance" | "tier" | "state">
 > & {
-  message?: {
-    header: string;
-    body: string;
-  };
+  notify?: boolean;
 };

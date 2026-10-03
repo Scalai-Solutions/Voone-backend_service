@@ -2,6 +2,7 @@ import { buildApp } from "./app";
 import { certificateStatus, isAppleWalletConfigured } from "./config/apple-wallet.config";
 import { config } from "./config/env";
 import { prisma } from "./infrastructure/database/prisma-client";
+import { startInProcessNotificationWorker } from "./modules/notifications/notification.composition";
 import { startInProcessWalletWorker } from "./wallet/wallet.composition";
 
 const app = buildApp();
@@ -35,9 +36,14 @@ if (!isAppleWalletConfigured()) {
 // been given the job. A durable queue nobody consumes is worse than no queue: jobs pile
 // up, every card goes stale, and nothing looks broken.
 const walletWorker = startInProcessWalletWorker(prisma);
+const notificationWorker = startInProcessNotificationWorker(prisma);
 
 if (walletWorker) {
   console.log("[wallet] consuming the sync queue in this process");
+}
+
+if (notificationWorker) {
+  console.log("[notifications] consuming the notification queue in this process");
 }
 
 const server = app.listen(config.PORT, () => {
@@ -51,6 +57,7 @@ const shutdown = async (signal: string): Promise<void> => {
 
   server.close();
   await walletWorker?.close();
+  await notificationWorker?.close();
   await prisma.$disconnect();
 
   process.exit(0);

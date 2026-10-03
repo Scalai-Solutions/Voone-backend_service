@@ -33,3 +33,53 @@ export class WalletSyncError extends AppError {
     super(message, { statusCode: 502, code: "WALLET_SYNC_FAILED", expose: false, cause });
   }
 }
+
+export type WalletNotificationErrorCode =
+  "QUOTA_EXCEEDED" | "NOT_FOUND" | "AUTH_ERROR" | "TRANSIENT" | "NOT_IMPLEMENTED";
+
+export class WalletNotificationError extends AppError {
+  constructor(message: string, code: WalletNotificationErrorCode, cause?: unknown) {
+    const statusCode =
+      code === "QUOTA_EXCEEDED"
+        ? 429
+        : code === "NOT_FOUND"
+          ? 404
+          : code === "AUTH_ERROR"
+            ? 502
+            : code === "NOT_IMPLEMENTED"
+              ? 501
+              : 503;
+
+    super(message, { statusCode, code: `WALLET_NOTIFICATION_${code}`, expose: false, cause });
+  }
+}
+
+export class WalletNotificationQuotaExceededError extends WalletNotificationError {
+  constructor(message = "Google Wallet notification quota exceeded", cause?: unknown) {
+    super(message, "QUOTA_EXCEEDED", cause);
+  }
+}
+
+export class WalletNotificationNotFoundError extends WalletNotificationError {
+  constructor(message = "Wallet notification target was not found", cause?: unknown) {
+    super(message, "NOT_FOUND", cause);
+  }
+}
+
+export class WalletNotificationAuthError extends WalletNotificationError {
+  constructor(message = "Wallet provider rejected notification credentials", cause?: unknown) {
+    super(message, "AUTH_ERROR", cause);
+  }
+}
+
+export class WalletNotificationTransientError extends WalletNotificationError {
+  constructor(message = "Wallet notification provider temporarily failed", cause?: unknown) {
+    super(message, "TRANSIENT", cause);
+  }
+}
+
+export class WalletNotificationNotImplementedError extends WalletNotificationError {
+  constructor(message = "Wallet notification method is not implemented", cause?: unknown) {
+    super(message, "NOT_IMPLEMENTED", cause);
+  }
+}

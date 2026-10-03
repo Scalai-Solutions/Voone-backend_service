@@ -1,3 +1,5 @@
+import { WalletProviderType } from "@prisma/client";
+
 import { WalletPassDataError } from "../../common/errors/wallet.errors";
 import type {
   ClinicTemplateWithRelations,
@@ -6,6 +8,14 @@ import type {
 import { WalletPlatform, getPassBuilder } from "../wallet.factory";
 import { loyaltyCardSchema } from "./loyalty-card";
 import { BuiltPass } from "./pass-builder.interface";
+import type {
+  WalletMerchantLocation,
+  WalletMessageInput,
+  WalletMessageRef,
+  WalletMessageTarget,
+  WalletPassProvider,
+  WalletPointsPatch
+} from "./wallet-pass-provider.interface";
 import { WalletProviderRegistry } from "./wallet-provider.registry";
 
 /**
@@ -69,6 +79,58 @@ export class WalletPassEngine {
 
   deletePass(): never {
     throw new Error("Not implemented");
+  }
+
+  patchPoints(objectId: string, patch: WalletPointsPatch): Promise<void> {
+    return this.google().patchPoints(objectId, patch);
+  }
+
+  addObjectMessage(objectId: string, message: WalletMessageInput): Promise<WalletMessageRef> {
+    return this.google().addObjectMessage(objectId, message);
+  }
+
+  addClassMessage(classId: string, message: WalletMessageInput): Promise<WalletMessageRef> {
+    return this.google().addClassMessage(classId, message);
+  }
+
+  removeMessage(target: WalletMessageTarget, messageId: string): Promise<void> {
+    return this.google().removeMessage(target, messageId);
+  }
+
+  setLocations(classId: string, locations: WalletMerchantLocation[]): Promise<void> {
+    return this.google().setLocations(classId, locations);
+  }
+
+  private google(): WalletPassProvider & {
+    patchPoints(objectId: string, patch: WalletPointsPatch): Promise<void>;
+    addObjectMessage(objectId: string, message: WalletMessageInput): Promise<WalletMessageRef>;
+    addClassMessage(classId: string, message: WalletMessageInput): Promise<WalletMessageRef>;
+    removeMessage(target: WalletMessageTarget, messageId: string): Promise<void>;
+    setLocations(classId: string, locations: WalletMerchantLocation[]): Promise<void>;
+  } {
+    const provider = this.registry.get(WalletProviderType.GOOGLE);
+
+    if (!provider) {
+      throw new WalletPassDataError("Google Wallet provider is not configured");
+    }
+
+    if (
+      !provider.patchPoints ||
+      !provider.addObjectMessage ||
+      !provider.addClassMessage ||
+      !provider.removeMessage ||
+      !provider.setLocations
+    ) {
+      throw new WalletPassDataError("Google Wallet provider does not support notifications");
+    }
+
+    return provider as WalletPassProvider & {
+      patchPoints(objectId: string, patch: WalletPointsPatch): Promise<void>;
+      addObjectMessage(objectId: string, message: WalletMessageInput): Promise<WalletMessageRef>;
+      addClassMessage(classId: string, message: WalletMessageInput): Promise<WalletMessageRef>;
+      removeMessage(target: WalletMessageTarget, messageId: string): Promise<void>;
+      setLocations(classId: string, locations: WalletMerchantLocation[]): Promise<void>;
+    };
   }
 }
 

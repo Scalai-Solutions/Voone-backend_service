@@ -8,14 +8,30 @@ import type {
   InstallArtifact,
   IssuedCard,
   ProgramRef,
-  ProgramTemplate
+  ProgramTemplate,
+  WalletMerchantLocation,
+  WalletMessageInput,
+  WalletMessageRef,
+  WalletMessageTarget,
+  WalletPointsPatch
 } from "../../engine/wallet-pass-provider.interface";
 import type { WalletSyncRepository } from "../../engine/wallet-sync.repository";
-import { createOrUpdateClass } from "./classService";
-import { getGoogleWalletIssuerId, isGoogleWalletConfigured } from "./client";
+import {
+  createOrUpdateClass,
+  addClassMessage,
+  removeClassMessage,
+  setClassLocations
+} from "./classService";
+import { GoogleWalletApiError, getGoogleWalletIssuerId, isGoogleWalletConfigured } from "./client";
 import { buildSaveLink } from "./jwt";
-import { createObject, patchObject } from "./objectService";
+import { addObjectMessage, createObject, patchObject, removeObjectMessage } from "./objectService";
 import type { LoyaltyClassInput, LoyaltyObjectInput } from "./types";
+import {
+  WalletNotificationAuthError,
+  WalletNotificationNotFoundError,
+  WalletNotificationQuotaExceededError,
+  WalletNotificationTransientError
+} from "../../../common/errors/wallet.errors";
 
 const GOOGLE_ID_SAFE_CHARACTER = /[^A-Za-z0-9._-]/g;
 
@@ -77,6 +93,73 @@ export class GoogleWalletProvider extends BaseWalletProvider {
 
   protected async doRevoke(ref: CardRef): Promise<void> {
     await patchObject(ref.externalId, { state: "INACTIVE" });
+  }
+
+  protected async doPatchPoints(objectId: string, patch: WalletPointsPatch): Promise<void> {
+    await this.mapNotificationErrors(() =>
+      patchObject(objectId, {
+        loyaltyPointsBalance: patch.points,
+        tier: patch.tier,
+        notify: patch.notify
+      })
+    );
+  }
+
+  protected async doAddObjectMessage(
+    objectId: string,
+    message: WalletMessageInput
+  ): Promise<WalletMessageRef> {
+    const messageId = await this.mapNotificationErrors(() => addObjectMessage(objectId, message));
+
+    return { messageId };
+  }
+
+  protected async doAddClassMessage(
+    classId: string,
+    message: WalletMessageInput
+  ): Promise<WalletMessageRef> {
+    const messageId = await this.mapNotificationErrors(() => addClassMessage(classId, message));
+
+    return { messageId };
+  }
+
+  protected async doRemoveMessage(target: WalletMessageTarget, messageId: string): Promise<void> {
+    await this.mapNotificationErrors(() =>
+      target.kind === "class"
+        ? removeClassMessage(target.id, messageId)
+        : removeObjectMessage(target.id, messageId)
+    );
+  }
+
+  protected async doSetLocations(
+    classId: string,
+    locations: WalletMerchantLocation[]
+  ): Promise<void> {
+    await this.mapNotificationErrors(() => setClassLocations(classId, locations));
+  }
+
+  private async mapNotificationErrors<T>(run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (error) {
+      if (error instanceof GoogleWalletApiError) {
+        if (error.status === 404) throw new WalletNotificationNotFoundError(undefined, error);
+        if (error.status === 401 || error.status === 403) {
+          throw new WalletNotificationAuthError(undefined, error);
+        }
+        if (error.status === 429 || this.isQuotaError(error.responseBody)) {
+          throw new WalletNotificationQuotaExceededError(undefined, error);
+        }
+
+        throw new WalletNotificationTransientError(undefined, error);
+      }
+
+      throw error;
+    }
+  }
+
+  private isQuotaError(responseBody: unknown): boolean {
+    return JSON.stringify(responseBody).includes("QuotaExceededException");
   }
 
   private classIdFor(clinicName: string, templateId: string): string {

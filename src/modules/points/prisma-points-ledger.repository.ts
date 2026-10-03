@@ -114,7 +114,9 @@ export class PrismaPointsLedgerRepository implements PointsLedgerRepository {
       // there is no second identifier for a clinic owner to keep in step.
       code: tier.name,
       label: tier.name,
-      minLifetimePoints: tier.minLifetimePoints
+      minLifetimePoints: tier.minLifetimePoints,
+      milestoneCount: tier.milestoneCount,
+      pointsToNextMilestone: tier.pointsToNextMilestone
     }));
   }
 
@@ -187,6 +189,13 @@ export class PrismaPointsLedgerRepository implements PointsLedgerRepository {
  */
 export class PrismaMemberPointsCache implements MemberPointsCache {
   constructor(private readonly prisma: PrismaClient) {}
+
+  async read(memberId: string): Promise<{ tier: string | null; lifetimePoints: number } | null> {
+    return this.prisma.member.findUnique({
+      where: { id: memberId },
+      select: { tier: true, lifetimePoints: true }
+    });
+  }
 
   async write(
     memberId: string,
