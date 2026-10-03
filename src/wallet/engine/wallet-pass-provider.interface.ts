@@ -82,9 +82,7 @@ export interface WalletMessageRef {
   messageId: string;
 }
 
-export type WalletMessageTarget =
-  | { kind: "class"; id: string }
-  | { kind: "object"; id: string };
+export type WalletMessageTarget = { kind: "class"; id: string } | { kind: "object"; id: string };
 
 export interface WalletMerchantLocation {
   name: string;

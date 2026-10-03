@@ -84,10 +84,7 @@ type AdminClinicSummaryInput = Omit<
 type AdminClinicDetail = AdminClinicSummaryInput | null;
 
 const ADMIN_CLINIC_DETAIL_CACHE_MS = 10_000;
-const adminClinicDetailCache = new Map<
-  string,
-  { expiresAt: number; clinic: AdminClinicDetail }
->();
+const adminClinicDetailCache = new Map<string, { expiresAt: number; clinic: AdminClinicDetail }>();
 
 const toAdminClinicSummary = (clinic: AdminClinicSummaryInput) => ({
   id: clinic.id,

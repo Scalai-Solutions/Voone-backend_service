@@ -10,10 +10,7 @@ import {
 } from "../../infrastructure/queue/bull-notifications.queue";
 import { WalletPassEngine } from "../../wallet/engine/wallet-pass.engine";
 import { buildWalletRegistry } from "../../wallet/wallet.composition";
-import {
-  InMemoryNotificationQuotaRedis,
-  NotificationQuotaService
-} from "./quota.service";
+import { InMemoryNotificationQuotaRedis, NotificationQuotaService } from "./quota.service";
 import {
   NotificationJobQueue,
   NotificationService,
@@ -121,9 +118,7 @@ export const buildNotificationService = (prisma: PrismaClient): NotificationServ
   );
 };
 
-export const startInProcessNotificationWorker = (
-  prisma: PrismaClient
-): Worker | null => {
+export const startInProcessNotificationWorker = (prisma: PrismaClient): Worker | null => {
   if (config.WALLET_SYNC_MODE !== "queue" || !config.WALLET_WORKER_IN_PROCESS) {
     return null;
   }

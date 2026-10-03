@@ -8,7 +8,10 @@ import {
   NotificationForbiddenError,
   NotificationValidationError
 } from "../../modules/notifications/notification.errors";
-import type { NotificationActor, NotificationService } from "../../modules/notifications/notification.service";
+import type {
+  NotificationActor,
+  NotificationService
+} from "../../modules/notifications/notification.service";
 import {
   clinicLocationsSchema,
   notificationListQuerySchema,

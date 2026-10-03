@@ -99,7 +99,13 @@ export class NotificationService {
       }
     });
 
-    await this.audit(notification.id, clinicId, actor, "BROADCAST_CREATED", await this.memberCount(clinicId));
+    await this.audit(
+      notification.id,
+      clinicId,
+      actor,
+      "BROADCAST_CREATED",
+      await this.memberCount(clinicId)
+    );
     await this.jobs.enqueueNotification(notification.id, this.delayFor(input.scheduledAt));
 
     return notification;
@@ -141,16 +147,28 @@ export class NotificationService {
       }
     });
 
-    await this.audit(notification.id, clinicId, actor, "SEGMENT_CREATED", members.length, input.segment);
+    await this.audit(
+      notification.id,
+      clinicId,
+      actor,
+      "SEGMENT_CREATED",
+      members.length,
+      input.segment
+    );
 
     for (const chunk of this.chunks(members, 100)) {
       const deliveries = await this.prisma.notificationDelivery.findMany({
-        where: { notificationId: notification.id, memberId: { in: chunk.map((member) => member.id) } },
+        where: {
+          notificationId: notification.id,
+          memberId: { in: chunk.map((member) => member.id) }
+        },
         select: { id: true }
       });
 
       await Promise.all(
-        deliveries.map((delivery) => this.jobs.enqueueDelivery(delivery.id, this.delayFor(input.scheduledAt)))
+        deliveries.map((delivery) =>
+          this.jobs.enqueueDelivery(delivery.id, this.delayFor(input.scheduledAt))
+        )
       );
     }
 
@@ -270,7 +288,10 @@ export class NotificationService {
     const wantsPush = delivery.notification.notify;
     const canPush = wantsPush ? await this.quota.canMarketingPush(object.externalObjectId) : false;
     const notify = wantsPush && canPush;
-    const status = wantsPush && !notify ? NotificationDeliveryStatus.DOWNGRADED : NotificationDeliveryStatus.SENT;
+    const status =
+      wantsPush && !notify
+        ? NotificationDeliveryStatus.DOWNGRADED
+        : NotificationDeliveryStatus.SENT;
 
     try {
       const message = await this.wallet.addObjectMessage(object.externalObjectId, {
@@ -372,7 +393,9 @@ export class NotificationService {
 
       await this.markDelivery(
         notification.deliveries[0].id,
-        shouldNotify && !notify ? NotificationDeliveryStatus.DOWNGRADED : NotificationDeliveryStatus.SENT,
+        shouldNotify && !notify
+          ? NotificationDeliveryStatus.DOWNGRADED
+          : NotificationDeliveryStatus.SENT,
         shouldNotify && !notify ? "QUOTA_RESERVED" : null
       );
       await this.refreshNotificationStatus(notification.id);
@@ -452,7 +475,10 @@ export class NotificationService {
 
     if (notification.type === NotificationType.BROADCAST && notification.providerMessageId) {
       const walletClass = await this.googleClassForClinic(notification.clinicId);
-      await this.bestEffortRemove({ kind: "class", id: walletClass.externalClassId }, notification.providerMessageId);
+      await this.bestEffortRemove(
+        { kind: "class", id: walletClass.externalClassId },
+        notification.providerMessageId
+      );
       return;
     }
 
@@ -501,7 +527,11 @@ export class NotificationService {
     return this.settingsFor(clinicId);
   }
 
-  async updateSettings(clinicId: string, input: NotificationSettingsInput, actor: NotificationActor) {
+  async updateSettings(
+    clinicId: string,
+    input: NotificationSettingsInput,
+    actor: NotificationActor
+  ) {
     this.assertSender(actor, clinicId);
 
     return this.prisma.clinicNotificationSettings.upsert({
@@ -514,7 +544,10 @@ export class NotificationService {
   async getLocations(clinicId: string, actor: NotificationActor) {
     this.assertReader(actor, clinicId);
 
-    return this.prisma.clinicLocation.findMany({ where: { clinicId }, orderBy: { createdAt: "asc" } });
+    return this.prisma.clinicLocation.findMany({
+      where: { clinicId },
+      orderBy: { createdAt: "asc" }
+    });
   }
 
   async setLocations(clinicId: string, locations: ClinicLocationInput[], actor: NotificationActor) {
@@ -672,7 +705,9 @@ export class NotificationService {
       return;
     }
 
-    const failed = deliveries.some((delivery) => delivery.status === NotificationDeliveryStatus.FAILED);
+    const failed = deliveries.some(
+      (delivery) => delivery.status === NotificationDeliveryStatus.FAILED
+    );
     const completed = deliveries.some(
       (delivery) =>
         delivery.status === NotificationDeliveryStatus.SENT ||
@@ -682,11 +717,20 @@ export class NotificationService {
 
     await this.prisma.notification.update({
       where: { id: notificationId },
-      data: { status: failed && completed ? NotificationStatus.PARTIAL_FAILED : failed ? NotificationStatus.FAILED : NotificationStatus.SENT }
+      data: {
+        status:
+          failed && completed
+            ? NotificationStatus.PARTIAL_FAILED
+            : failed
+              ? NotificationStatus.FAILED
+              : NotificationStatus.SENT
+      }
     });
   }
 
-  private async countsFor(notification: NonNullable<NotificationRecord>): Promise<NotificationCounts> {
+  private async countsFor(
+    notification: NonNullable<NotificationRecord>
+  ): Promise<NotificationCounts> {
     if (notification.type === NotificationType.BROADCAST) {
       const total = await this.memberCount(notification.clinicId);
       const sent = notification.status === NotificationStatus.SENT ? total : 0;
@@ -720,7 +764,7 @@ export class NotificationService {
   private assertSender(actor: NotificationActor, clinicId: string): void {
     this.assertReader(actor, clinicId);
 
-    if (!['OWNER', 'MANAGER', 'VOONE_ADMIN'].includes(actor.role.toUpperCase())) {
+    if (!["OWNER", "MANAGER", "VOONE_ADMIN"].includes(actor.role.toUpperCase())) {
       throw new NotificationForbiddenError("Only owners and managers can send notifications");
     }
   }

@@ -2,11 +2,7 @@ import { inspect } from "node:util";
 import { randomUUID } from "node:crypto";
 
 import { assertIssuerScopedId, getAuthenticatedClient, GoogleWalletApiError } from "./client";
-import type {
-  LoyaltyClassInput,
-  LoyaltyMerchantLocationInput,
-  LoyaltyMessageInput
-} from "./types";
+import type { LoyaltyClassInput, LoyaltyMerchantLocationInput, LoyaltyMessageInput } from "./types";
 import type { GoogleMessage } from "./objectService";
 
 interface GoogleImage {

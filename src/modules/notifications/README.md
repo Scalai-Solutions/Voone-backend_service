@@ -105,9 +105,7 @@ Google allows 3 notification-triggering sends per object per rolling 24 hours. M
 
 ```json
 {
-  "locations": [
-    { "name": "Main clinic", "latitude": 40.4168, "longitude": -3.7038 }
-  ]
+  "locations": [{ "name": "Main clinic", "latitude": 40.4168, "longitude": -3.7038 }]
 }
 ```
 

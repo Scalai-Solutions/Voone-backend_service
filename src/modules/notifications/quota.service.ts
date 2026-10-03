@@ -27,7 +27,9 @@ export class InMemoryNotificationQuotaRedis implements NotificationQuotaRedis {
   }
 
   async zrange(key: string): Promise<string[]> {
-    const first = [...(this.sets.get(key) ?? [])].sort((left, right) => left.score - right.score)[0];
+    const first = [...(this.sets.get(key) ?? [])].sort(
+      (left, right) => left.score - right.score
+    )[0];
 
     return first ? [first.member, String(first.score)] : [];
   }

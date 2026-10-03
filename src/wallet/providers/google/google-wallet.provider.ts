@@ -16,7 +16,12 @@ import type {
   WalletPointsPatch
 } from "../../engine/wallet-pass-provider.interface";
 import type { WalletSyncRepository } from "../../engine/wallet-sync.repository";
-import { createOrUpdateClass, addClassMessage, removeClassMessage, setClassLocations } from "./classService";
+import {
+  createOrUpdateClass,
+  addClassMessage,
+  removeClassMessage,
+  setClassLocations
+} from "./classService";
 import { GoogleWalletApiError, getGoogleWalletIssuerId, isGoogleWalletConfigured } from "./client";
 import { buildSaveLink } from "./jwt";
 import { addObjectMessage, createObject, patchObject, removeObjectMessage } from "./objectService";

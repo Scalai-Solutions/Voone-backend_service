@@ -35,11 +35,7 @@ export class WalletSyncError extends AppError {
 }
 
 export type WalletNotificationErrorCode =
-  | "QUOTA_EXCEEDED"
-  | "NOT_FOUND"
-  | "AUTH_ERROR"
-  | "TRANSIENT"
-  | "NOT_IMPLEMENTED";
+  "QUOTA_EXCEEDED" | "NOT_FOUND" | "AUTH_ERROR" | "TRANSIENT" | "NOT_IMPLEMENTED";
 
 export class WalletNotificationError extends AppError {
   constructor(message: string, code: WalletNotificationErrorCode, cause?: unknown) {

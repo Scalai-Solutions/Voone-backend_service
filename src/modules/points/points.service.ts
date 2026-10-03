@@ -182,15 +182,19 @@ export class PointsService {
     await this.wallets.enqueueMemberSync(memberId);
 
     if (applied && this.notifications) {
-      this.notifications.onPointsCredited(memberId, balance.spendable, {
-        milestoneReached: previous ? this.crossedMilestone(previous.lifetimePoints, balance.lifetime, tier) : false,
-        tierChanged: previous ? previous.tier !== (tier?.code ?? null) : false
-      }).catch((error) => {
-        console.error("[notifications] could not enqueue points credit notification", {
-          memberId,
-          error: error instanceof Error ? error.message : String(error)
+      this.notifications
+        .onPointsCredited(memberId, balance.spendable, {
+          milestoneReached: previous
+            ? this.crossedMilestone(previous.lifetimePoints, balance.lifetime, tier)
+            : false,
+          tierChanged: previous ? previous.tier !== (tier?.code ?? null) : false
+        })
+        .catch((error) => {
+          console.error("[notifications] could not enqueue points credit notification", {
+            memberId,
+            error: error instanceof Error ? error.message : String(error)
+          });
         });
-      });
     }
 
     return { applied, balance, tier };

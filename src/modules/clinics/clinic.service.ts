@@ -48,9 +48,10 @@ export const findClinicBySlug = async (
     throw new ClinicNotFoundError(publicKey);
   }
 
-  const where = parsed.data.includes("-") && z.string().uuid().safeParse(parsed.data).success
-    ? { id: parsed.data }
-    : { slug: parsed.data };
+  const where =
+    parsed.data.includes("-") && z.string().uuid().safeParse(parsed.data).success
+      ? { id: parsed.data }
+      : { slug: parsed.data };
 
   const clinic = await db.clinic.findUnique({
     where,

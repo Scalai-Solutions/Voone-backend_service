@@ -169,10 +169,7 @@ export abstract class BaseWalletProvider implements WalletPassProvider {
     throw new WalletNotificationNotImplementedError();
   }
 
-  protected doSetLocations(
-    classId: string,
-    locations: WalletMerchantLocation[]
-  ): Promise<void> {
+  protected doSetLocations(classId: string, locations: WalletMerchantLocation[]): Promise<void> {
     void classId;
     void locations;
 

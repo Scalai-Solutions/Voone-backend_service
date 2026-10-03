@@ -1,8 +1,11 @@
 import { z } from "zod";
 
-const httpsUrl = z.string().url().refine((value) => value.startsWith("https://"), {
-  message: "actionUrl must use https"
-});
+const httpsUrl = z
+  .string()
+  .url()
+  .refine((value) => value.startsWith("https://"), {
+    message: "actionUrl must use https"
+  });
 
 export const notificationMessageSchema = z.object({
   header: z.string().trim().min(1).max(60),

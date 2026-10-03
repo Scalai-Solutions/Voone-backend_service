@@ -54,9 +54,9 @@ describe("findClinicBySlug", () => {
   it("returns the clinic a UUID QR poster points at", async () => {
     const clinic = { ...AUREA, template: TEMPLATE };
 
-    await expect(
-      findClinicBySlug(db(vi.fn().mockResolvedValue(clinic)), AUREA.id)
-    ).resolves.toBe(clinic);
+    await expect(findClinicBySlug(db(vi.fn().mockResolvedValue(clinic)), AUREA.id)).resolves.toBe(
+      clinic
+    );
   });
 
   it("keeps old slug posters working", async () => {
