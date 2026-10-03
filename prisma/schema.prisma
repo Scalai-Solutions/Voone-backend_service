@@ -186,6 +186,7 @@ model Member {
   phone String?
 
   email         String?
+  code          String?
   pointsBalance Int     @default(0)
   tier          String?
 
@@ -259,6 +260,7 @@ model Member {
   notificationDeliveries NotificationDelivery[]
 
   @@unique([clinicId, phone])
+  @@unique([clinicId, code])
   @@index([clinicId])
 }
 
