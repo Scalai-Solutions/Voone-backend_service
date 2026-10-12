@@ -3,3 +3,8 @@ node_modules
 coverage
 package-lock.json
 tests/.tmp
+
+# The onboarding engine reference implementation and its fixtures, vendored verbatim
+# as a test oracle. Reformatting them would break a byte-for-byte diff against the next
+# drop from the partners, which is how we detect that the specification moved.
+tests/onboarding/reference/

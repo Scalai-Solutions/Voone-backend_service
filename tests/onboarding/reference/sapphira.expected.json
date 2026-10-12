@@ -1,0 +1,443 @@
+{
+  "version": "1.2.0",
+  "answers": {
+    "ticket": null,
+    "freq": null,
+    "objective": "equilibrado",
+    "investment": "equilibrado",
+    "occupancy": "o2",
+    "members": "m3"
+  },
+  "estimates": {
+    "segment": "high",
+    "ticket": 65,
+    "visits": 5.1,
+    "annualSpend": 331.5
+  },
+  "ladder": [
+    {
+      "n": 1,
+      "tramo": 1,
+      "type": "premio",
+      "threshold": 30,
+      "tier": null,
+      "reward": {
+        "name": "Kit de minitallas",
+        "value": 18,
+        "cost": 9
+      },
+      "perk": null
+    },
+    {
+      "n": 2,
+      "tramo": 1,
+      "type": "ventaja",
+      "threshold": 70,
+      "tier": null,
+      "reward": null,
+      "perk": {
+        "kind": "diag",
+        "name": "Diagnóstico corporal gratis",
+        "cost": 0
+      }
+    },
+    {
+      "n": 3,
+      "tramo": 1,
+      "type": "premio",
+      "threshold": 100,
+      "tier": null,
+      "reward": {
+        "name": "Minitalla de sérum",
+        "value": 10,
+        "cost": 5
+      },
+      "perk": null
+    },
+    {
+      "n": 4,
+      "tramo": 1,
+      "type": "ventaja",
+      "threshold": 130,
+      "tier": null,
+      "reward": null,
+      "perk": {
+        "kind": "doble",
+        "name": "Puntos dobles en tu próxima visita",
+        "cost": 3.25
+      }
+    },
+    {
+      "n": 5,
+      "tramo": 1,
+      "type": "premio",
+      "threshold": 160,
+      "tier": null,
+      "reward": {
+        "name": "Mascarilla facial monodosis",
+        "value": 12,
+        "cost": 6
+      },
+      "perk": null
+    },
+    {
+      "n": 6,
+      "tramo": 1,
+      "type": "nivel",
+      "threshold": 190,
+      "tier": "plata",
+      "reward": null,
+      "perk": null
+    },
+    {
+      "n": 7,
+      "tramo": 2,
+      "type": "premio",
+      "threshold": 250,
+      "tier": null,
+      "reward": {
+        "name": "Zona mini (entrecejo, labio, mentón, patillas)",
+        "value": 20,
+        "cost": 1.6
+      },
+      "perk": null
+    },
+    {
+      "n": 8,
+      "tramo": 2,
+      "type": "ventaja",
+      "threshold": 310,
+      "tier": null,
+      "reward": null,
+      "perk": {
+        "kind": "doble",
+        "name": "Puntos dobles en tu próxima visita",
+        "cost": 3.25
+      }
+    },
+    {
+      "n": 9,
+      "tramo": 2,
+      "type": "premio",
+      "threshold": 370,
+      "tier": null,
+      "reward": {
+        "name": "Zona pequeña (axilas, ingles, cuello)",
+        "value": 30,
+        "cost": 2.4
+      },
+      "perk": null
+    },
+    {
+      "n": 10,
+      "tramo": 2,
+      "type": "premio",
+      "threshold": 430,
+      "tier": null,
+      "reward": {
+        "name": "Presoterapia 30 min",
+        "value": 35,
+        "cost": 1.75
+      },
+      "perk": null
+    },
+    {
+      "n": 11,
+      "tramo": 2,
+      "type": "nivel",
+      "threshold": 490,
+      "tier": "oro",
+      "reward": null,
+      "perk": null
+    },
+    {
+      "n": 12,
+      "tramo": 3,
+      "type": "premio",
+      "threshold": 590,
+      "tier": null,
+      "reward": {
+        "name": "Zona mediana (glúteos, pecho, espalda, facial completa)",
+        "value": 45,
+        "cost": 3.6
+      },
+      "perk": null
+    },
+    {
+      "n": 13,
+      "tramo": 3,
+      "type": "ventaja",
+      "threshold": 680,
+      "tier": null,
+      "reward": null,
+      "perk": {
+        "kind": "doble",
+        "name": "Puntos dobles en tu próxima visita",
+        "cost": 3.25
+      }
+    },
+    {
+      "n": 14,
+      "tramo": 3,
+      "type": "premio",
+      "threshold": 770,
+      "tier": null,
+      "reward": {
+        "name": "Tratamiento Mirada",
+        "value": 50,
+        "cost": 10
+      },
+      "perk": null
+    },
+    {
+      "n": 15,
+      "tramo": 3,
+      "type": "premio",
+      "threshold": 860,
+      "tier": null,
+      "reward": {
+        "name": "Higiene facial Detox / Limpieza facial básica",
+        "value": 60,
+        "cost": 12
+      },
+      "perk": null
+    },
+    {
+      "n": 16,
+      "tramo": 3,
+      "type": "nivel",
+      "threshold": 950,
+      "tier": "platino",
+      "reward": null,
+      "perk": null
+    },
+    {
+      "n": 17,
+      "tramo": 4,
+      "type": "premio",
+      "threshold": 1050,
+      "tier": null,
+      "reward": {
+        "name": "Masaje descontracturante",
+        "value": 70,
+        "cost": 7
+      },
+      "perk": null
+    },
+    {
+      "n": 18,
+      "tramo": 4,
+      "type": "ventaja",
+      "threshold": 1150,
+      "tier": null,
+      "reward": null,
+      "perk": {
+        "kind": "doble",
+        "name": "Puntos dobles en tu próxima visita",
+        "cost": 3.25
+      }
+    },
+    {
+      "n": 19,
+      "tramo": 4,
+      "type": "ventaja",
+      "threshold": 1260,
+      "tier": null,
+      "reward": null,
+      "perk": {
+        "kind": "mejora",
+        "name": "Mejora de tu tratamiento o 10 minutos extra",
+        "cost": 3.25
+      }
+    },
+    {
+      "n": 20,
+      "tramo": 4,
+      "type": "premio",
+      "threshold": 1360,
+      "tier": null,
+      "reward": {
+        "name": "Oxigenación profunda con Hydrafacial",
+        "value": 75,
+        "cost": 9
+      },
+      "perk": null
+    },
+    {
+      "n": 21,
+      "tramo": 4,
+      "type": "ventaja",
+      "threshold": 1460,
+      "tier": null,
+      "reward": null,
+      "perk": {
+        "kind": "sorpresa",
+        "name": "Premio sorpresa",
+        "cost": 3.65
+      }
+    },
+    {
+      "n": 22,
+      "tramo": 4,
+      "type": "premio",
+      "threshold": 1560,
+      "tier": null,
+      "reward": {
+        "name": "Láser lipolítico",
+        "value": 80,
+        "cost": 12
+      },
+      "perk": null
+    },
+    {
+      "n": 23,
+      "tramo": 4,
+      "type": "nivel",
+      "threshold": 1660,
+      "tier": "diamante",
+      "reward": null,
+      "perk": null
+    }
+  ],
+  "recurring": {
+    "every": 250,
+    "name": "Láser lipolítico",
+    "value": 80
+  },
+  "tiers": {
+    "bronce": {
+      "birthday": "Mascarilla facial monodosis",
+      "annualCost": 6
+    },
+    "plata": {
+      "birthday": "Presoterapia 15 min",
+      "annualCost": 1.5
+    },
+    "oro": {
+      "birthday": "Presoterapia 30 min",
+      "annualCost": 3.66
+    },
+    "platino": {
+      "birthday": "Masaje descontracturante",
+      "annualCost": 12.99
+    },
+    "diamante": {
+      "birthday": "Oxigenación profunda con Hydrafacial",
+      "annualCost": 19.23
+    }
+  },
+  "referrals": [
+    {
+      "n": 1,
+      "name": "Presoterapia 15 min",
+      "value": 20,
+      "cost": 1
+    },
+    {
+      "n": 3,
+      "name": "Zona pequeña (axilas, ingles, cuello) y Kit de minitallas",
+      "value": 48,
+      "cost": 11.4
+    },
+    {
+      "n": 5,
+      "name": "Masaje descontracturante y Mascarilla facial monodosis",
+      "value": 82,
+      "cost": 13
+    },
+    {
+      "n": 7,
+      "name": "Oxigenación profunda con Hydrafacial y Contorno de ojos",
+      "value": 113,
+      "cost": 28
+    },
+    {
+      "n": 10,
+      "name": "Bio-Pen y Tratamiento Bom Bon Chocolate",
+      "value": 180,
+      "cost": 18
+    }
+  ],
+  "costPct": 0.0662,
+  "program": {
+    "incRedeem": 4444.85,
+    "redemptions": 683.82,
+    "repRewardYear": 21.79,
+    "repRewardCount": 4,
+    "occPrem": 9,
+    "occCount": 2,
+    "netYear1": 12558.56,
+    "repeaters": 156,
+    "occasionals": 144,
+    "refNew": 15,
+    "refRevenue": 2823.6,
+    "refCostYear": 26.14,
+    "monthlyFee": 149.99,
+    "s0": 0.42,
+    "s1": 0.52,
+    "occSpend": 84.5,
+    "incRetention": 7410,
+    "incSpend": 2585.7,
+    "incRevenue": 17264.15,
+    "incMargin": 10358.49,
+    "costRewards": 3521.12,
+    "costBenefits": 1654.65,
+    "costFee": 1799.88,
+    "costAll": 7001.78,
+    "netYear": 3356.71,
+    "breakEvenPP": 0.12,
+    "memberSpend": 63882,
+    "repBenefYear": 8.95,
+    "lifeRep": 4
+  },
+  "adaptations": [
+    "Algunos premios usan algo más de su presupuesto individual; el coste total queda en el 6,6% del gasto."
+  ],
+  "review": [],
+  "guarantees": [
+    [
+      "El primer premio llega en la primera visita",
+      true
+    ],
+    [
+      "Plata se alcanza con 3 visitas",
+      true
+    ],
+    [
+      "Cada nivel cuesta al menos 1,5 veces el anterior (aquí ×1,53)",
+      true
+    ],
+    [
+      "Nunca pasan más de 1,5 visitas sin un premio, una ventaja o una subida de nivel",
+      true
+    ],
+    [
+      "Todo premio o ventaja se canjea en una visita de pago o en una sesión de un bono ya pagado, en un máximo de 60 días",
+      true
+    ],
+    [
+      "En Bronce el mejor premio es el primero",
+      true
+    ],
+    [
+      "Cada nivel incluye una ventaja de puntos dobles",
+      true
+    ],
+    [
+      "Los bonos suman puntos en cada sesión consumida, no al comprarlos",
+      true
+    ],
+    [
+      "Subir de nivel exige antigüedad mínima (Oro 12, Platino 24 y Diamante 36 meses)",
+      true
+    ],
+    [
+      "Ningún regalo se repite en dos hitos seguidos",
+      true
+    ],
+    [
+      "Premios y ventajas cuestan el 6,6% del gasto de la clienta",
+      true
+    ]
+  ]
+}
