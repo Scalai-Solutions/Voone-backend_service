@@ -77,12 +77,36 @@ case, because it is the specification.
    nearest 5 — gives 15, because that threshold is 30. `sapphira.expected.json` carries no
    `welcome` field, so the prescribed fixture test cannot catch it.
 
+## Storage
+
+`CatalogItem` holds a centre's price list; `OnboardingProgram` holds a generated
+programme with the answers and the catalogue snapshot that produced it.
+
+**`CatalogItem` is separate from `ClinicTreatment` for a structural reason, not a
+stylistic one.** The engine's determinism rests on stable item ids — they are the final
+tie-break in every sort — and `treatmentsRepository.replaceForClinic` deletes every row
+and recreates it on each template save, minting fresh uuids. A catalogue stored there
+would generate a different ladder after an unrelated edit to the card's copy.
+
+The duplication is meant to be temporary. `ClinicTreatment.pointsAllotted` is a
+per-treatment points award that the engine's progress-in-euros model replaces outright;
+when the wizard is rewritten, `ClinicTreatment` should be retired and its two readers —
+the staff credit screen and the template flow — moved onto `CatalogItem`. Until then,
+which table a screen reads must be a deliberate choice.
+
+Prices are stored in cents. The engine does float arithmetic on euros, and a decimal
+column read back as a float is how a ladder ends up differing by a cent and therefore by
+a tie-break.
+
 ## Not wired up yet
 
-Nothing calls this. It computes a programme and returns it; it does not persist one, and
-no existing points, tier or notification code path has been changed.
+No route calls any of this, and no existing points, tier, wallet or notification path has
+been changed. `OnboardingService` can generate, store and publish a programme; nothing
+reads a published one yet, so members still earn against `ClinicTemplate.tierRewards`.
 
-Still to come: a catalogue table, program storage and draft/publish endpoints, issued
-rewards with expiry and the paid-visit redemption gate, and the wizard rewrite. The
-runtime rules in section 6 of the guide — tenure gates, 60-day expiry, progress
-multipliers, referral counting — are the product's job, not the engine's.
+Still to come: HTTP routes, CSV import, issued rewards with expiry and the paid-visit
+redemption gate, referral counting, and the wizard rewrite. Switching the points and tier
+engines over to a published programme is the step that needs the most care — it changes
+what every existing member's balance means. The runtime rules in section 6 of the guide —
+tenure gates, 60-day expiry, progress multipliers — are the product's job, not the
+engine's.

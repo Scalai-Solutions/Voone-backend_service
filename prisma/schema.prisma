@@ -52,6 +52,8 @@ model Clinic {
   notificationSettings  ClinicNotificationSettings?
   notificationLocations ClinicLocation[]
   notificationAuditLogs NotificationAuditLog[]
+  catalogItems          CatalogItem[]
+  onboardingPrograms    OnboardingProgram[]
 }
 
 model User {
@@ -566,4 +568,123 @@ model PassClaim {
 
   /// For the sweep that deletes expired rows.
   @@index([expiresAt])
+}
+
+/// One row of a centre's price list, as the onboarding engine consumes it.
+///
+/// SEPARATE FROM ClinicTreatment, and not by preference. The engine's determinism rests
+/// on stable item ids — they are the final tie-break in every sort — and
+/// treatmentsRepository.replaceForClinic deletes every row and recreates it on each
+/// template save, minting fresh uuids. A catalogue stored that way would generate a
+/// different ladder after an unrelated edit to the card's copy.
+///
+/// This duplication is real and is meant to be temporary. ClinicTreatment carries
+/// `pointsAllotted`, a per-treatment points award that the engine's progress-in-euros
+/// model replaces outright. When the onboarding wizard is rewritten, ClinicTreatment
+/// should be retired and its two readers — the staff credit screen and the template
+/// flow — moved onto this table. Until then the two coexist, and whichever one a screen
+/// reads must be a deliberate choice rather than whichever came to hand.
+model CatalogItem {
+  id       String @id @default(uuid())
+  clinicId String
+  clinic   Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  /// The id the engine sees, stable for the life of the row. Taken from the centre's own
+  /// export when it has one, generated otherwise. Unique per clinic so an import can
+  /// address a row it has seen before without guessing at our uuid.
+  externalId String
+
+  name String
+
+  /// Cents, not euros. The engine does float arithmetic on euros and a decimal column
+  /// read back as a float is the classic way to get a ladder that differs by a cent and
+  /// therefore by a tie-break. An integer converts to the same euro value every time.
+  priceCents Int
+
+  durationMin Int?
+
+  /// Retail product. Forces category COS in the engine.
+  isProduct Boolean @default(false)
+
+  /// Category the centre chose. Null means the engine classifies by keyword.
+  /// Deliberately a string rather than an enum: the category list lives in the versioned
+  /// engine config, and a database enum would make adding one a migration.
+  categoryId String?
+
+  /// The centre's own cost ratio for this row, 0 to 1. Beats the category default.
+  costPctOverride Float?
+
+  /// The price is Voone's estimate rather than the centre's figure, so it is excluded
+  /// from ticket estimation.
+  estimated Boolean @default(false)
+
+  /// How the stored category was arrived at: "centro", "producto", "palabra clave" or
+  /// "sin clasificar". Kept so the review screen can show the centre why a row is filed
+  /// where it is.
+  classificationSource String?
+
+  /// Nothing matched, so the centre must choose. Blocks programme approval.
+  needsReview Boolean @default(false)
+
+  /// Position in the catalogue, and part of the engine's contract: the beam search keeps
+  /// a bounded number of states, so input order can change which survive. A centre's
+  /// catalogue must therefore be passed in a fixed order, and this is that order.
+  position Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([clinicId, externalId])
+  @@index([clinicId, position])
+}
+
+/// A generated loyalty programme: the engine's whole output, with the inputs that made it.
+///
+/// Stored verbatim rather than normalised into milestone rows. The output is the audit
+/// record — regenerating it must be possible years later, which needs the catalogue
+/// snapshot, the answers and both version strings together. Splitting it across tables
+/// would make "what exactly did this centre approve" a join that can drift.
+model OnboardingProgram {
+  id       String @id @default(uuid())
+  clinicId String
+  clinic   Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  /// Monotonic per clinic. A recalibration or an answer change writes a new version
+  /// rather than editing one, so a published programme is never altered underneath a
+  /// member who is part way up its ladder.
+  version Int
+
+  status OnboardingProgramStatus @default(BORRADOR)
+
+  /// Which code and which numbers produced this. Both are needed: the same engine with a
+  /// recalibrated config gives a different ladder.
+  engineVersion String
+  configVersion String
+
+  /// The six answers, exactly as submitted.
+  answers Json
+
+  /// The engine's Program object, whole.
+  output Json
+
+  /// The catalogue as it stood when this was generated. Without it the output cannot be
+  /// reproduced, because the engine reads prices and ids that the centre may since have
+  /// edited.
+  catalogSnapshot Json
+
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([clinicId, version])
+  @@index([clinicId, status])
+}
+
+enum OnboardingProgramStatus {
+  /// Generated and waiting for the centre. Carries review notes it must clear first.
+  BORRADOR
+  /// Live. Members earn against this programme's thresholds.
+  ACTIVO
+  /// Replaced by a later version. Kept, never deleted: members progressed against it.
+  SUSTITUIDO
 }
