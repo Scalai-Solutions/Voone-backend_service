@@ -704,6 +704,80 @@ const relaxationSteps = (candidateCount: number): Array<[string, Relaxation]> =>
   ]
 ];
 
+/* ------------------------------------------------------------------- bronce ordering */
+
+export type BronceOrdering =
+  /** The first reward already is a best one, so there was nothing to move. */
+  | "unchanged"
+  /** The document's order: best first, the rest ascending. */
+  | "best-first"
+  /** Best first, the rest descending, because the document's order would repeat a gift. */
+  | "best-first-descending"
+  /** Best first was impossible without repeating a gift, so the beam's order was kept. */
+  | "kept-to-avoid-repeat";
+
+const sharesItem = (a: RewardOption, b: RewardOption): boolean =>
+  ids(a).some((id) => ids(b).includes(id));
+
+/** True when two consecutive rewards in the sequence share a catalogue item. */
+const hasConsecutiveRepeat = (sequence: RewardOption[]): boolean =>
+  sequence.some((option, i) => i > 0 && sharesItem(option, sequence[i - 1]));
+
+/**
+ * Put Bronce's best reward first, without ever repeating a gift back to back.
+ *
+ * Version 1.2 of the guide asks for two things at once: the best Bronce reward leads, so
+ * the very first visit feels generous, and no gift repeats in two milestones in a row.
+ * The reference engine does the first by rotating the segment, and in doing so it can undo
+ * the second — the beam search guarantees its own ordering has no adjacent repeat, and the
+ * rotation moves rewards next to neighbours the beam never checked.
+ *
+ * That is not a theoretical clash. In every failing case the three Bronce rewards are
+ * tied in value, so "best first" has no meaning at all and the rotation was changing
+ * nothing except creating the repeat.
+ *
+ * So the order is applied only where it changes which reward leads, and never at the price
+ * of a repeat — the second guarantee wins, because a gift offered twice running reads as a
+ * mistake, whereas an unusual Bronce order is invisible. Rewards travel with their
+ * alternatives, which were computed against their neighbours' values.
+ */
+export const orderBronce = (chosen: ChosenReward[]): BronceOrdering => {
+  const segment = chosen.filter((c) => c.m.tramo === 1);
+  const following = chosen.find((c) => c.m.tramo > 1);
+
+  if (segment.length < 2) return "unchanged";
+
+  const slots = segment.map((c) => ({ o: c.o, alts: c.alts }));
+  const best = Math.max(...slots.map((s) => s.o.value));
+
+  // Already leading with a best reward. Covers the all-tied case, where the reference's
+  // rotation is a no-op in meaning and the source of the repeat.
+  if (slots[0].o.value === best) return "unchanged";
+
+  const ascending = [...slots].sort((x, y) => x.o.value - y.o.value);
+  const top = ascending[ascending.length - 1];
+  const rest = ascending.slice(0, -1);
+  const attempts: Array<[BronceOrdering, typeof slots]> = [
+    ["best-first", [top, ...rest]],
+    ["best-first-descending", [top, ...[...rest].reverse()]]
+  ];
+
+  for (const [name, order] of attempts) {
+    const sequence = [...order.map((s) => s.o), ...(following ? [following.o] : [])];
+
+    if (hasConsecutiveRepeat(sequence)) continue;
+
+    segment.forEach((c, i) => {
+      c.o = order[i].o;
+      c.alts = order[i].alts;
+    });
+
+    return name;
+  }
+
+  return "kept-to-avoid-repeat";
+};
+
 /* ------------------------------------------------------------------------------ run */
 
 export const run = (items: CatalogItem[], ans: Answers): EngineResult => {
@@ -744,17 +818,7 @@ export const run = (items: CatalogItem[], ans: Answers): EngineResult => {
     };
   }
 
-  // Bronce leads with its best reward, so the very first visit feels generous. The rest
-  // of the segment stays ascending, as every later segment does.
-  const bronce = chosen.filter((c) => c.m.tramo === 1);
-  const ascending = bronce
-    .map((c) => ({ o: c.o, alts: c.alts }))
-    .sort((x, y) => x.o.value - y.o.value);
-  const reordered = [ascending[ascending.length - 1], ...ascending.slice(0, -1)];
-  bronce.forEach((c, i) => {
-    c.o = reordered[i].o;
-    c.alts = reordered[i].alts;
-  });
+  const bronce = orderBronce(chosen);
 
   const rec = chooseRecurring(est.A, chosen[chosen.length - 1].o.value, lad.inv, cands);
   const gifts = chooseTierGifts(cands, est.ticket);
@@ -791,6 +855,14 @@ export const run = (items: CatalogItem[], ans: Answers): EngineResult => {
 
   const rx = used.rx;
   const adapt: string[] = [];
+
+  if (bronce === "kept-to-avoid-repeat") {
+    // The one case where the two Bronce rules cannot both hold. Said plainly, because the
+    // guarantee below will read false and the centre should know why.
+    adapt.push(
+      "En Bronce el mejor premio no va el primero, porque así se repetiría un regalo en dos hitos seguidos."
+    );
+  }
 
   if (floorUsed) {
     adapt.push(

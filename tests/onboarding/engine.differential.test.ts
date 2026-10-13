@@ -140,6 +140,66 @@ const answersFor = (
   occupancy: OccupancyLevel
 ): Answers => ({ ticket: null, freq: null, objective, investment, occupancy, members: "m3" });
 
+const REPEAT = "Ningún regalo se repite en dos hitos seguidos";
+/** The sentence the port adds when best-first cannot be had without a repeat. */
+const KEPT_NOTE = "En Bronce el mejor premio no va el primero";
+const BRONCE_FIRST = "En Bronce el mejor premio es el primero";
+
+const holds = (r: ComparableResult, title: string): boolean =>
+  r.guarantees.find(([text]) => text === title)?.[1] ?? true;
+
+/**
+ * Compares two orderings of the same first segment as equal, and ignores the two
+ * guarantees that the one deliberate deviation can change.
+ */
+const withoutBronceOrder = (s: ReturnType<typeof shape>) => ({
+  ...s,
+  rewards: [
+    ...s.rewards
+      .slice(0, 3)
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      .map(({ n, ...rest }) => rest)
+      .sort((a, b) => (a.ids.join() < b.ids.join() ? -1 : 1)),
+    ...s.rewards.slice(3)
+  ],
+  adapt: s.adapt.filter((note) => !note.startsWith(KEPT_NOTE)),
+  guarantees: s.guarantees.filter(([text]) => text !== REPEAT && text !== BRONCE_FIRST)
+});
+
+/**
+ * The port must equal the reference — except in one documented case.
+ *
+ * Version 1.2 reorders Bronce so its best reward leads, and in doing so can break the
+ * guarantee that no gift repeats in two milestones in a row. The port repairs that, so
+ * wherever the REFERENCE breaks the guarantee the port is required to hold it, and to
+ * differ from the reference in nothing except the order of the three Bronce rewards.
+ * Everywhere else the two must be identical. Nothing wider than that is tolerated: a
+ * deviation that were allowed to grow would stop proving anything.
+ */
+const expectAgreement = (
+  mine: ComparableResult,
+  theirs: ComparableResult,
+  label?: string
+): void => {
+  if (holds(theirs, REPEAT)) {
+    expect(shape(mine), label).toEqual(shape(theirs));
+
+    return;
+  }
+
+  expect(holds(mine, REPEAT), `${label}: the port must repair the repeat`).toBe(true);
+
+  // When the repair cannot also keep the best reward first, the port says so — and the
+  // two facts always come together. A false guarantee without its sentence would be a
+  // silent defect; the sentence without a false guarantee would be a lie.
+  const saysKept = mine.adapt.some((note) => note.startsWith(KEPT_NOTE));
+  expect(holds(mine, BRONCE_FIRST), `${label}: the Bronce guarantee and its note disagree`).toBe(
+    !saysKept
+  );
+
+  expect(withoutBronceOrder(shape(mine)), label).toEqual(withoutBronceOrder(shape(theirs)));
+};
+
 describe("the TypeScript port against the reference engine", () => {
   const combos = OBJECTIVES.flatMap((objective) =>
     INVESTMENTS.flatMap((investment) =>
@@ -154,8 +214,10 @@ describe("the TypeScript port against the reference engine", () => {
       const mine = run(items, answers);
 
       expect(isEngineError(mine)).toBe(false);
-      expect(shape(mine as unknown as ComparableResult)).toEqual(
-        shape(reference.run(items, answers))
+      expectAgreement(
+        mine as unknown as ComparableResult,
+        reference.run(items, answers),
+        `${objective}/${investment}/${occupancy}`
       );
     }
   );
@@ -174,10 +236,11 @@ describe("the TypeScript port against the reference engine", () => {
           members: "m3"
         };
 
-        expect(
-          shape(run(items, answers) as unknown as ComparableResult),
+        expectAgreement(
+          run(items, answers) as unknown as ComparableResult,
+          reference.run(items, answers),
           `${ticket}/${freq}`
-        ).toEqual(shape(reference.run(items, answers)));
+        );
       }
     }
   });
@@ -214,7 +277,29 @@ describe("the TypeScript port against the reference engine", () => {
       return;
     }
 
-    expect(shape(mine as unknown as ComparableResult)).toEqual(shape(theirs));
+    expectAgreement(mine as unknown as ComparableResult, theirs, "tiny catalogue");
+  });
+});
+
+describe("the one place the port deliberately differs from the reference", () => {
+  const FAILING: Array<[Objective, InvestmentLevel, OccupancyLevel]> = [
+    ["equilibrado", "conservador", "o4"],
+    ["mas_visitas", "conservador", "o4"],
+    ["mas_gasto", "conservador", "o3"],
+    ["mas_gasto", "conservador", "o4"],
+    ["mas_clientes_nuevos", "conservador", "o4"]
+  ];
+
+  it.each(FAILING)("repairs the repeat on %s / %s / %s", (objective, investment, occupancy) => {
+    const answers = answersFor(objective, investment, occupancy);
+    const theirs = reference.run(items, answers);
+    const mine = run(items, answers) as unknown as ComparableResult;
+
+    // Pinned to the reference's own failure, so if the reference is ever fixed upstream
+    // this test says so instead of quietly passing against nothing.
+    expect(holds(theirs, REPEAT), "the reference no longer has this defect").toBe(false);
+    expect(holds(mine, REPEAT)).toBe(true);
+    expect(holds(mine, BRONCE_FIRST)).toBe(true);
   });
 });
 
@@ -240,8 +325,10 @@ describe("determinism", () => {
     expect(isEngineError(forward)).toBe(false);
     expect(isEngineError(backward)).toBe(false);
     // The reference and the port must agree about the reversed case too, whatever it is.
-    expect(shape(backward as unknown as ComparableResult)).toEqual(
-      shape(reference.run([...items].reverse(), answers))
+    expectAgreement(
+      backward as unknown as ComparableResult,
+      reference.run([...items].reverse(), answers),
+      "reversed catalogue"
     );
   });
 });
