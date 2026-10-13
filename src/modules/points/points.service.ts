@@ -57,6 +57,31 @@ export interface PointsNotificationPort {
   ): Promise<void>;
 }
 
+/**
+ * What a published onboarding programme contributes to a tier decision.
+ *
+ * A legacy clinic ranks members on lifetime points alone. A clinic with a published
+ * programme must also respect a minimum tenure per tier, never take a tier away, and notify
+ * on its real milestones rather than on evenly spaced ones. None of that belongs in the
+ * points module, which should not know programmes exist — so it asks this port, and a
+ * clinic without a programme gets `null` and the legacy rules, unchanged.
+ */
+export interface ProgramTierPort {
+  resolve(input: {
+    memberId: string;
+    clinicId: string;
+    lifetime: number;
+    /** The tier the member holds now, as stored. */
+    current: string | null;
+    /** Only a staff correction may take a tier away. */
+    allowDemotion: boolean;
+  }): Promise<{
+    tier: TierDefinition;
+    /** Whether going from `before` to `after` crossed a milestone worth announcing. */
+    milestoneCrossed: (before: number, after: number) => boolean;
+  } | null>;
+}
+
 /** Re-exported so callers of the service need not know where the error is declared. */
 export { InsufficientPointsError };
 
@@ -80,8 +105,14 @@ export class PointsService {
     private readonly ledger: PointsLedgerRepository,
     private readonly cache: MemberPointsCache,
     private readonly wallets: WalletSyncQueue,
-    private readonly notifications?: PointsNotificationPort
+    private readonly notifications?: PointsNotificationPort,
+    private readonly programTiers?: ProgramTierPort
   ) {}
+
+  /** The member's balances, from the ledger. For callers that need a number before they act. */
+  balanceFor(memberId: string): Promise<PointsBalance> {
+    return this.ledger.balanceFor(memberId);
+  }
 
   async credit(request: CreditRequest): Promise<PointsOutcome> {
     assertPositive(request.points);
@@ -124,7 +155,9 @@ export class PointsService {
       createdBy: request.createdBy
     });
 
-    return this.settle(request.memberId, request.clinicId, applied);
+    // A correction is the one thing allowed to take a tier away: the guide says tiers are
+    // not lost, but a wrong credit must be undoable for tier as well as for balance.
+    return this.settle(request.memberId, request.clinicId, applied, true);
   }
 
   async redeem(request: RedeemRequest): Promise<PointsOutcome> {
@@ -165,15 +198,29 @@ export class PointsService {
   private async settle(
     memberId: string,
     clinicId: string,
-    applied: boolean
+    applied: boolean,
+    allowDemotion = false
   ): Promise<PointsOutcome> {
     const [balance, scale] = await Promise.all([
       this.ledger.balanceFor(memberId),
       this.ledger.tierScaleFor(clinicId)
     ]);
-    const previous = applied && this.cache.read ? await this.cache.read(memberId) : null;
+    // Read for a programme even on a duplicate: "never lose a tier" needs the tier held now,
+    // and a retry is exactly when it might not be the one the cache last wrote.
+    const previous =
+      (applied || this.programTiers) && this.cache.read ? await this.cache.read(memberId) : null;
 
-    const tier = tierFor(balance.lifetime, scale);
+    const program = this.programTiers
+      ? await this.programTiers.resolve({
+          memberId,
+          clinicId,
+          lifetime: balance.lifetime,
+          current: previous?.tier ?? null,
+          allowDemotion
+        })
+      : null;
+
+    const tier = program ? program.tier : tierFor(balance.lifetime, scale);
 
     await this.cache.write(memberId, balance, tier?.code ?? null);
 
@@ -185,7 +232,9 @@ export class PointsService {
       this.notifications
         .onPointsCredited(memberId, balance.spendable, {
           milestoneReached: previous
-            ? this.crossedMilestone(previous.lifetimePoints, balance.lifetime, tier)
+            ? program
+              ? program.milestoneCrossed(previous.lifetimePoints, balance.lifetime)
+              : this.crossedMilestone(previous.lifetimePoints, balance.lifetime, tier)
             : false,
           tierChanged: previous ? previous.tier !== (tier?.code ?? null) : false
         })

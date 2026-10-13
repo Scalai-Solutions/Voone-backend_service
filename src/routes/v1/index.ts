@@ -14,6 +14,16 @@ import { PointsService } from "../../modules/points/points.service";
 import { buildNotificationService } from "../../modules/notifications/notification.composition";
 import { buildWalletSyncQueue } from "../../wallet/wallet.composition";
 import { createPointsRouter } from "./points.route";
+import { createOnboardingRouter } from "./onboarding.route";
+import { findClinicBySlug } from "../../modules/clinics/clinic.service";
+import { PrismaCatalogRepository } from "../../modules/onboarding/catalog.repository";
+import { OnboardingService } from "../../modules/onboarding/onboarding.service";
+import {
+  PrismaProgramTierPort,
+  hasActiveProgram
+} from "../../modules/onboarding/runtime/program-tier.port";
+import { RewardService } from "../../modules/onboarding/runtime/reward.service";
+import { VisitService } from "../../modules/onboarding/runtime/visit.service";
 import { CardIssuer } from "../../modules/wallet/card-issuer";
 import { buildWalletRegistry } from "../../wallet/wallet.composition";
 import { createMemberPassRouter } from "./member-pass.route";
@@ -78,15 +88,27 @@ if (config.APPLE_PASS_WEB_SERVICE_URL && config.CARD_REDEMPTION_SECRET) {
  */
 const walletSyncQueue = buildWalletSyncQueue(prisma);
 
-if (walletSyncQueue) {
+/**
+ * The points service every route here shares, built once.
+ *
+ * It carries the programme port, so a clinic that has published an onboarding programme gets
+ * tenure-aware tiers and exact milestone notifications, and every other clinic gets the legacy
+ * rules unchanged.
+ */
+const pointsService = walletSyncQueue
+  ? new PointsService(
+      new PrismaPointsLedgerRepository(prisma),
+      new PrismaMemberPointsCache(prisma),
+      walletSyncQueue,
+      notificationService,
+      new PrismaProgramTierPort(prisma)
+    )
+  : null;
+
+if (pointsService) {
   v1Router.use(
     createPointsRouter({
-      points: new PointsService(
-        new PrismaPointsLedgerRepository(prisma),
-        new PrismaMemberPointsCache(prisma),
-        walletSyncQueue,
-        notificationService
-      ),
+      points: pointsService,
       // Resolved from the member rather than trusted from the body: a staff caller must
       // not be able to attribute a movement to a clinic that is not the member's.
       clinicOfMember: async (memberId) => {
@@ -96,10 +118,33 @@ if (walletSyncQueue) {
         });
 
         return member && !member.erasedAt ? member.clinicId : null;
-      }
+      },
+      // At a clinic on a programme, points come from recorded visits, not from typing.
+      usesProgram: (clinicId) => hasActiveProgram(prisma, clinicId)
     })
   );
 }
+
+/**
+ * Onboarding and the programme's runtime.
+ *
+ * The catalogue and programme routes need only the database. Recording a visit and redeeming
+ * a reward credit points, so those are wired only when the points service could be built —
+ * and report 503 rather than disappearing, so a deployment missing its wallet configuration
+ * says why instead of answering 404.
+ */
+const catalogRepository = new PrismaCatalogRepository(prisma);
+
+v1Router.use(
+  createOnboardingRouter({
+    onboarding: new OnboardingService(prisma, catalogRepository),
+    catalog: catalogRepository,
+    visits: pointsService ? new VisitService(prisma, pointsService) : undefined,
+    rewards: new RewardService(prisma),
+    findClinic: (slug) => findClinicBySlug(prisma, slug),
+    clinicExists: async (clinicId) => (await prisma.clinic.count({ where: { id: clinicId } })) > 0
+  })
+);
 
 /**
  * Staff card download. Needs the same two variables as the Apple routes, because without

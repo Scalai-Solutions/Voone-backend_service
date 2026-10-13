@@ -3,6 +3,8 @@ import type { ZodType } from "zod";
 
 import { MemberNotFoundError } from "../../common/errors/membership.errors";
 import { PointsValidationError } from "../../common/errors/points.errors";
+import { OnboardingError } from "../../modules/onboarding/onboarding.service";
+import { MANUAL_POINTS_REFUSAL } from "../../modules/onboarding/runtime/program-tier.port";
 import { asyncHandler } from "../../common/middleware/async-handler";
 import { createRequireStaffKey } from "../../common/middleware/staff-key";
 import { config } from "../../config/env";
@@ -13,6 +15,11 @@ export interface PointsRouterDeps {
   points: PointsService;
   /** Resolves the member's clinic, and refuses a member who does not exist or is erased. */
   clinicOfMember: (memberId: string) => Promise<string | null>;
+  /**
+   * Whether a clinic runs an onboarding programme, in which case points are not added or
+   * spent by hand. Optional so a deployment without programmes behaves exactly as before.
+   */
+  usesProgram?: (clinicId: string) => Promise<boolean>;
 }
 
 /**
@@ -79,11 +86,19 @@ export const createPointsRouter = (deps: PointsRouterDeps): Router => {
     return clinicId;
   };
 
+  /** Refuses a by-hand movement at a clinic that runs a programme. Claw-back is exempt. */
+  const refuseIfProgram = async (clinicId: string): Promise<void> => {
+    if (deps.usesProgram && (await deps.usesProgram(clinicId))) {
+      throw new OnboardingError(MANUAL_POINTS_REFUSAL, 409);
+    }
+  };
+
   router.post(
     "/members/:memberId/points/credit",
     requireStaff,
     asyncHandler(async (req, res) => {
       const clinicId = await clinicFor(req);
+      await refuseIfProgram(clinicId);
       const input = parse(creditSchema, req.body);
 
       await respond(res, () =>
@@ -101,6 +116,7 @@ export const createPointsRouter = (deps: PointsRouterDeps): Router => {
     requireStaff,
     asyncHandler(async (req, res) => {
       const clinicId = await clinicFor(req);
+      await refuseIfProgram(clinicId);
       const input = parse(redeemSchema, req.body);
 
       await respond(res, () =>

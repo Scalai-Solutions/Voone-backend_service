@@ -51,5 +51,40 @@ export const startOfMonthIn = (timeZone: string, now: Date = new Date()): Date =
   return new Date(naive - offsetMs(new Date(naive), timeZone));
 };
 
+/**
+ * The start of the current calendar year in a given time zone, as a UTC instant.
+ *
+ * Needed for "3 products per year": a clinic in Madrid thinks of the year as starting at
+ * midnight on 1 January there, and UTC would put every purchase made in the first hour of
+ * the year (two in summer) into the year before. Same technique as startOfMonthIn, and for
+ * the same reason it measures the offset at the candidate instant rather than at `now`.
+ */
+export const startOfYearIn = (timeZone: string, now: Date = new Date()): Date => {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric" }).formatToParts(now);
+  const year = Number(parts.find((p) => p.type === "year")?.value ?? 0);
+  const naive = Date.UTC(year, 0, 1, 0, 0, 0);
+
+  return new Date(naive - offsetMs(new Date(naive), timeZone));
+};
+
+/**
+ * The calendar day an instant falls on in a zone, as YYYY-MM-DD.
+ *
+ * What "the same visit" means for redemption: a reward can be redeemed against a payment
+ * made today, and a payment at 23:50 must still count at 00:10 only if the clinic would
+ * call that the same day — which is a Madrid question, not a UTC one.
+ */
+export const dayKeyIn = (timeZone: string, at: Date): string => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(at);
+  const get = (type: string): string => parts.find((p) => p.type === type)?.value ?? "";
+
+  return `${get("year")}-${get("month")}-${get("day")}`;
+};
+
 /** Every clinic is Spanish, so this is the only zone the product currently has. */
 export const CLINIC_TIME_ZONE = "Europe/Madrid";

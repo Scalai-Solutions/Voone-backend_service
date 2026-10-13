@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import { OnboardingProgramStatus, type PrismaClient } from "@prisma/client";
 
 import { MemberNotFoundError } from "../common/errors/membership.errors";
 import { WalletConfigurationError } from "../common/errors/wallet.errors";
@@ -6,6 +6,9 @@ import { LoyaltyCardAssembler } from "./engine/loyalty-card-assembler";
 import { LoyaltyCard, loyaltyCardSchema } from "./engine/loyalty-card";
 import { deriveRedemptionCode } from "./engine/redemption-code";
 import { milestoneProgress } from "../modules/points/milestone-engine";
+import type { Program } from "../modules/onboarding/engine.types";
+import { programView } from "../modules/onboarding/runtime/program-view";
+import { nextRewardFor } from "../modules/onboarding/runtime/rules";
 import { tierRewardsSchema } from "../modules/templates/templates.schema";
 
 /**
@@ -60,6 +63,32 @@ const rewardFor = (
   };
 };
 
+/**
+ * "PRÓXIMA RECOMPENSA" for a member of a clinic that runs an onboarding programme.
+ *
+ * The guide is explicit about how this reads: the client is told how many EUROS stand between
+ * them and their next reward, "never points". So the line names the reward and the distance in
+ * euros, and the bar shows how far through that step they are.
+ *
+ * The pass caps the description at 120 characters and a reward can be a pack of two long item
+ * names, so the name is shortened and the distance — the part the member acts on — never is.
+ */
+const programRewardFor = (
+  programOutput: unknown,
+  lifetimePoints: number
+): { description: string; progressPercent: number } | undefined => {
+  const next = nextRewardFor(programView(programOutput as Program), lifetimePoints);
+
+  if (!next) return undefined;
+
+  const tail = ` · te faltan ${next.remaining} €`;
+  const room = 120 - tail.length;
+  const title =
+    next.title.length > room ? `${next.title.slice(0, room - 1).trimEnd()}…` : next.title;
+
+  return { description: `${title}${tail}`, progressPercent: next.percent };
+};
+
 export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
   constructor(
     private readonly prisma: PrismaClient,
@@ -69,7 +98,20 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
   async assemble(memberId: string): Promise<LoyaltyCard> {
     const member = await this.prisma.member.findUnique({
       where: { id: memberId },
-      include: { clinic: { include: { template: true } } }
+      include: {
+        clinic: {
+          include: {
+            template: true,
+            // The live programme, if any, in the same round trip: a pass is rebuilt on every
+            // sync and device fetch, so a second query here would be paid thousands of times.
+            onboardingPrograms: {
+              where: { status: OnboardingProgramStatus.ACTIVO },
+              take: 1,
+              select: { output: true }
+            }
+          }
+        }
+      }
     });
 
     // An erased member is treated as absent rather than rendered: erasure overwrites the
@@ -91,7 +133,13 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
     // than trusted: a template written before tiers carried points yields a scale that
     // cannot rank anybody, and a card with no reward is better than one showing
     // progress against a tier the member is not in.
-    const reward = rewardFor(member, template.tierRewards);
+    const live = member.clinic.onboardingPrograms?.[0];
+
+    // A clinic that has published a programme is ranked by it; every other clinic keeps the
+    // ladder its template carries, exactly as before.
+    const reward = live
+      ? programRewardFor(live.output, member.lifetimePoints)
+      : rewardFor(member, template.tierRewards);
 
     const card = {
       memberId: member.id,
