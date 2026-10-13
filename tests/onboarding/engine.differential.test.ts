@@ -222,28 +222,34 @@ describe("the TypeScript port against the reference engine", () => {
     }
   );
 
-  it("agrees when the centre overrides the ticket and frequency buckets", () => {
-    // The estimate path and the bucket path are different branches, and the sweep above
-    // only ever exercises the estimate one.
-    for (const ticket of ["t1", "t2", "t3", "t4"]) {
-      for (const freq of ["f1", "f3", "f5"]) {
-        const answers: Answers = {
-          ticket,
-          freq,
-          objective: "equilibrado",
-          investment: "equilibrado",
-          occupancy: "o2",
-          members: "m3"
-        };
+  // The estimate path and the bucket path are different branches, and the sweep above only
+  // ever exercises the estimate one. One test per pair rather than a loop: a slow pair (the
+  // t1/f1 search takes about a second in both engines) then gets its own timeout instead of
+  // sharing one, which a loop over twelve exceeded on a slow CI runner, and a failure names
+  // the pair instead of only the loop.
+  const bucketCombos = ["t1", "t2", "t3", "t4"].flatMap((ticket) =>
+    ["f1", "f3", "f5"].map((freq) => ({ ticket, freq }))
+  );
 
-        expectAgreement(
-          run(items, answers) as unknown as ComparableResult,
-          reference.run(items, answers),
-          `${ticket}/${freq}`
-        );
-      }
+  it.each(bucketCombos)(
+    "agrees when the centre overrides the buckets to $ticket / $freq",
+    ({ ticket, freq }) => {
+      const answers: Answers = {
+        ticket,
+        freq,
+        objective: "equilibrado",
+        investment: "equilibrado",
+        occupancy: "o2",
+        members: "m3"
+      };
+
+      expectAgreement(
+        run(items, answers) as unknown as ComparableResult,
+        reference.run(items, answers),
+        `${ticket}/${freq}`
+      );
     }
-  });
+  );
 
   it("agrees on a catalogue with no rewardable items", () => {
     // Both must refuse, and with the same Spanish sentence: the centre reads it.
