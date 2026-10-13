@@ -28,6 +28,7 @@ what the partners validated against their spreadsheet. A copy of the reference l
 | B7     | What does "leave a rating" mean?                 | Decided: nothing earns from a review              |
 | C1–C10 | Further decisions found while building           | See Part C                                        |
 | D      | What is **not** built                            | See Part D                                        |
+| E1–E12 | The frontend: wizard, staff screens, safety      | See Part E                                        |
 
 ---
 
@@ -218,9 +219,10 @@ These were not asked of Sergio, but each is a product rule the guide left open.
 
 Stated plainly, so nothing is assumed finished.
 
-1. **The frontend wizard.** The backend exposes everything the three screens need (catalogue,
-   estimates, draft, swap, publish) but the existing onboarding wizard still asks the centre to
-   hand-enter tiers. It must be rewritten to catalogue → six questions → preview.
+1. **The frontend, partly.** The admin wizard (catalogue, six questions, programme, swap,
+   activate) and the staff visit and reward screens are built (Part E). Still open: the
+   scan-to-credit screen is not adapted to programme centres, and the old wizard's hand-entered
+   treatments step is kept for centres not yet on a programme (E10, E11).
 2. **Birthday gifts.** The guide issues one on the member's birthday, but the system stores
    only a **birth year**. Issuing needs day and month, which is a data-collection and privacy
    decision. The gift is chosen and shown in the programme; it is never issued.
@@ -235,3 +237,151 @@ Stated plainly, so nothing is assumed finished.
 6. **Google Wallet.** The pass change is Apple/Google-agnostic (it feeds the shared card), but
    Google remains unconfigured for the pilot and was not exercised.
 7. **Pushing and opening pull requests**, because of tooling gates on this machine, not code.
+
+---
+
+## Part E: the frontend
+
+The screens are in the frontend repository (`Voone-frontend_service`): the admin wizard at
+`/admin/clinics/:id/program`, and a visit and rewards panel on the member page. As in the
+parts above, each entry gives the approach taken **while waiting for an answer**.
+
+### E1. Who uses the wizard: Voone, or the centre itself?
+
+**Question.** The guide describes the centre answering six questions. Does Voone's team run
+this with the centre, or does the centre do it alone in its own dashboard?
+
+**Approach implemented.** Voone's admin only, under the admin area. The programme screen also
+shows Voone's own figures (what the rewards cost the centre, and whether each guarantee holds),
+which the guide says a centre must never see. Those figures are hidden behind a toggle, off by
+default, so a screen shared on a call never carries them.
+
+**To change.** A centre-facing page would reuse the same components with the internal block
+removed and the centre's own login; the backend already has a cost-free view for that.
+
+### E2. How does a centre give us its price list?
+
+**Question.** What do the centres actually have: a spreadsheet, an export from their agenda
+software, or nothing? The guide says "upload the catalogue" and gives no format.
+
+**Approach implemented.** Two ways, both saved automatically as the person types: paste or
+upload a CSV (semicolon, comma or tab separated; name and price, with an optional third column
+saying "producto" or a category), or add rows by hand. Rows the system cannot place in a
+category stop the person from continuing until they pick one; nothing is guessed silently.
+Importing replaces the whole catalogue, so it asks for a second click to confirm.
+
+**To change.** If the partners have a standard export, a column mapping step replaces the fixed
+column order.
+
+### E3. Is the sixth question ("how many active clients") required?
+
+**Question.** It changes nothing about the programme or the levels; it only sizes an internal
+projection that has not been built. Should it still block the "see the programme" button?
+
+**Approach implemented.** Yes, it must be answered, with no pre-selected value. The guide lists
+six questions, and a silent default would store a made-up answer.
+
+### E4. Ticket and frequency come pre-selected from the catalogue
+
+**Question.** The first two questions are pre-filled from an estimate the engine makes from the
+price list, and tagged "estimado". Is that what Sergio wants, or should they start empty?
+
+**Approach implemented.** Pre-filled and tagged, because the guide says "use your own estimate"
+is the common case; the centre can change either.
+
+### E5. Does the programme update as answers change?
+
+**Question.** Should the centre see the result live, or only after pressing a button?
+
+**Approach implemented.** Live. A side panel recomputes (after half a second of no typing) from
+a preview that is **not saved**. A draft is only created, and numbered, when the person presses
+"Ver el programa completo". Every press creates a new draft version; older drafts are kept and
+only the latest is shown. There is no clean-up of old drafts.
+
+**To change.** If drafts should be limited or discarded, that is a small backend change.
+
+### E6. Spanish wording
+
+**Question.** The objective descriptions, the adaptation notes and every button were written
+from the guide's examples. Can someone at the partner read them before a centre does?
+
+**Approach implemented.** "Centro", never "clínica", throughout. The notes the engine adds
+("como tu catálogo tiene pocos regalos posibles...") are the reference's own wording.
+
+### E7. Costs stay out of anything a centre can see
+
+**Approach implemented.** The programme a centre would read is built without any cost: the
+screen cannot show one however it is edited. The staff screens (visits, rewards) have no
+cost fields at all. This was checked down to the stored reward detail, which holds names and
+values, not costs. No question; recorded so nobody removes the separation by accident.
+
+### E8. Changing a reward
+
+**Question.** The guide lets a reward be swapped for one of two alternatives that do not break
+the ladder. Should that also be possible after a programme is active?
+
+**Approach implemented.** Only on a draft. An active programme cannot be edited; to change it,
+the person creates a new version and activates that. This keeps what members were promised
+from changing under them.
+
+### E9. Activating a programme
+
+**Question.** Activating moves the centre from the old points scheme to the programme: manual
+points stop working (C5) and existing members are not re-ranked until their next visit (D5).
+Should activation warn about that, and be undoable?
+
+**Approach implemented.** One click, then a message saying the programme is active. There is
+**no confirmation dialog and no undo**. Activating a _new version_ only replaces the old one;
+it cannot go back to the scheme before it. **Recommendation: add a confirmation that names
+what changes, at least when the centre already has members.** Left out because it is a wording
+decision for Sergio.
+
+### E10. The old wizard step is kept
+
+**Question.** The existing "create a centre" wizard still asks for treatments, tiers and
+milestone rewards by hand. When should that step go?
+
+**Approach implemented.** Left as it is. Centres not yet on a programme still depend on it for
+their points, and removing it changes what the backend is sent when a centre is created. The
+centre's page now has a "Loyalty program" card that leads to the new wizard. **Retire the old
+step together with `ClinicTreatment` (C7)** once every centre has moved.
+
+### E11. Staff: recording a visit and redeeming a reward
+
+**Question.** This is B1 in practice: how a payment reaches Voone. The screens need an answer.
+
+**Approach implemented.** On a member's page, at a centre with a programme, the "add points by
+hand" form is replaced by a visit form: what was paid (by category, so retail and medicine can
+be told apart), how many discounted products, or a prepaid session. The result shows the
+progress earned, the new level and any rewards issued. Rewards are listed below it, with a
+"Canjear" button that redeems **against the visit just recorded**; the visit is remembered for
+the browser tab so a reload does not lose it. The system checks it is the same client, centre
+and day.
+
+**Not done.** The scan-to-credit screen still tries the old points route at a programme centre,
+and shows the backend's refusal. Adapting it needs B1 answered (a scan at the till is one of
+the options).
+
+### E12. Browser translation breaks the screens
+
+**Finding.** When Chrome auto-translates these Spanish pages into English, React could no longer
+update them: a spinner next to a label crashed the page, and a "Borrador" badge stayed stale
+after activation. Everything an English-speaking colleague might translate is now built so it
+does not break (labels in their own element, status text re-created rather than edited).
+
+**Question.** Should the admin and dashboard tell browsers not to translate at all
+(`translate="no"`)? **Recommendation: yes.** The copy is deliberately Spanish and automatic
+translation produced wrong words ("Importar" became "Matter"). Left off because it is a
+product choice for anyone who wants an English view.
+
+### E13. A security hole found on the way
+
+**Finding.** The frontend's existing pass-through route (`/api/staff/[...path]`) forwarded any
+path to the backend with Voone's staff key attached. Anyone signed in to **one** centre could
+therefore reach another centre's admin endpoints. It now forwards only an allowlist of paths
+(branch `fix/staff-proxy-allowlist`, separate from the wizard). The new admin and staff
+handlers follow the same rule: the centre always comes from the login session, never from
+anything the browser sends.
+
+**Action needed.** That branch should be reviewed and deployed **independently and soon**; it
+does not depend on this work.
