@@ -120,6 +120,17 @@ describe("a catalogue that has been through the database", () => {
     expect(after).toHaveLength(10);
   });
 
+  it("empties the catalogue when saved with nothing", async () => {
+    // Deleting the last row in the editor sends exactly this. It once answered 500, because the
+    // "keep nothing" case was spelled with a NUL character, which Postgres rejects.
+    await repo.replaceForClinic(clinic.id, asInput(fixture));
+
+    const after = await repo.replaceForClinic(clinic.id, []);
+
+    expect(after).toEqual([]);
+    expect(await db.catalogItem.count({ where: { clinicId: clinic.id } })).toBe(0);
+  });
+
   it("returns rows in a stable order however they were written", async () => {
     await repo.replaceForClinic(clinic.id, asInput(fixture));
 

@@ -109,8 +109,11 @@ export class PrismaCatalogRepository implements CatalogRepository {
     const keep = prepared.map((p) => p.externalId);
 
     await this.prisma.$transaction(async (tx) => {
+      // An empty list means "the centre sells nothing", which is a legitimate thing to save —
+      // deleting the last row in the editor sends exactly that. `notIn: []` is valid and matches
+      // every row, so no special case is needed for it.
       await tx.catalogItem.deleteMany({
-        where: { clinicId, externalId: { notIn: keep.length ? keep : ["\u0000"] } }
+        where: { clinicId, externalId: { notIn: keep } }
       });
 
       for (const row of prepared) {

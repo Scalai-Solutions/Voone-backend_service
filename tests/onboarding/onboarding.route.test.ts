@@ -202,6 +202,14 @@ describe("the catalogue", () => {
     });
   });
 
+  it("accepts an empty catalogue and answers with an empty list", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const r = await call("PUT", admin("/catalog"), { items: [] });
+
+    expect(r.status).toBe(200);
+    expect(r.body.items).toEqual([]);
+  });
+
   it("hides the database id, which is not the identity the engine uses", async () => {
     const r = await call("PUT", admin("/catalog"), { items: fixtureItems });
 
