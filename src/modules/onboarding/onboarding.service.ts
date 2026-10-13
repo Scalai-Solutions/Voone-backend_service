@@ -1,11 +1,19 @@
-import { OnboardingProgramStatus, type OnboardingProgram, type PrismaClient } from "@prisma/client";
+import {
+  OnboardingProgramStatus,
+  VisitKind,
+  type OnboardingProgram,
+  type PrismaClient
+} from "@prisma/client";
 
+import { AppError } from "../../common/errors/app-error";
 import { toEngineCatalog, type CatalogRepository } from "./catalog.repository";
 import { run } from "./engine";
 import { CONFIG_VERSION, ENGINE_VERSION, FREQ_BUCKETS, TICKET_BUCKETS } from "./engine.config";
 import { classify, estimate } from "./engine";
 import type { Answers, EngineError, Program } from "./engine.types";
 import { isEngineError } from "./engine.types";
+import { recalibrationAdvice, type RecalibrationAdvice } from "./runtime/rules";
+import { swapReward } from "./swap";
 
 /**
  * Generating, storing and publishing a centre's loyalty programme.
@@ -15,14 +23,18 @@ import { isEngineError } from "./engine.types";
  * inputs that produced it so the programme can be audited and regenerated later.
  */
 
-export class OnboardingError extends Error {
-  readonly statusCode: number;
-  readonly expose = true;
-
+/**
+ * A refusal the centre can act on.
+ *
+ * An AppError, not a plain Error, and that matters: the error handler answers 500 with a
+ * generic message to anything it does not recognise, so a plain Error would turn every
+ * "this reward has expired" into "Internal server error" and hide the one sentence a
+ * receptionist needs. The message is Spanish copy written for the screen and echoes nothing
+ * stored, so it is safe to expose.
+ */
+export class OnboardingError extends AppError {
   constructor(message: string, statusCode = 400) {
-    super(message);
-    this.name = "OnboardingError";
-    this.statusCode = statusCode;
+    super(message, { statusCode, code: `ONBOARDING_${statusCode}`, expose: true });
   }
 }
 
@@ -204,5 +216,147 @@ export class OnboardingService {
         data: { status: OnboardingProgramStatus.ACTIVO, publishedAt: new Date() }
       });
     });
+  }
+
+  /** Every version for a clinic, newest first. Metadata only: the output can be large. */
+  listPrograms(clinicId: string) {
+    return this.prisma.onboardingProgram.findMany({
+      where: { clinicId },
+      orderBy: { version: "desc" },
+      select: {
+        id: true,
+        version: true,
+        status: true,
+        engineVersion: true,
+        configVersion: true,
+        publishedAt: true,
+        createdAt: true
+      }
+    });
+  }
+
+  /** One programme, scoped to the clinic so another centre's id answers the same as none. */
+  async getProgram(clinicId: string, programId: string): Promise<OnboardingProgram> {
+    const row = await this.prisma.onboardingProgram.findFirst({
+      where: { id: programId, clinicId }
+    });
+
+    if (!row) throw new OnboardingError("No existe ese programa para este centro.", 404);
+
+    return row;
+  }
+
+  /**
+   * Replaces one reward in a DRAFT with an alternative the engine proposed.
+   *
+   * Drafts only: a published programme is what members are climbing, so changing a reward in it
+   * is not an edit but a new version, which the centre must ask for by generating a draft.
+   *
+   * Optimistic on the row's updatedAt. Two operators editing the same draft would otherwise
+   * each read it, each swap a different reward, and the second write would silently erase the
+   * first.
+   */
+  async swapMilestone(
+    clinicId: string,
+    programId: string,
+    milestone: number,
+    alternative: number
+  ): Promise<OnboardingProgram> {
+    const row = await this.getProgram(clinicId, programId);
+
+    if (row.status !== OnboardingProgramStatus.BORRADOR) {
+      throw new OnboardingError(
+        "Solo se pueden cambiar los premios de un borrador. Genera un borrador nuevo para editar un programa activo.",
+        409
+      );
+    }
+
+    const result = swapReward(
+      row.output as unknown as Program,
+      row.answers as unknown as Answers,
+      milestone,
+      alternative
+    );
+
+    if (!result.ok) throw new OnboardingError(result.reason, 409);
+
+    const updated = await this.prisma.onboardingProgram.updateMany({
+      where: { id: row.id, updatedAt: row.updatedAt },
+      data: { output: result.program as unknown as object }
+    });
+
+    if (updated.count === 0) {
+      throw new OnboardingError(
+        "El borrador ha cambiado mientras lo editabas. Recarga la página y vuelve a intentarlo.",
+        409
+      );
+    }
+
+    return this.getProgram(clinicId, programId);
+  }
+
+  /**
+   * Whether the centre's real numbers have drifted far enough from the programme's assumptions
+   * to offer a recalibration.
+   *
+   * PROMPTED, never automatic — this only answers "is it worth asking". Measured from the
+   * visits recorded since the programme went live: the average amount that earns progress per
+   * payment, and how often a member who has visited comes back, per year.
+   */
+  async recalibrationFor(clinicId: string): Promise<
+    RecalibrationAdvice & {
+      measured: { ticket: number; visitsPerYear: number } | null;
+      used: { ticket: number; visitsPerYear: number } | null;
+      daysOfData: number;
+    }
+  > {
+    const live = await this.active(clinicId);
+
+    if (!live?.publishedAt) {
+      return {
+        offer: false,
+        ticketDrift: 0,
+        visitsDrift: 0,
+        reason: "El centro todavía no tiene un programa activo.",
+        measured: null,
+        used: null,
+        daysOfData: 0
+      };
+    }
+
+    const output = live.output as unknown as Program;
+    const daysOfData = Math.floor((Date.now() - live.publishedAt.getTime()) / 86_400_000);
+
+    const payments = await this.prisma.paidVisit.aggregate({
+      where: { clinicId, kind: VisitKind.PAYMENT, occurredAt: { gte: live.publishedAt } },
+      _avg: { amountCents: true },
+      _count: { _all: true }
+    });
+    const members = await this.prisma.paidVisit.groupBy({
+      by: ["memberId"],
+      where: { clinicId, occurredAt: { gte: live.publishedAt } }
+    });
+
+    const used = { ticket: output.est.ticket, visitsPerYear: output.est.visits };
+    const measuredTicket = (payments._avg.amountCents ?? 0) / 100;
+    const years = Math.max(daysOfData, 1) / 365;
+    const measuredVisits = members.length ? payments._count._all / members.length / years : 0;
+
+    const advice = recalibrationAdvice({
+      usedTicket: used.ticket,
+      usedVisits: used.visitsPerYear,
+      measuredTicket,
+      measuredVisits,
+      daysOfData
+    });
+
+    return {
+      ...advice,
+      measured: payments._count._all
+        ? { ticket: measuredTicket, visitsPerYear: measuredVisits }
+        : null,
+      used,
+      daysOfData
+    };
   }
 }

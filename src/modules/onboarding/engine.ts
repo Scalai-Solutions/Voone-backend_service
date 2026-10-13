@@ -778,6 +778,68 @@ export const orderBronce = (chosen: ChosenReward[]): BronceOrdering => {
   return "kept-to-avoid-repeat";
 };
 
+/* ----------------------------------------------------------------- guarantees and review */
+
+/**
+ * The blocking note raised when a programme costs more than half again its chosen budget.
+ *
+ * A constant because two places must agree on it exactly: the engine, which raises it, and a
+ * reward swap, which must clear it or add it as the cost moves. A swap that matched the text
+ * by a near copy would stop recognising it the first time someone reworded one.
+ */
+export const COST_REVIEW_NOTE =
+  "El coste de los premios supera en más de un 50% la inversión elegida. Sube la inversión o añade regalos más baratos.";
+
+/**
+ * The invariants a valid programme must hold, as sentences with a truth value.
+ *
+ * Extracted from `run` so a reward swap can re-check them. A swap changes which rewards sit
+ * where, and the three guarantees that depend on that — no repeats, Bronce leading, total cost
+ * — can all flip; the rest are properties of the ladder's shape, which a swap does not touch.
+ */
+export const buildGuarantees = (
+  lad: Ladder,
+  est: Estimates,
+  chosen: ChosenReward[],
+  costPct: number
+): Array<[string, boolean]> => [
+  ["El primer premio llega en la primera visita", lad.ms[0].th <= est.ticket],
+  [`Plata se alcanza con ${esNum(Math.round(lad.visitsSilver * 10) / 10)} visitas`, true],
+  [
+    `Cada nivel cuesta al menos ${esNum(P.minGrowth)} veces el anterior (aquí ×${lad.R.toFixed(2).replace(".", ",")})`,
+    lad.R >= P.minGrowth - 1e-9
+  ],
+  [
+    `Nunca pasan más de ${esNum(P.maxVisitsBetween)} visitas sin un premio, una ventaja o una subida de nivel`,
+    true
+  ],
+  [
+    "Todo premio o ventaja se canjea en una visita de pago o en una sesión de un bono ya pagado, en un máximo de 60 días",
+    true
+  ],
+  [
+    "En Bronce el mejor premio es el primero",
+    (() => {
+      const b1 = chosen.filter((c) => c.m.tramo === 1);
+      return b1.every((c) => c.o.value <= b1[0].o.value);
+    })()
+  ],
+  [
+    "Cada nivel incluye una ventaja de puntos dobles",
+    [1, 2, 3, 4].every((tr) => lad.ms.some((m) => m.tramo === tr && m.perk?.kind === "doble"))
+  ],
+  ["Los bonos suman puntos en cada sesión consumida, no al comprarlos", true],
+  ["Subir de nivel exige antigüedad mínima (Oro 12, Platino 24 y Diamante 36 meses)", true],
+  [
+    "Ningún regalo se repite en dos hitos seguidos",
+    chosen.every((c, i) => !i || !ids(c.o).some((x) => ids(chosen[i - 1].o).includes(x)))
+  ],
+  [
+    `Premios y ventajas cuestan el ${(costPct * 100).toFixed(1).replace(".", ",")}% del gasto de la clienta`,
+    costPct <= lad.inv * 1.5
+  ]
+];
+
 /* ------------------------------------------------------------------------------ run */
 
 export const run = (items: CatalogItem[], ans: Answers): EngineResult => {
@@ -929,11 +991,7 @@ export const run = (items: CatalogItem[], ans: Answers): EngineResult => {
     );
   }
 
-  if (costPct > lad.inv * 1.5) {
-    review.push(
-      "El coste de los premios supera en más de un 50% la inversión elegida. Sube la inversión o añade regalos más baratos."
-    );
-  }
+  if (costPct > lad.inv * 1.5) review.push(COST_REVIEW_NOTE);
 
   if (lad.visitsSilver < P.visitsSilver) {
     adapt.push(
@@ -949,43 +1007,7 @@ export const run = (items: CatalogItem[], ans: Answers): EngineResult => {
     review.push("El tiempo hasta Diamante sale fuera de lo razonable. Revisa ticket y frecuencia.");
   }
 
-  const guarantees: Array<[string, boolean]> = [
-    ["El primer premio llega en la primera visita", lad.ms[0].th <= est.ticket],
-    [`Plata se alcanza con ${esNum(Math.round(lad.visitsSilver * 10) / 10)} visitas`, true],
-    [
-      `Cada nivel cuesta al menos ${esNum(P.minGrowth)} veces el anterior (aquí ×${lad.R.toFixed(2).replace(".", ",")})`,
-      lad.R >= P.minGrowth - 1e-9
-    ],
-    [
-      `Nunca pasan más de ${esNum(P.maxVisitsBetween)} visitas sin un premio, una ventaja o una subida de nivel`,
-      true
-    ],
-    [
-      "Todo premio o ventaja se canjea en una visita de pago o en una sesión de un bono ya pagado, en un máximo de 60 días",
-      true
-    ],
-    [
-      "En Bronce el mejor premio es el primero",
-      (() => {
-        const b1 = chosen!.filter((c) => c.m.tramo === 1);
-        return b1.every((c) => c.o.value <= b1[0].o.value);
-      })()
-    ],
-    [
-      "Cada nivel incluye una ventaja de puntos dobles",
-      [1, 2, 3, 4].every((tr) => lad.ms.some((m) => m.tramo === tr && m.perk?.kind === "doble"))
-    ],
-    ["Los bonos suman puntos en cada sesión consumida, no al comprarlos", true],
-    ["Subir de nivel exige antigüedad mínima (Oro 12, Platino 24 y Diamante 36 meses)", true],
-    [
-      "Ningún regalo se repite en dos hitos seguidos",
-      chosen.every((c, i) => !i || !ids(c.o).some((x) => ids(chosen![i - 1].o).includes(x)))
-    ],
-    [
-      `Premios y ventajas cuestan el ${(costPct * 100).toFixed(1).replace(".", ",")}% del gasto de la clienta`,
-      costPct <= lad.inv * 1.5
-    ]
-  ];
+  const guarantees = buildGuarantees(lad, est, chosen, costPct);
 
   return {
     engineVersion: ENGINE_VERSION,

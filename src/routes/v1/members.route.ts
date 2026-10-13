@@ -22,6 +22,13 @@ import { config } from "../../config/env";
 import { prisma } from "../../infrastructure/database/prisma-client";
 import { findClinicBySlug } from "../../modules/clinics/clinic.service";
 import { withMemberCode } from "../../modules/members/member-code";
+import { OnboardingError } from "../../modules/onboarding/onboarding.service";
+import {
+  MANUAL_POINTS_REFUSAL,
+  PrismaProgramTierPort,
+  hasActiveProgram
+} from "../../modules/onboarding/runtime/program-tier.port";
+import { ReferralService } from "../../modules/onboarding/runtime/referral.service";
 import { PointsService } from "../../modules/points/points.service";
 import {
   PrismaMemberPointsCache,
@@ -53,9 +60,15 @@ const pointsService = walletSyncQueue
   ? new PointsService(
       new PrismaPointsLedgerRepository(prisma),
       new PrismaMemberPointsCache(prisma),
-      walletSyncQueue
+      walletSyncQueue,
+      // No notification path here, as before; the programme port is what is new. It returns
+      // null for a clinic with no published programme, so everything else is unchanged.
+      undefined,
+      new PrismaProgramTierPort(prisma)
     )
   : null;
+
+const referralService = pointsService ? new ReferralService(prisma, pointsService) : null;
 
 const emptyWalletStatus = {
   google: "not_added",
@@ -528,6 +541,11 @@ membersRouter.post(
       return;
     }
 
+    // A clinic on a programme earns progress from recorded visits, not from points typed in.
+    if (await hasActiveProgram(prisma, clinic.id)) {
+      throw new OnboardingError(MANUAL_POINTS_REFUSAL, 409);
+    }
+
     // Through the ledger, never straight at the cached column. This used to do
     // `pointsBalance: { increment }`, which wrote no PointsTransaction row — so the
     // movement had no audit trail, no idempotency, and never moved the member's
@@ -676,6 +694,24 @@ membersRouter.post(
      *
      * Still never a 201: the status code stays 200 for both.
      */
+    // Who sent them, if they said. Best effort and silent: a mistyped code must not cost
+    // someone their membership, and the response must not reveal whether a code exists —
+    // otherwise this form becomes a way to enumerate a clinic's members.
+    if (result.memberId && parsed.data.referredByCode && referralService) {
+      try {
+        await referralService.register({
+          clinicId: clinic.id,
+          referredMemberId: result.memberId,
+          code: parsed.data.referredByCode
+        });
+      } catch (error) {
+        console.error("[referral] could not register a referral at sign-up", {
+          memberId: result.memberId,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+
     const wallet = result.memberId ? await issueWalletPasses(result.memberId) : undefined;
 
     res.status(200).json({ status: "ok", wallet });

@@ -198,6 +198,64 @@ export const recurringCrossed = (view: ProgramView, before: number, after: numbe
   return out;
 };
 
+export interface NextReward {
+  title: string;
+  /** Progress euros still to earn. Always at least 1. */
+  remaining: number;
+  /** How far through the CURRENT step, 0 to 100 — not through the whole tier. */
+  percent: number;
+  /** A ladder reward or perk, or the repeating one after Diamante. */
+  source: "milestone" | "recurring";
+}
+
+/**
+ * What the member is working towards next, for "PRÓXIMA RECOMPENSA" on their pass.
+ *
+ * The next milestone that actually issues something — a reward or a perk, not a tier-up,
+ * which grants nothing — and how far through the step to it they are. Measured from the
+ * previous milestone of ANY kind, so a member who has just entered a tier starts that step
+ * at zero rather than appearing partway up it.
+ *
+ * Past the last milestone it is the repeating reward after Diamante. Null only for a
+ * programme that has none, so the pass can leave the field out rather than show a bar that
+ * means nothing.
+ */
+export const nextRewardFor = (view: ProgramView, progress: number): NextReward | null => {
+  const next = view.milestones.find((m) => m.issue && m.th > progress);
+  // The previous milestone of any kind, tier-ups included: a member who has just entered a
+  // tier starts their next step at zero rather than appearing partway up it.
+  const previous = Math.max(0, ...view.milestones.filter((m) => m.th <= progress).map((m) => m.th));
+  const clamp = (value: number): number => Math.min(100, Math.max(0, Math.round(value)));
+
+  if (next?.issue) {
+    const span = next.th - previous;
+
+    return {
+      title: next.issue.title,
+      remaining: Math.max(1, next.th - progress),
+      percent: span > 0 ? clamp(((progress - previous) / span) * 100) : 0,
+      source: "milestone"
+    };
+  }
+
+  const { every, startsAt, title } = view.recurring;
+
+  if (every <= 0 || !title) return null;
+
+  const done = Math.max(0, Math.floor((progress - startsAt) / every));
+  const target = startsAt + (done + 1) * every;
+  // Before the first repeat the step runs from the last milestone, which may sit below
+  // Diamante's threshold when the final ladder reward comes before it.
+  const from = Math.max(previous, startsAt + done * every);
+
+  return {
+    title,
+    remaining: Math.max(1, target - progress),
+    percent: clamp(((progress - from) / (target - from)) * 100),
+    source: "recurring"
+  };
+};
+
 /** When an issued reward lapses. */
 export const rewardExpiry = (issuedAt: Date): Date =>
   new Date(issuedAt.getTime() + RUNTIME_DECISIONS.rewardTtlDays * 24 * 60 * 60 * 1000);

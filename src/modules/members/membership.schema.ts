@@ -181,20 +181,34 @@ export const membershipSignupSchema = z
      * either value for a row they are creating anyway. It becomes trustworthy when the
      * staff surface gets authentication, and is honest for legitimate callers meanwhile.
      */
-    consentSource: signupSourceSchema.optional()
+    consentSource: signupSourceSchema.optional(),
+
+    /**
+     * The five-character code of the member who recommended this one.
+     *
+     * Deliberately lenient: it is trimmed and length-bounded and nothing more, because it is
+     * never an error. A mistyped or unknown code is ignored silently at sign-up, both so it
+     * cannot cost someone their membership and so the response cannot be used to find out
+     * which codes exist.
+     */
+    referredByCode: z.string().trim().max(10).optional()
   })
   // Flattened here rather than in the service so the parsed value is already shaped like
   // the row it becomes, and the raw submission cannot be dropped by a forgetful caller.
-  .transform(({ name, phone, email, birthYear, sex, consentMarketing, consentSource }) => ({
-    name,
-    email,
-    phone: phone.e164,
-    phoneRaw: phone.raw,
-    phoneRegionAssumed: phone.regionAssumed,
-    birthYear,
-    sex,
-    consentMarketing,
-    consentSource
-  }));
+  .transform(
+    ({ name, phone, email, birthYear, sex, consentMarketing, consentSource, referredByCode }) => ({
+      name,
+      email,
+      phone: phone.e164,
+      phoneRaw: phone.raw,
+      phoneRegionAssumed: phone.regionAssumed,
+      birthYear,
+      sex,
+      consentMarketing,
+      consentSource,
+      // Only present when given, so the parsed shape stays what it was for everyone else.
+      ...(referredByCode ? { referredByCode } : {})
+    })
+  );
 
 export type MembershipSignupInput = z.infer<typeof membershipSignupSchema>;

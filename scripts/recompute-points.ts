@@ -27,10 +27,12 @@ import {
   PrismaPointsLedgerRepository
 } from "../src/modules/points/prisma-points-ledger.repository";
 import { tierFor, type TierDefinition } from "../src/modules/points/tier-engine";
+import { PrismaProgramTierPort } from "../src/modules/onboarding/runtime/program-tier.port";
 
 const prisma = new PrismaClient();
 const ledger = new PrismaPointsLedgerRepository(prisma);
 const cache = new PrismaMemberPointsCache(prisma);
+const programTiers = new PrismaProgramTierPort(prisma);
 
 const args = process.argv.slice(2);
 const apply = args.includes("--apply");
@@ -60,7 +62,20 @@ const main = async (): Promise<void> => {
     }
 
     const balance = await ledger.balanceFor(member.id);
-    const tier = tierFor(balance.lifetime, scale);
+
+    // A clinic on an onboarding programme is ranked by it — thresholds AND tenure — and NOT by
+    // the legacy scale, which would put every such member in whatever tier the old template
+    // happens to read as. Demotion is allowed here, deliberately: this script derives the tier
+    // from the ledger and the sign-up date, so a tier that does not follow from them is exactly
+    // the drift it exists to repair. "Tiers are not lost" is a rule about ordinary movements.
+    const programme = await programTiers.resolve({
+      memberId: member.id,
+      clinicId: member.clinicId,
+      lifetime: balance.lifetime,
+      current: member.tier,
+      allowDemotion: true
+    });
+    const tier = programme ? programme.tier : tierFor(balance.lifetime, scale);
     const tierCode = tier?.code ?? null;
 
     if (

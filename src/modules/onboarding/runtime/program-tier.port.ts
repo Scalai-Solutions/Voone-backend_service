@@ -26,6 +26,23 @@ export const activeProgramView = async (
   return row ? { id: row.id, view: programView(row.output as unknown as Program) } : null;
 };
 
+/** Whether a clinic has published a programme. Cheaper than loading it. */
+export const hasActiveProgram = async (prisma: PrismaClient, clinicId: string): Promise<boolean> =>
+  (await prisma.onboardingProgram.count({
+    where: { clinicId, status: OnboardingProgramStatus.ACTIVO }
+  })) > 0;
+
+/**
+ * The refusal for adding points by hand at a clinic that runs a programme.
+ *
+ * Progress at such a clinic comes from RECORDED VISITS, because only a visit applies the tier
+ * multiplier, spends a waiting double-points perk and issues the rewards a purchase crosses.
+ * A manual credit would move the balance and skip all of it, leaving a member whose progress
+ * and whose issued rewards no longer agree.
+ */
+export const MANUAL_POINTS_REFUSAL =
+  "Este centro usa el programa de fidelización por visitas: registra la visita con su importe en lugar de sumar puntos a mano.";
+
 export class PrismaProgramTierPort implements ProgramTierPort {
   constructor(
     private readonly prisma: PrismaClient,

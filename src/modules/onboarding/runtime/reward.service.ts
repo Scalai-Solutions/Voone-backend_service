@@ -15,6 +15,8 @@ import { checkRedemption, isInSurprisePool } from "./rules";
 
 export interface RedeemInput {
   clinicId: string;
+  /** When given, the reward must belong to this member: the URL says whose it is. */
+  memberId?: string;
   rewardId: string;
   /** The payment or package session this redemption happens in. */
   visitId?: string;
@@ -82,7 +84,11 @@ export class RewardService {
   async redeem(input: RedeemInput): Promise<MemberRewardSummary> {
     const now = this.now();
     const reward = await this.prisma.memberReward.findFirst({
-      where: { id: input.rewardId, clinicId: input.clinicId }
+      where: {
+        id: input.rewardId,
+        clinicId: input.clinicId,
+        ...(input.memberId ? { memberId: input.memberId } : {})
+      }
     });
 
     // The same answer whether it never existed or belongs to another centre: confirming

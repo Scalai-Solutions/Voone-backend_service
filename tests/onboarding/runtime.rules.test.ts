@@ -14,6 +14,7 @@ import {
   includesTreatment,
   isInSurprisePool,
   milestonesCrossed,
+  nextRewardFor,
   purchaseProgress,
   recalibrationAdvice,
   recurringCrossed,
@@ -576,5 +577,90 @@ describe("the decisions the guide left open", () => {
       reviewsEarnProgress: false
     });
     expect(RUNTIME_DECISIONS.acceptedVisitSources).toEqual(["STAFF_ENTRY"]);
+  });
+});
+
+describe("nextRewardFor", () => {
+  const issuing = view.milestones.filter((m) => m.issue);
+
+  it("names the first reward to a brand new member", () => {
+    const next = nextRewardFor(view, 0)!;
+
+    expect(next).toMatchObject({ remaining: issuing[0].th, percent: 0, source: "milestone" });
+    expect(next.title).toBe(issuing[0].issue!.title);
+  });
+
+  it("counts the distance in euros and the progress through the step", () => {
+    const first = issuing[0]; // th 30
+    const next = nextRewardFor(view, 15)!;
+
+    expect(next.remaining).toBe(first.th - 15);
+    expect(next.percent).toBe(50);
+  });
+
+  it("moves on to the following reward the moment one is crossed", () => {
+    const [a, b] = issuing;
+
+    expect(nextRewardFor(view, a.th - 1)!.title).toBe(a.issue!.title);
+    expect(nextRewardFor(view, a.th)!.title).toBe(b.issue!.title);
+  });
+
+  it("skips a tier-up, which grants nothing, when looking for the next reward", () => {
+    // Sitting just below a tier milestone: the next REWARD is still the next one that issues.
+    const tierUp = view.milestones.find((m) => m.type === "nivel")!;
+    const next = nextRewardFor(view, tierUp.th - 1)!;
+
+    expect(view.milestones.find((m) => m.issue?.title === next.title)!.th).toBeGreaterThan(
+      tierUp.th - 1
+    );
+  });
+
+  it("starts the step after a tier-up at zero, not partway up it", () => {
+    // Just past the Plata threshold the member has just entered the tier: their next step
+    // begins here, so the bar must read near empty and not carry the previous step's progress.
+    const plata = tier("plata").floor;
+
+    expect(nextRewardFor(view, plata)!.percent).toBe(0);
+  });
+
+  it("always asks for at least one more euro", () => {
+    for (const progress of [0, 29, 30, 249, 1559]) {
+      expect(nextRewardFor(view, progress)!.remaining).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it("keeps the percentage between 0 and 100 everywhere", () => {
+    for (let progress = 0; progress <= 4000; progress += 7) {
+      const { percent } = nextRewardFor(view, progress)!;
+
+      expect(percent, `at ${progress}`).toBeGreaterThanOrEqual(0);
+      expect(percent, `at ${progress}`).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it("turns to the recurring reward once the ladder's rewards are all earned", () => {
+    const lastReward = issuing[issuing.length - 1];
+    const next = nextRewardFor(view, lastReward.th)!;
+
+    expect(next.source).toBe("recurring");
+    expect(next.title).toBe(view.recurring.title);
+  });
+
+  it("does not go negative between the last reward and Diamante", () => {
+    // The last issuing milestone sits BELOW Diamante's threshold, so for a stretch the member
+    // is past every reward but not yet past the point the recurring one counts from.
+    const lastReward = issuing[issuing.length - 1];
+    const progress = lastReward.th + 5;
+
+    expect(progress).toBeLessThan(view.recurring.startsAt);
+    expect(nextRewardFor(view, progress)!.percent).toBeGreaterThanOrEqual(0);
+  });
+
+  it("counts down to each repeat past Diamante", () => {
+    const { every, startsAt } = view.recurring;
+
+    expect(nextRewardFor(view, startsAt + 10)!.remaining).toBe(every - 10);
+    // One repeat later the target moves out by an interval.
+    expect(nextRewardFor(view, startsAt + every + 10)!.remaining).toBe(every - 10);
   });
 });

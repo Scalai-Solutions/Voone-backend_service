@@ -60,53 +60,35 @@ on it.
 The `members` answer is accepted and ignored for the same reason. Store it with the centre
 profile; it changes nothing about the programme.
 
-## Known discrepancies in the implementation guide
+## Decisions and open questions
 
-Found while porting, raised with Sergio, not yet resolved. The reference wins in each
-case, because it is the specification.
+Every question raised while porting the guide, and the approach taken for each while waiting
+for an answer, is recorded in **`docs/onboarding-decisions.md`**: the three errors found in
+the guide, the guide's seven open questions, and ten further decisions made while building.
+The provisional answers are also collected in one file, `runtime/decisions.ts`, so the people
+who own them can find and change each one.
 
-1. **The sweep test cannot pass as written.** The guide says all 48 answer combinations
-   should return a programme with no review notes and every guarantee true. Against the
-   reference, 10 of 48 have a false guarantee and 5 raise a review note.
-2. **The Bronce reorder can break the no-consecutive-repeat guarantee.** The beam search
-   forbids an item appearing in two consecutive rewards, but v1.2 then reorders the first
-   segment so its best reward leads. That reordering can move a repeat into adjacency.
-   All five failures start at the same place, the first-to-second reward of segment 1.
-3. **Welcome progress is 15 for the fixture, not 25.** The guide's expected-values table
-   says 25; its own stated formula — half the first milestone threshold, rounded to the
-   nearest 5 — gives 15, because that threshold is 30. `sapphira.expected.json` carries no
-   `welcome` field, so the prescribed fixture test cannot catch it.
+Where the guide contradicts the code that existed before it, the guide won. Where it
+contradicts itself, the reference implementation won.
 
-## Storage
+## What exists
 
-`CatalogItem` holds a centre's price list; `OnboardingProgram` holds a generated
-programme with the answers and the catalogue snapshot that produced it.
+| Layer                | Files                                                                                          |
+| -------------------- | ---------------------------------------------------------------------------------------------- |
+| Engine (pure)        | `engine.ts`, `engine.config.ts`, `engine.math.ts`, `engine.types.ts`, `swap.ts`                |
+| Storage              | `catalog.repository.ts`, `onboarding.service.ts` (`CatalogItem`, `OnboardingProgram`)          |
+| Presentation         | `presentation.ts` — a programme with **no cost figures**, by construction                      |
+| Import               | `catalog-csv.ts` — `;` or tab, bad rows skipped and reported                                   |
+| Runtime rules (pure) | `runtime/rules.ts`, `runtime/program-view.ts`, `runtime/decisions.ts`                          |
+| Runtime services     | `runtime/visit.service.ts`, `reward.service.ts`, `referral.service.ts`, `program-tier.port.ts` |
+| HTTP                 | `src/routes/v1/onboarding.route.ts`                                                            |
 
-**`CatalogItem` is separate from `ClinicTreatment` for a structural reason, not a
-stylistic one.** The engine's determinism rests on stable item ids — they are the final
-tie-break in every sort — and `treatmentsRepository.replaceForClinic` deletes every row
-and recreates it on each template save, minting fresh uuids. A catalogue stored there
-would generate a different ladder after an unrelated edit to the card's copy.
+A clinic opts in by **publishing** a programme. Until it does, every code path is the one that
+existed before: `PointsService` asks `ProgramTierPort`, gets `null`, and applies the legacy
+rules unchanged.
 
-The duplication is meant to be temporary. `ClinicTreatment.pointsAllotted` is a
-per-treatment points award that the engine's progress-in-euros model replaces outright;
-when the wizard is rewritten, `ClinicTreatment` should be retired and its two readers —
-the staff credit screen and the template flow — moved onto `CatalogItem`. Until then,
-which table a screen reads must be a deliberate choice.
+## What is not built
 
-Prices are stored in cents. The engine does float arithmetic on euros, and a decimal
-column read back as a float is how a ladder ends up differing by a cent and therefore by
-a tie-break.
-
-## Not wired up yet
-
-No route calls any of this, and no existing points, tier, wallet or notification path has
-been changed. `OnboardingService` can generate, store and publish a programme; nothing
-reads a published one yet, so members still earn against `ClinicTemplate.tierRewards`.
-
-Still to come: HTTP routes, CSV import, issued rewards with expiry and the paid-visit
-redemption gate, referral counting, and the wizard rewrite. Switching the points and tier
-engines over to a published programme is the step that needs the most care — it changes
-what every existing member's balance means. The runtime rules in section 6 of the guide —
-tenure gates, 60-day expiry, progress multipliers — are the product's job, not the
-engine's.
+See Part D of `docs/onboarding-decisions.md`. In short: the frontend wizard, birthday gifts
+(only a birth year is stored), the Family & Friends list, Happy Hour slot flagging, and a bulk
+re-tiering of existing members when a clinic publishes.

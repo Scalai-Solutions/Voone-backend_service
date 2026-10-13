@@ -1,0 +1,776 @@
+import { PointsTransactionKind, PrismaClient, type Clinic } from "@prisma/client";
+import express, { type Express } from "express";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+
+import { errorHandler } from "../../src/common/middleware/error-handler";
+import { PrismaCatalogRepository } from "../../src/modules/onboarding/catalog.repository";
+import type { CatalogItem } from "../../src/modules/onboarding/engine.types";
+import { OnboardingService } from "../../src/modules/onboarding/onboarding.service";
+import { PrismaProgramTierPort } from "../../src/modules/onboarding/runtime/program-tier.port";
+import { RewardService } from "../../src/modules/onboarding/runtime/reward.service";
+import { VisitService } from "../../src/modules/onboarding/runtime/visit.service";
+import {
+  PrismaMemberPointsCache,
+  PrismaPointsLedgerRepository
+} from "../../src/modules/points/prisma-points-ledger.repository";
+import { PointsService } from "../../src/modules/points/points.service";
+import { ClinicNotFoundError } from "../../src/common/errors/membership.errors";
+import { createOnboardingRouter } from "../../src/routes/v1/onboarding.route";
+import { createPointsRouter } from "../../src/routes/v1/points.route";
+import catalogFixture from "./reference/sapphira.catalogo.json";
+
+/**
+ * The onboarding API, over HTTP, against a real database.
+ *
+ * Service tests cannot catch the class of bug that matters most at this layer: whether a
+ * refusal reaches the person who needs it as the sentence they need. The error handler
+ * answers 500 "Internal server error" to anything it does not recognise, so a service that
+ * throws the wrong kind of error passes every service test and fails every real request.
+ * Every assertion about an error here is therefore on the status AND the Spanish message.
+ */
+const db = new PrismaClient();
+
+const SLUG = "test-route";
+const ANSWERS = {
+  objective: "equilibrado",
+  investment: "equilibrado",
+  occupancy: "o2",
+  members: "m3"
+};
+
+const catalog = new PrismaCatalogRepository(db);
+const onboarding = new OnboardingService(db, catalog);
+const points = new PointsService(
+  new PrismaPointsLedgerRepository(db),
+  new PrismaMemberPointsCache(db),
+  { enqueueMemberSync: async () => {}, close: async () => {} },
+  undefined,
+  new PrismaProgramTierPort(db)
+);
+
+const app = ((): Express => {
+  const a = express();
+
+  a.use(express.json());
+  a.use(
+    "/api/v1",
+    createOnboardingRouter({
+      onboarding,
+      catalog,
+      visits: new VisitService(db, points),
+      rewards: new RewardService(db),
+      findClinic: async (slug) => {
+        const found = await db.clinic.findUnique({ where: { slug }, select: { id: true } });
+
+        if (!found) throw new ClinicNotFoundError(slug);
+
+        return found;
+      },
+      clinicExists: async (id) => (await db.clinic.count({ where: { id } })) > 0
+    })
+  );
+  a.use(errorHandler);
+
+  return a;
+})();
+
+interface Reply {
+  status: number;
+  body: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+}
+
+const call = async (method: string, path: string, body?: unknown): Promise<Reply> => {
+  const server = app.listen(0);
+
+  try {
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+    const response = await fetch(`http://127.0.0.1:${port}/api/v1${path}`, {
+      method,
+      headers: { "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+    const text = await response.text();
+
+    return { status: response.status, body: text ? JSON.parse(text) : null };
+  } finally {
+    server.close();
+  }
+};
+
+let clinic: Clinic;
+let phoneSeq = 0;
+
+const fixtureItems = (catalogFixture as CatalogItem[]).map((i) => ({
+  externalId: i.id,
+  name: i.name,
+  priceEuro: i.price,
+  isProduct: i.product ?? false,
+  costPctOverride: i.costPct ?? null,
+  estimated: i.estimated ?? false
+}));
+
+const admin = (suffix: string) => `/admin/clinics/${clinic.id}/onboarding${suffix}`;
+
+const wipe = async (): Promise<void> => {
+  await db.memberReward.deleteMany({ where: { clinicId: clinic.id } });
+  await db.referral.deleteMany({ where: { clinicId: clinic.id } });
+  await db.paidVisit.deleteMany({ where: { clinicId: clinic.id } });
+  await db.pointsTransaction.deleteMany({ where: { clinicId: clinic.id } });
+  await db.member.deleteMany({ where: { clinicId: clinic.id } });
+  await db.onboardingProgram.deleteMany({ where: { clinicId: clinic.id } });
+  await db.catalogItem.deleteMany({ where: { clinicId: clinic.id } });
+};
+
+/** Catalogue loaded, draft generated and published, through the API. */
+const goLive = async (): Promise<string> => {
+  await call("PUT", admin("/catalog"), { items: fixtureItems });
+  const draft = await call("POST", admin("/programs"), ANSWERS);
+  const live = await call("POST", admin(`/programs/${draft.body.id}/publish`));
+
+  expect(live.status).toBe(200);
+
+  return draft.body.id as string;
+};
+
+const newMember = async () => {
+  phoneSeq += 1;
+
+  return db.member.create({
+    data: {
+      clinicId: clinic.id,
+      name: `Clienta ${phoneSeq}`,
+      phone: `+34688000${String(phoneSeq).padStart(3, "0")}`,
+      code: `R${String(phoneSeq).padStart(3, "0")}X`,
+      consentMarketing: false,
+      consentSource: "staff_entry"
+    }
+  });
+};
+
+beforeAll(async () => {
+  clinic = await db.clinic.upsert({
+    where: { slug: SLUG },
+    update: {},
+    create: { slug: SLUG, name: "Centro de ruta", addressLine: "Calle Tres 3", pincode: "28003" }
+  });
+  await wipe();
+});
+
+beforeEach(async () => {
+  await wipe();
+  phoneSeq = 0;
+});
+
+afterAll(async () => {
+  await wipe();
+  await db.clinic.deleteMany({ where: { slug: SLUG } });
+  await db.$disconnect();
+});
+
+describe("the catalogue", () => {
+  it("answers 404 for a clinic that does not exist, on every admin route", async () => {
+    const ghost = "/admin/clinics/does-not-exist/onboarding";
+
+    for (const [method, path, body] of [
+      ["GET", "/catalog", undefined],
+      ["PUT", "/catalog", { items: [] }],
+      ["GET", "/estimates", undefined],
+      ["GET", "/programs", undefined],
+      ["POST", "/programs", ANSWERS],
+      ["GET", "/recalibration", undefined]
+    ] as const) {
+      const r = await call(method, `${ghost}${path}`, body);
+
+      expect(r.status, `${method} ${path}`).toBe(404);
+    }
+  });
+
+  it("stores a catalogue and shows each row's category and where it came from", async () => {
+    const r = await call("PUT", admin("/catalog"), { items: fixtureItems });
+
+    expect(r.status).toBe(200);
+    expect(r.body.items).toHaveLength(fixtureItems.length);
+
+    const hydra = r.body.items.find((i: { externalId: string }) => i.externalId === "F2");
+
+    expect(hydra).toMatchObject({ category: "APF", classifiedBy: "palabra clave", priceEuro: 75 });
+    // Retail is filed by its flag, not by a keyword.
+    expect(r.body.items.find((i: { externalId: string }) => i.externalId === "K1")).toMatchObject({
+      category: "COS",
+      classifiedBy: "producto"
+    });
+  });
+
+  it("hides the database id, which is not the identity the engine uses", async () => {
+    const r = await call("PUT", admin("/catalog"), { items: fixtureItems });
+
+    expect(Object.keys(r.body.items[0])).not.toContain("id");
+  });
+
+  it("refuses bad input with the Spanish sentence for the field", async () => {
+    const negative = await call("PUT", admin("/catalog"), {
+      items: [{ name: "Facial", priceEuro: -5 }]
+    });
+    const category = await call("PUT", admin("/catalog"), {
+      items: [{ name: "Facial", priceEuro: 5, categoryId: "NOPE" }]
+    });
+    const duplicate = await call("PUT", admin("/catalog"), {
+      items: [
+        { externalId: "A", name: "Uno", priceEuro: 1 },
+        { externalId: "A", name: "Dos", priceEuro: 2 }
+      ]
+    });
+
+    expect(negative.status).toBe(422);
+    expect(negative.body.message).toContain("no puede ser negativo");
+    expect(category.status).toBe(422);
+    expect(category.body.message).toContain("Categoría desconocida");
+    expect(duplicate.status).toBe(422);
+    expect(duplicate.body.message).toContain("repetido");
+  });
+
+  it("lets the centre classify a row the engine could not", async () => {
+    await call("PUT", admin("/catalog"), {
+      items: [{ externalId: "X1", name: "Servicio sin nombre reconocible", priceEuro: 40 }]
+    });
+
+    const before = await call("GET", admin("/catalog"));
+
+    expect(before.body.items[0]).toMatchObject({
+      needsReview: true,
+      classifiedBy: "sin clasificar"
+    });
+
+    const after = await call("PATCH", admin("/catalog/X1"), { categoryId: "FAC" });
+
+    expect(after.status).toBe(200);
+    expect(after.body.items[0]).toMatchObject({
+      category: "FAC",
+      classifiedBy: "centro",
+      needsReview: false
+    });
+  });
+
+  it("answers 404 for a row that does not exist and 422 for an empty patch", async () => {
+    await call("PUT", admin("/catalog"), {
+      items: [{ externalId: "A", name: "Uno", priceEuro: 1 }]
+    });
+
+    const missing = await call("PATCH", admin("/catalog/NOPE"), { priceEuro: 10 });
+    const empty = await call("PATCH", admin("/catalog/A"), {});
+
+    expect(missing.status).toBe(404);
+    expect(missing.body.message).toBe("No existe esa fila del catálogo.");
+    expect(empty.status).toBe(422);
+  });
+
+  it("imports a CSV, reporting the rows it could not read", async () => {
+    const r = await call("POST", admin("/catalog/import"), {
+      csv: "Nombre;Precio\nHigiene facial;60\nMasaje relajante;45,50\nrota\nCrema;40;producto"
+    });
+
+    expect(r.status).toBe(200);
+    expect(r.body.imported).toBe(3);
+    expect(r.body.skipped).toEqual([
+      expect.objectContaining({ line: 4, reason: expect.stringContaining("columnas") })
+    ]);
+    expect(r.body.items.map((i: { name: string }) => i.name)).toEqual([
+      "Higiene facial",
+      "Masaje relajante",
+      "Crema"
+    ]);
+    expect(r.body.items[1].priceEuro).toBe(45.5);
+  });
+
+  it("explains an import that read nothing", async () => {
+    const r = await call("POST", admin("/catalog/import"), { csv: "esto no es un catálogo" });
+
+    expect(r.status).toBe(422);
+    expect(r.body.message).toContain("punto y coma");
+  });
+});
+
+describe("generating a programme", () => {
+  it("cannot estimate without a catalogue, and says what to do", async () => {
+    const r = await call("GET", admin("/estimates"));
+
+    expect(r.status).toBe(400);
+    expect(r.body.message).toContain("catálogo");
+  });
+
+  it("offers the pre-selected buckets the questions screen needs", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const r = await call("GET", admin("/estimates"));
+
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({
+      segment: "high",
+      ticketEstimate: 65,
+      preselectedTicketBucket: "t2",
+      preselectedFreqBucket: "f4"
+    });
+  });
+
+  it("creates a draft and returns the programme with the internal block", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const r = await call("POST", admin("/programs"), ANSWERS);
+
+    expect(r.status).toBe(201);
+    expect(r.body).toMatchObject({ version: 1, status: "BORRADOR" });
+    expect(r.body.program.ladder.length).toBeGreaterThan(10);
+    expect(r.body.internal.costPct).toBeGreaterThan(0);
+    expect(r.body.internal.guarantees.length).toBeGreaterThan(5);
+  });
+
+  it("NEVER puts a cost in the programme a centre sees", async () => {
+    // The guide is explicit: "No costs and no revenue figures anywhere." The presentation is
+    // built from a projection that never reads a cost, so this fails the day someone adds one.
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const draft = await call("POST", admin("/programs"), ANSWERS);
+    const text = JSON.stringify(draft.body.program);
+
+    expect(text).not.toMatch(/"cost/i);
+    expect(text).not.toMatch(/"budget/i);
+    expect(text).not.toMatch(/"cb"|"cap"/);
+    // ...and the same for the live view a centre's own staff get.
+    await call("POST", admin(`/programs/${draft.body.id}/publish`));
+    const live = await call("GET", `/clinics/${SLUG}/program`);
+
+    expect(JSON.stringify(live.body)).not.toMatch(/"cost|"budget|costPct|guarantees/i);
+  });
+
+  it("rejects incomplete answers with the question the centre skipped", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const r = await call("POST", admin("/programs"), { objective: "equilibrado" });
+
+    expect(r.status).toBe(422);
+    expect(r.body.message).toMatch(/inversi|devolver|ocupaci/);
+  });
+
+  it("passes the engine's own refusal to the centre", async () => {
+    await call("PUT", admin("/catalog"), {
+      items: [{ externalId: "M1", name: "Toxina botulínica", priceEuro: 300 }]
+    });
+    const r = await call("POST", admin("/programs"), ANSWERS);
+
+    expect(r.status).toBe(400);
+    expect(r.body.message).toContain("tratamientos con precio");
+  });
+
+  it("lists versions and fetches one, scoped to the clinic", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const a = await call("POST", admin("/programs"), ANSWERS);
+    await call("POST", admin("/programs"), { ...ANSWERS, investment: "generoso" });
+
+    const list = await call("GET", admin("/programs"));
+
+    expect(list.body.programs.map((p: { version: number }) => p.version)).toEqual([2, 1]);
+    expect((await call("GET", admin(`/programs/${a.body.id}`))).status).toBe(200);
+
+    const missing = await call("GET", admin("/programs/not-a-real-id"));
+
+    expect(missing.status).toBe(404);
+    expect(missing.body.message).toContain("No existe ese programa");
+  });
+});
+
+describe("publishing and editing", () => {
+  it("publishes a clean draft", async () => {
+    const id = await goLive();
+    const r = await call("GET", admin(`/programs/${id}`));
+
+    expect(r.body.status).toBe("ACTIVO");
+    expect(r.body.publishedAt).not.toBeNull();
+  });
+
+  it("refuses to publish while the programme has review notes, and says why", async () => {
+    await call("PUT", admin("/catalog"), {
+      items: [
+        ...fixtureItems,
+        { externalId: "X9", name: "Servicio sin nombre reconocible", priceEuro: 40 }
+      ]
+    });
+    const draft = await call("POST", admin("/programs"), ANSWERS);
+    const r = await call("POST", admin(`/programs/${draft.body.id}/publish`));
+
+    expect(r.status).toBe(409);
+    expect(r.body.message).toContain("avisos que resolver");
+    expect(r.body.message).toContain("sin categoría");
+  });
+
+  it("swaps a reward for one of its alternatives", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const draft = await call("POST", admin("/programs"), ANSWERS);
+    const before = draft.body.program.ladder.find((m: { n: number }) => m.n === 7);
+
+    expect(before.reward.alternatives.length).toBeGreaterThan(0);
+
+    const r = await call("PATCH", admin(`/programs/${draft.body.id}/milestones/7`), {
+      alternative: 0
+    });
+
+    expect(r.status).toBe(200);
+    expect(r.body.program.ladder.find((m: { n: number }) => m.n === 7).reward.name).toBe(
+      before.reward.alternatives[0].name
+    );
+  });
+
+  it("refuses a swap that does not exist, in Spanish", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const draft = await call("POST", admin("/programs"), ANSWERS);
+
+    const none = await call("PATCH", admin(`/programs/${draft.body.id}/milestones/9`), {
+      alternative: 0
+    });
+    const notAReward = await call("PATCH", admin(`/programs/${draft.body.id}/milestones/2`), {
+      alternative: 0
+    });
+
+    expect(none.status).toBe(409);
+    expect(none.body.message).toBe("Esa alternativa no existe.");
+    expect(notAReward.status).toBe(409);
+    expect(notAReward.body.message).toContain("no tiene un premio");
+  });
+
+  it("validates the swap request itself", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const draft = await call("POST", admin("/programs"), ANSWERS);
+
+    expect(
+      (await call("PATCH", admin(`/programs/${draft.body.id}/milestones/7`), { alternative: 7 }))
+        .status
+    ).toBe(422);
+    expect(
+      (await call("PATCH", admin(`/programs/${draft.body.id}/milestones/abc`), { alternative: 0 }))
+        .status
+    ).toBe(422);
+  });
+
+  it("will not edit a programme that is already live", async () => {
+    const id = await goLive();
+    const r = await call("PATCH", admin(`/programs/${id}/milestones/7`), { alternative: 0 });
+
+    expect(r.status).toBe(409);
+    expect(r.body.message).toContain("borrador");
+  });
+
+  it("makes a recalibration prompt only once there is data", async () => {
+    const none = await call("GET", admin("/recalibration"));
+
+    expect(none.body).toMatchObject({ offer: false, daysOfData: 0 });
+
+    await goLive();
+    const fresh = await call("GET", admin("/recalibration"));
+
+    // Live for seconds: not enough data to say anything, and it says so.
+    expect(fresh.body.offer).toBe(false);
+    expect(fresh.body.reason).toContain("90");
+    expect(fresh.body.used).toMatchObject({ ticket: 65 });
+  });
+});
+
+describe("a centre's own staff", () => {
+  it("has no programme to show until one is published", async () => {
+    const r = await call("GET", `/clinics/${SLUG}/program`);
+
+    expect(r.status).toBe(404);
+    expect(r.body.message).toContain("todavía no tiene un programa activo");
+  });
+
+  it("answers 404 for an unknown poster slug", async () => {
+    expect((await call("GET", "/clinics/no-such-slug/program")).status).toBe(404);
+  });
+
+  it("records a visit and returns what it did", async () => {
+    await goLive();
+    const m = await newMember();
+    const r = await call("POST", `/clinics/${SLUG}/members/${m.id}/visits`, {
+      kind: "PAYMENT",
+      lines: [{ amountEuro: 65 }],
+      idempotencyKey: "route-visit-1"
+    });
+
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ progress: 65, duplicate: false, lifetimeAfter: 65 });
+    expect(r.body.issued.length).toBeGreaterThan(0);
+  });
+
+  it("answers a retry with the same result and not an error", async () => {
+    await goLive();
+    const m = await newMember();
+    const send = () =>
+      call("POST", `/clinics/${SLUG}/members/${m.id}/visits`, {
+        kind: "PAYMENT",
+        lines: [{ amountEuro: 65 }],
+        idempotencyKey: "route-visit-retry"
+      });
+
+    const first = await send();
+    const second = await send();
+
+    expect(second.status).toBe(200);
+    expect(second.body.duplicate).toBe(true);
+    expect(second.body.visitId).toBe(first.body.visitId);
+    expect(await db.pointsTransaction.count({ where: { memberId: m.id } })).toBe(1);
+  });
+
+  it("reports a refusal as the sentence reception needs, not as a 500", async () => {
+    // THE bug this file exists for. An error that is not an AppError answers
+    // "Internal server error", hiding the one line a receptionist can act on.
+    const m = await newMember();
+    const r = await call("POST", `/clinics/${SLUG}/members/${m.id}/visits`, {
+      kind: "PAYMENT",
+      lines: [{ amountEuro: 65 }],
+      idempotencyKey: "route-no-program"
+    });
+
+    expect(r.status).toBe(409);
+    expect(r.body.message).toContain("todavía no tiene un programa activo");
+    expect(r.body.message).not.toBe("Internal server error");
+  });
+
+  it("validates a visit before touching anything", async () => {
+    await goLive();
+    const m = await newMember();
+    const path = `/clinics/${SLUG}/members/${m.id}/visits`;
+
+    expect(
+      (await call("POST", path, { kind: "PAYMENT", lines: [], idempotencyKey: "k-123456" })).status
+    ).toBe(422);
+    expect(
+      (await call("POST", path, { kind: "PAYMENT", lines: [{ amountEuro: 10 }] })).status
+    ).toBe(422);
+    expect(
+      (
+        await call("POST", path, {
+          kind: "PAYMENT",
+          lines: [{ amountEuro: -3 }],
+          idempotencyKey: "k-123456"
+        })
+      ).status
+    ).toBe(422);
+    expect(
+      (
+        await call("POST", path, {
+          kind: "REGALO",
+          lines: [{ amountEuro: 3 }],
+          idempotencyKey: "k-123456"
+        })
+      ).status
+    ).toBe(422);
+  });
+
+  it("does not let the caller choose the visit's source", async () => {
+    await goLive();
+    const m = await newMember();
+    const r = await call("POST", `/clinics/${SLUG}/members/${m.id}/visits`, {
+      kind: "PAYMENT",
+      lines: [{ amountEuro: 20 }],
+      idempotencyKey: "route-source-1",
+      source: "INTEGRATION"
+    });
+
+    expect(r.status).toBe(200);
+    // Whatever was claimed, only reception-typed visits exist.
+    expect((await db.paidVisit.findFirstOrThrow({ where: { memberId: m.id } })).source).toBe(
+      "STAFF_ENTRY"
+    );
+  });
+
+  it("answers 404 in Spanish for a member who is not here", async () => {
+    await goLive();
+    const r = await call("POST", `/clinics/${SLUG}/members/ghost/visits`, {
+      kind: "PAYMENT",
+      lines: [{ amountEuro: 20 }],
+      idempotencyKey: "route-ghost-1"
+    });
+
+    expect(r.status).toBe(404);
+    expect(r.body.message).toBe("No existe esa clienta en este centro.");
+  });
+
+  it("records a prepaid package session", async () => {
+    await goLive();
+    const m = await newMember();
+    const r = await call("POST", `/clinics/${SLUG}/members/${m.id}/visits`, {
+      kind: "BONO_SESSION",
+      package: { priceEuro: 300, sessions: 6 },
+      idempotencyKey: "route-bono-1"
+    });
+
+    expect(r.status).toBe(200);
+    expect(r.body.progress).toBe(50);
+  });
+
+  it("lists rewards, then redeems one against today's visit", async () => {
+    await goLive();
+    const m = await newMember();
+    const visit = await call("POST", `/clinics/${SLUG}/members/${m.id}/visits`, {
+      kind: "PAYMENT",
+      lines: [{ amountEuro: 65 }],
+      idempotencyKey: "route-redeem-1"
+    });
+
+    const list = await call("GET", `/clinics/${SLUG}/members/${m.id}/rewards`);
+
+    expect(list.body.rewards[0].status).toBe("disponible");
+
+    const rewardId = list.body.rewards[0].id;
+    const redeemed = await call(
+      "POST",
+      `/clinics/${SLUG}/members/${m.id}/rewards/${rewardId}/redeem`,
+      { visitId: visit.body.visitId }
+    );
+
+    expect(redeemed.status).toBe(200);
+    expect(redeemed.body.status).toBe("canjeado");
+  });
+
+  it("refuses a redemption with no visit named, and a repeat, with the reason", async () => {
+    await goLive();
+    const m = await newMember();
+    const visit = await call("POST", `/clinics/${SLUG}/members/${m.id}/visits`, {
+      kind: "PAYMENT",
+      lines: [{ amountEuro: 65 }],
+      idempotencyKey: "route-redeem-2"
+    });
+    const rewardId = (await call("GET", `/clinics/${SLUG}/members/${m.id}/rewards`)).body.rewards[0]
+      .id;
+    const path = `/clinics/${SLUG}/members/${m.id}/rewards/${rewardId}/redeem`;
+
+    const noVisit = await call("POST", path, {});
+
+    expect(noVisit.status).toBe(422);
+
+    await call("POST", path, { visitId: visit.body.visitId });
+    const again = await call("POST", path, { visitId: visit.body.visitId });
+
+    expect(again.status).toBe(409);
+    expect(again.body.message).toBe("Este premio ya se canjeó.");
+  });
+
+  it("will not redeem a reward through another member's URL", async () => {
+    await goLive();
+    const owner = await newMember();
+    const other = await newMember();
+    const visit = await call("POST", `/clinics/${SLUG}/members/${owner.id}/visits`, {
+      kind: "PAYMENT",
+      lines: [{ amountEuro: 65 }],
+      idempotencyKey: "route-scope-1"
+    });
+    const rewardId = (await call("GET", `/clinics/${SLUG}/members/${owner.id}/rewards`)).body
+      .rewards[0].id;
+
+    const r = await call(
+      "POST",
+      `/clinics/${SLUG}/members/${other.id}/rewards/${rewardId}/redeem`,
+      { visitId: visit.body.visitId }
+    );
+
+    expect(r.status).toBe(404);
+  });
+});
+
+describe("adding points by hand, at a clinic on a programme", () => {
+  const credited: string[] = [];
+  const fake = {
+    credit: async () => {
+      credited.push("credit");
+
+      return { applied: true, balance: { spendable: 1, lifetime: 1 }, tier: null };
+    },
+    redeem: async () => {
+      credited.push("redeem");
+
+      return { applied: true, balance: { spendable: 0, lifetime: 1 }, tier: null };
+    },
+    clawBack: async () => {
+      credited.push("clawBack");
+
+      return { applied: true, balance: { spendable: 0, lifetime: 0 }, tier: null };
+    }
+  } as unknown as PointsService;
+
+  const pointsApp = (usesProgram: boolean | undefined): Express => {
+    const a = express();
+
+    a.use(express.json());
+    a.use(
+      "/api/v1",
+      createPointsRouter({
+        points: fake,
+        clinicOfMember: async () => clinic.id,
+        ...(usesProgram === undefined ? {} : { usesProgram: async () => usesProgram })
+      })
+    );
+    a.use(errorHandler);
+
+    return a;
+  };
+
+  const post = async (a: Express, path: string, body: unknown): Promise<Reply> => {
+    const server = a.listen(0);
+
+    try {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      const response = await fetch(`http://127.0.0.1:${port}/api/v1${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body)
+      });
+
+      return { status: response.status, body: await response.json() };
+    } finally {
+      server.close();
+    }
+  };
+
+  const credit = { points: 10, kind: PointsTransactionKind.EARN, idempotencyKey: "key-123456" };
+
+  beforeEach(() => {
+    credited.length = 0;
+  });
+
+  it("refuses to credit, because only a recorded visit applies the programme's rules", async () => {
+    const r = await post(pointsApp(true), "/members/m1/points/credit", credit);
+
+    expect(r.status).toBe(409);
+    expect(r.body.message).toContain("registra la visita");
+    expect(credited).toEqual([]);
+  });
+
+  it("refuses to spend points, which no longer exist as a currency there", async () => {
+    const r = await post(pointsApp(true), "/members/m1/points/redeem", {
+      points: 5,
+      idempotencyKey: "key-123456"
+    });
+
+    expect(r.status).toBe(409);
+    expect(credited).toEqual([]);
+  });
+
+  it("still allows a correction, which is how a mistake gets undone", async () => {
+    const r = await post(pointsApp(true), "/members/m1/points/claw-back", {
+      points: 5,
+      idempotencyKey: "key-123456",
+      reason: "Error"
+    });
+
+    expect(r.status).toBe(200);
+    expect(credited).toEqual(["clawBack"]);
+  });
+
+  it("changes nothing for a clinic with no programme", async () => {
+    expect((await post(pointsApp(false), "/members/m1/points/credit", credit)).status).toBe(200);
+    expect(credited).toEqual(["credit"]);
+  });
+
+  it("changes nothing when programmes are not configured at all", async () => {
+    expect((await post(pointsApp(undefined), "/members/m1/points/credit", credit)).status).toBe(
+      200
+    );
+    expect(credited).toEqual(["credit"]);
+  });
+});

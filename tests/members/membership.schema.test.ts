@@ -187,6 +187,41 @@ describe("clinicSlugSchema", () => {
   });
 });
 
+describe("membershipSignupSchema referredByCode", () => {
+  it("is optional, and absent from the parsed value when not given", () => {
+    const parsed = membershipSignupSchema.parse(VALID);
+
+    expect(parsed).not.toHaveProperty("referredByCode");
+  });
+
+  it("carries the code through, trimmed", () => {
+    expect(
+      membershipSignupSchema.parse({ ...VALID, referredByCode: "  K7M2Q " }).referredByCode
+    ).toBe("K7M2Q");
+  });
+
+  it("treats a blank code as no code at all", () => {
+    // A form field left empty submits "", which must never become a lookup of "".
+    expect(membershipSignupSchema.parse({ ...VALID, referredByCode: "   " })).not.toHaveProperty(
+      "referredByCode"
+    );
+  });
+
+  it("refuses an absurdly long code rather than passing it on", () => {
+    expect(
+      membershipSignupSchema.safeParse({ ...VALID, referredByCode: "x".repeat(11) }).success
+    ).toBe(false);
+  });
+
+  it("does not let a bad code fail the sign-up, because it is validated only for size", () => {
+    // Unknown or mistyped codes are ignored later, silently. If the schema were strict about
+    // the alphabet, a typo would cost someone their membership.
+    expect(membershipSignupSchema.safeParse({ ...VALID, referredByCode: "O0I1l" }).success).toBe(
+      true
+    );
+  });
+});
+
 describe("clinicSlugSchema, against the clinics that already exist", () => {
   it("still resolves a slug longer than five characters", () => {
     // THE regression guard for the five-character cap. New clinics get five characters,
