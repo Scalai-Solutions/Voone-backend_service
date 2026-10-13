@@ -54,6 +54,9 @@ model Clinic {
   notificationAuditLogs NotificationAuditLog[]
   catalogItems          CatalogItem[]
   onboardingPrograms    OnboardingProgram[]
+  paidVisits            PaidVisit[]
+  memberRewards         MemberReward[]
+  referrals             Referral[]
 }
 
 model User {
@@ -259,6 +262,10 @@ model Member {
   walletObjects          WalletObject[]
   pointsLedger           PointsTransaction[]
   passClaims             PassClaim[]
+  paidVisits             PaidVisit[]
+  rewards                MemberReward[]
+  referralsMade          Referral[]             @relation("Referrer")
+  referredBy             Referral?              @relation("Referred")
   notificationDeliveries NotificationDelivery[]
 
   @@unique([clinicId, phone])
@@ -676,6 +683,8 @@ model OnboardingProgram {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  rewards MemberReward[]
+
   @@unique([clinicId, version])
   @@index([clinicId, status])
 }
@@ -687,4 +696,162 @@ enum OnboardingProgramStatus {
   ACTIVO
   /// Replaced by a later version. Kept, never deleted: members progressed against it.
   SUSTITUIDO
+}
+
+enum VisitKind {
+  /// Money changed hands for something that earns progress.
+  PAYMENT
+  /// One session of a prepaid package was consumed. The package was paid for earlier;
+  /// progress is added per session, never as a lump sum at purchase.
+  BONO_SESSION
+}
+
+enum VisitSource {
+  /// Reception typed it in. The only source that exists today.
+  STAFF_ENTRY
+  /// Reserved: a QR scanned at the till. Not accepted by any route yet.
+  QR_SCAN
+  /// Reserved: pushed by the centre's own management software. Not accepted yet.
+  INTEGRATION
+}
+
+/// A visit that included a payment or a consumed prepaid session.
+///
+/// This exists because the guide makes redemption conditional on it: "the backend must
+/// validate this; it is not a staff convention". A reward can only be redeemed against one
+/// of these, so the rule is enforced by what the database can show rather than by what
+/// reception remembers.
+///
+/// Deliberately SOURCE-AGNOSTIC. How a payment reaches Voone — typed by staff, scanned at
+/// the till, or pushed from the centre's own software — is an open question in the guide,
+/// and it must not be answered by accident in a schema. `source` records the channel; the
+/// redemption rule only cares that the row exists.
+///
+/// Holds amounts and counts, never what was bought. Treatment names are special-category
+/// data in this product's design (see PointsTransaction), and a table that must be kept
+/// as a financial record cannot also be erasable.
+model PaidVisit {
+  id       String @id @default(uuid())
+  clinicId String
+  clinic   Clinic @relation(fields: [clinicId], references: [id])
+  memberId String
+  member   Member @relation(fields: [memberId], references: [id])
+
+  kind   VisitKind
+  source VisitSource @default(STAFF_ENTRY)
+
+  /// For PAYMENT, what was paid that earns progress. For BONO_SESSION, the package price
+  /// divided by its sessions. Cents, for the same reason as CatalogItem.priceCents.
+  amountCents Int
+
+  /// False when the visit was retail only. A referral counts on the referred person's
+  /// first payment for a TREATMENT, so buying a moisturiser must not trigger it.
+  hasTreatment Boolean @default(true)
+
+  /// Cosmetics bought at the tier discount in this visit. Counted against the yearly
+  /// allowance rather than stored as a running total, so a correction is a row, not an
+  /// edit.
+  discountedProducts Int @default(0)
+
+  /// Minted by the caller. A double tap at reception must not pay a client twice.
+  idempotencyKey String
+
+  /// Snapshots taken when the progress was credited. They make the milestones this visit
+  /// crossed a fact about THIS visit, independent of whatever the member does afterwards:
+  /// a retry an hour later must not see the same thresholds as crossed by someone else's
+  /// later visit.
+  progressAwarded Int?
+  lifetimeBefore  Int?
+  lifetimeAfter   Int?
+
+  occurredAt DateTime
+  createdAt  DateTime @default(now())
+  createdBy  String?
+
+  redemptions MemberReward[] @relation("RedeemedAt")
+
+  @@unique([clinicId, idempotencyKey])
+  @@index([memberId, occurredAt])
+  @@index([clinicId, occurredAt])
+}
+
+enum MemberRewardKind {
+  /// A reward from the ladder, picked from the centre's own catalogue.
+  PREMIO
+  /// A perk: double progress, a free diagnosis, an upgrade, a surprise.
+  VENTAJA
+  /// The reward that repeats every so often after Diamante.
+  RECURRENTE
+  /// Earned by referring someone who then paid for a treatment.
+  REFERIDO
+}
+
+/// A reward or perk that has been issued to a member and is waiting to be used.
+///
+/// Issued when progress crosses a milestone, and expires 60 days later. Redeemed only
+/// against a PaidVisit. Never deleted: what a member was promised, and when, has to
+/// survive the programme being replaced.
+model MemberReward {
+  id        String            @id @default(uuid())
+  clinicId  String
+  clinic    Clinic            @relation(fields: [clinicId], references: [id])
+  memberId  String
+  member    Member            @relation(fields: [memberId], references: [id])
+  programId String
+  program   OnboardingProgram @relation(fields: [programId], references: [id])
+
+  kind MemberRewardKind
+
+  /// What makes this issuance unique for the member: "m:7" for the seventh milestone of
+  /// the programme, "rec:3" for the third recurring reward, "ref:5" for the fifth
+  /// referral. Together with the member it is the idempotency key for issuing, so a
+  /// retried visit cannot hand out a reward twice.
+  sourceKey String
+
+  /// Spanish, ready to show: the reward's name or the perk's.
+  title String
+
+  /// Whatever the screen needs to render it: the perk's kind and description, the items
+  /// in a reward, and for a surprise the pool the centre chooses from.
+  detail Json
+
+  issuedAt  DateTime @default(now())
+  expiresAt DateTime
+
+  redeemedAt      DateTime?
+  redeemedVisitId String?
+  redeemedVisit   PaidVisit? @relation("RedeemedAt", fields: [redeemedVisitId], references: [id])
+  redeemedBy      String?
+
+  /// For a surprise: which pool item the centre chose when it was redeemed. The guide
+  /// leaves open whether staff pick from the pool or type free text; picking is the
+  /// stricter reading and can be loosened, whereas the reverse cannot be recovered.
+  surpriseItem String?
+
+  @@unique([memberId, sourceKey])
+  @@index([memberId, expiresAt])
+  @@index([clinicId, issuedAt])
+}
+
+/// Who recommended whom.
+///
+/// Created when a new member says who sent them, but only COUNTS once they make their
+/// first payment for a treatment — sign-up alone does not. `referredId` is unique: a
+/// person can be recommended once, so a rival referral cannot steal the credit.
+model Referral {
+  id         String @id @default(uuid())
+  clinicId   String
+  clinic     Clinic @relation(fields: [clinicId], references: [id])
+  referrerId String
+  referrer   Member @relation("Referrer", fields: [referrerId], references: [id])
+  referredId String @unique
+  referred   Member @relation("Referred", fields: [referredId], references: [id])
+
+  createdAt DateTime  @default(now())
+  /// Set on the referred person's first treatment payment. The count is cumulative and
+  /// never resets or expires, so this is only ever written once.
+  countedAt DateTime?
+
+  @@index([referrerId, countedAt])
+  @@index([clinicId])
 }
