@@ -112,6 +112,7 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
     configVersion: string;
     publishedAt: Date | null;
     output: unknown;
+    answers: unknown;
   }) => {
     const output = row.output as Program;
 
@@ -122,6 +123,8 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
       engineVersion: row.engineVersion,
       configVersion: row.configVersion,
       publishedAt: row.publishedAt,
+      // What the centre answered, so the screens can pre-fill when it comes back to a draft.
+      answers: row.answers,
       program: presentProgram(output),
       internal: {
         costPct: output.costPct,
@@ -265,6 +268,30 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
       const draft = await deps.onboarding.createDraft(clinicId, answers);
 
       res.status(201).json(forAdmin(draft));
+    })
+  );
+
+  /**
+   * The live preview: the programme these answers WOULD produce, stored nowhere.
+   *
+   * Declared before the :programId routes, because "preview" would otherwise be read as a
+   * programme id.
+   */
+  router.post(
+    "/admin/clinics/:clinicId/onboarding/preview",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const clinicId = await clinicOr404(req.params.clinicId);
+      const answers = parse(answersSchema, req.body);
+      const program = await deps.onboarding.preview(clinicId, answers);
+
+      res.json({
+        program: presentProgram(program),
+        internal: {
+          costPct: program.costPct,
+          guarantees: program.guarantees.map(([text, held]) => ({ text, held }))
+        }
+      });
     })
   );
 

@@ -155,6 +155,32 @@ export class OnboardingService {
     });
   }
 
+  /**
+   * Generates a programme WITHOUT storing it, for the live preview.
+   *
+   * The guide wants the preview to update as the centre changes an answer, and every
+   * generation that persisted would mint a new version: a centre trying four investment
+   * levels would leave four numbered drafts behind, and "version 14" would mean nothing to
+   * anyone. So the preview computes and returns, and a draft is written only when the centre
+   * commits to one. Same engine, same catalogue read, same refusals — only the insert is
+   * skipped, so what the preview shows is exactly what saving would store.
+   */
+  async preview(clinicId: string, answers: Answers): Promise<Program> {
+    const rows = await this.catalog.listForClinic(clinicId);
+
+    if (!rows.length) {
+      throw new OnboardingError(
+        "El centro no tiene catálogo. Sube los tratamientos y productos antes de generar el programa."
+      );
+    }
+
+    const result = run(toEngineCatalog(rows), answers);
+
+    if (isEngineError(result)) throw new OnboardingError((result as EngineError).error);
+
+    return result as Program;
+  }
+
   /** The clinic's current draft, or null when it has none. */
   latestDraft(clinicId: string): Promise<OnboardingProgram | null> {
     return this.prisma.onboardingProgram.findFirst({

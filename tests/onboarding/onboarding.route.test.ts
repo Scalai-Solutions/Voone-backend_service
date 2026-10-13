@@ -323,6 +323,20 @@ describe("generating a programme", () => {
     expect(r.body.internal.guarantees.length).toBeGreaterThan(5);
   });
 
+  it("returns the answers it was generated from, so the screens can pre-fill", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const draft = await call("POST", admin("/programs"), {
+      ...ANSWERS,
+      investment: "generoso",
+      occupancy: "o3"
+    });
+
+    expect(draft.body.answers).toMatchObject({ investment: "generoso", occupancy: "o3" });
+    expect((await call("GET", admin(`/programs/${draft.body.id}`))).body.answers).toMatchObject({
+      investment: "generoso"
+    });
+  });
+
   it("NEVER puts a cost in the programme a centre sees", async () => {
     // The guide is explicit: "No costs and no revenue figures anywhere." The presentation is
     // built from a projection that never reads a cost, so this fails the day someone adds one.
@@ -372,6 +386,62 @@ describe("generating a programme", () => {
 
     expect(missing.status).toBe(404);
     expect(missing.body.message).toContain("No existe ese programa");
+  });
+});
+
+describe("the live preview", () => {
+  it("returns a programme and stores nothing", async () => {
+    // The reason it exists: a centre trying four investment levels must not leave four
+    // numbered drafts behind.
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+
+    for (const investment of ["conservador", "equilibrado", "generoso"]) {
+      const r = await call("POST", admin("/preview"), { ...ANSWERS, investment });
+
+      expect(r.status).toBe(200);
+      expect(r.body.program.ladder.length).toBeGreaterThan(10);
+    }
+
+    expect(await db.onboardingProgram.count({ where: { clinicId: clinic.id } })).toBe(0);
+  });
+
+  it("shows exactly what saving would store", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+
+    const preview = await call("POST", admin("/preview"), ANSWERS);
+    const saved = await call("POST", admin("/programs"), ANSWERS);
+
+    expect(preview.body.program).toEqual(saved.body.program);
+  });
+
+  it("carries the same internal block and no cost in the centre-facing part", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const r = await call("POST", admin("/preview"), ANSWERS);
+
+    expect(r.body.internal.costPct).toBeGreaterThan(0);
+    expect(JSON.stringify(r.body.program)).not.toMatch(/"cost|"budget/i);
+  });
+
+  it("is not read as a programme id", async () => {
+    // "preview" sits beside /programs/:programId, and a route order mistake would answer
+    // "no existe ese programa" instead.
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+
+    expect((await call("POST", admin("/preview"), ANSWERS)).status).toBe(200);
+  });
+
+  it("refuses in Spanish without a catalogue, with bad answers, and for an unknown clinic", async () => {
+    const empty = await call("POST", admin("/preview"), ANSWERS);
+
+    expect(empty.status).toBe(400);
+    expect(empty.body.message).toContain("catálogo");
+
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+
+    expect((await call("POST", admin("/preview"), { objective: "equilibrado" })).status).toBe(422);
+    expect(
+      (await call("POST", "/admin/clinics/does-not-exist/onboarding/preview", ANSWERS)).status
+    ).toBe(404);
   });
 });
 
