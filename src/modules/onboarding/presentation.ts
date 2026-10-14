@@ -15,10 +15,16 @@ import type { Program, TierCode } from "./engine.types";
  * Pure. Everything in the result is plain data safe to serialise.
  */
 
+/**
+ * A gift, by name only.
+ *
+ * Neither what it costs the centre nor what it is worth at retail is here: the feedback is
+ * explicit that a centre should see what it gives and what its clients spend, not what each gift
+ * is worth. Value stays in the engine and the stored programme, because choosing rewards needs
+ * it; it just never reaches this projection.
+ */
 export interface PresentedItem {
   name: string;
-  /** What the client perceives: the sale price. Never what it costs the centre. */
-  value: number;
 }
 
 export interface PresentedMilestone {
@@ -26,16 +32,23 @@ export interface PresentedMilestone {
   /** Which tier band it sits in, 1 to 4 — the ladder is shown grouped by band. */
   band: number;
   type: "premio" | "ventaja" | "nivel";
-  /** Progress euros. */
+  /** Progress euros. Not shown to a centre: see `realSpend`. */
   threshold: number;
+  /**
+   * What a client has actually paid when she reaches this step. This is what the centre reads,
+   * not `threshold`: progress runs ×1.1 in Oro, ×1.2 in Platino and ×1.3 in Diamante, so the two
+   * diverge, and a row showing both would look like a mistake.
+   */
+  realSpend: number;
+  /** Months for a typical repeating client to get here, at the programme's annual spend. */
+  month: number;
   /** For a tier-up row: the tier entered. */
   tier?: { key: TierCode; label: string };
   reward?: {
     name: string;
-    value: number;
     items: PresentedItem[];
     /** What the centre may swap this for without breaking the ladder. */
-    alternatives: Array<{ name: string; value: number; items: PresentedItem[] }>;
+    alternatives: Array<{ name: string; items: PresentedItem[] }>;
   };
   perk?: { kind: string; name: string; description: string };
 }
@@ -43,7 +56,7 @@ export interface PresentedMilestone {
 export interface PresentedTier {
   key: TierCode;
   label: string;
-  /** Progress euros at which the threshold is met. */
+  /** What a client has paid when she enters this tier. */
   threshold: number;
   minTenureMonths: number;
   benefits: string[];
@@ -53,19 +66,24 @@ export interface PresentedProgram {
   estimates: { segment: string; ticket: number; visitsPerYear: number; annualSpend: number };
   tiers: PresentedTier[];
   ladder: PresentedMilestone[];
-  recurring: { every: number; name: string; value: number };
-  referrals: Array<{ n: number; name: string; value: number }>;
+  /** After Diamante: one reward for every `every` euros a client pays. */
+  recurring: { every: number; name: string };
+  /**
+   * `minRevenue` is what the centre has earned at least from the people referred when the referrer
+   * reaches this step: each one paid for a treatment, so each spent at least one average ticket.
+   */
+  referrals: Array<{ n: number; name: string; minRevenue: number }>;
   welcomeProgress: number;
   /** The separate, static tier outside the ladder. Shown as its own card. */
-  familyAndFriends: { title: string; description: string };
+  familyAndFriends: { title: string; description: string; comingSoon: boolean };
   /** How the programme bent to fit the catalogue. Informational. */
   adaptations: string[];
   /** Real problems to resolve before approving. Blocking. */
   review: string[];
 }
 
-const itemsOf = (items: Array<{ name: string; value: number }>): PresentedItem[] =>
-  items.map((i) => ({ name: i.name, value: i.value }));
+const itemsOf = (items: Array<{ name: string }>): PresentedItem[] =>
+  items.map((i) => ({ name: i.name }));
 
 const nameOf = (items: Array<{ name: string }>): string => items.map((i) => i.name).join(" y ");
 
@@ -105,7 +123,11 @@ const benefitsFor = (key: TierCode, program: Program): string[] => {
 
 export const presentProgram = (program: Program): PresentedProgram => {
   const levels = program.lad.ms.filter((m) => m.type === "nivel");
-  const floors = [0, ...levels.map((m) => m.th)];
+  // Whole euros: a centre reads "826 €", and an unrounded real spend is a long float whose last
+  // digits differ between the engine's output and the copy stored and read back.
+  const euros = (n: number): number => Math.round(n);
+  const floors = [0, ...levels.map((m) => euros(program.realTh[m.n]))];
+  const monthOf = (real: number): number => Math.max(1, Math.round((real / program.est.A) * 12));
   const rewardAt = new Map(program.chosen.map((c) => [c.m.n, c]));
 
   return {
@@ -125,7 +147,15 @@ export const presentProgram = (program: Program): PresentedProgram => {
     })),
 
     ladder: program.lad.ms.map((m): PresentedMilestone => {
-      const base: PresentedMilestone = { n: m.n, band: m.tramo, type: m.type, threshold: m.th };
+      const real = program.realTh[m.n];
+      const base: PresentedMilestone = {
+        n: m.n,
+        band: m.tramo,
+        type: m.type,
+        threshold: m.th,
+        realSpend: euros(real),
+        month: monthOf(real)
+      };
 
       if (m.type === "nivel" && m.tier) base.tier = { key: m.tier, label: TIER_NAMES[m.tier] };
 
@@ -134,11 +164,9 @@ export const presentProgram = (program: Program): PresentedProgram => {
       if (m.type === "premio" && chosen) {
         base.reward = {
           name: nameOf(chosen.o.items),
-          value: chosen.o.value,
           items: itemsOf(chosen.o.items),
           alternatives: chosen.alts.map((a) => ({
             name: nameOf(a.items),
-            value: a.value,
             items: itemsOf(a.items)
           }))
         };
@@ -152,19 +180,26 @@ export const presentProgram = (program: Program): PresentedProgram => {
     }),
 
     recurring: {
-      every: program.rec.every,
-      name: nameOf(program.rec.o.items),
-      value: program.rec.o.value
+      // Progress runs ×1.3 in Diamante, so a reward every `every` of progress is one every
+      // `every / 1.3` euros actually paid, and the euros paid are what a centre reads.
+      every: Math.round(program.rec.every / TIER_BENEFITS.diamante.mult),
+      name: nameOf(program.rec.o.items)
     },
 
-    referrals: program.refLad.map((r) => ({ n: r.n, name: r.name, value: r.o.value })),
+    referrals: program.refLad.map((r) => ({
+      n: r.n,
+      name: r.name,
+      minRevenue: r.n * program.est.ticket
+    })),
 
     welcomeProgress: program.welcome,
 
     familyAndFriends: {
       title: "Family & Friends",
       description:
-        "Un nivel aparte para las personas cercanas al centro. El centro las añade a mano y define sus ventajas. No acumulan progreso, no tienen hitos y no suben de nivel."
+        "Un nivel aparte para las personas cercanas al centro. El centro las añade a mano y define sus ventajas. No acumulan progreso, no tienen hitos y no suben de nivel.",
+      // Not available yet: the card stays visible so centres know it is coming.
+      comingSoon: true
     },
 
     adaptations: program.adapt,

@@ -17,13 +17,15 @@ import { milestonesCrossed, recurringCrossed, resolveTier, tenureMonths, tierKey
 export const activeProgramView = async (
   prisma: PrismaClient,
   clinicId: string
-): Promise<{ id: string; view: ProgramView } | null> => {
+): Promise<{ id: string; version: number; view: ProgramView } | null> => {
   const row = await prisma.onboardingProgram.findFirst({
     where: { clinicId, status: OnboardingProgramStatus.ACTIVO },
-    select: { id: true, output: true }
+    select: { id: true, version: true, output: true }
   });
 
-  return row ? { id: row.id, view: programView(row.output as unknown as Program) } : null;
+  return row
+    ? { id: row.id, version: row.version, view: programView(row.output as unknown as Program) }
+    : null;
 };
 
 /** Whether a clinic has published a programme. Cheaper than loading it. */

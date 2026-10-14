@@ -8,10 +8,17 @@ import {
 import { AppError } from "../../common/errors/app-error";
 import { toEngineCatalog, type CatalogRepository } from "./catalog.repository";
 import { run } from "./engine";
-import { CONFIG_VERSION, ENGINE_VERSION, FREQ_BUCKETS, TICKET_BUCKETS } from "./engine.config";
+import {
+  ANSWER_LIMITS,
+  CONFIG_VERSION,
+  ENGINE_VERSION,
+  FREQ_BUCKETS,
+  TICKET_BUCKETS
+} from "./engine.config";
 import { classify, estimate } from "./engine";
 import type { Answers, EngineError, Program } from "./engine.types";
 import { isEngineError } from "./engine.types";
+import { placeMembersOnProgram } from "./runtime/placement";
 import { recalibrationAdvice, type RecalibrationAdvice } from "./runtime/rules";
 import { swapReward } from "./swap";
 
@@ -46,6 +53,8 @@ export interface OnboardingEstimates {
   annualSpend: number;
   preselectedTicketBucket: string;
   preselectedFreqBucket: string;
+  /** The ranges the centre's own ticket and visits figures may take. */
+  limits: { ticket: { min: number; max: number }; visits: { min: number; max: number } };
   ticketBuckets: Array<{ id: string; label: string; value: number }>;
   freqBuckets: Array<{ id: string; label: string }>;
   /** Rows the centre must categorise before a programme can be approved. */
@@ -94,6 +103,10 @@ export class OnboardingService {
       annualSpend: est.A,
       preselectedTicketBucket: est.tPre,
       preselectedFreqBucket: est.fPre,
+      limits: {
+        ticket: { ...ANSWER_LIMITS.ticket },
+        visits: { ...ANSWER_LIMITS.visits }
+      },
       ticketBuckets: buckets.map((b) => ({ id: b.id, label: b.label, value: b.value })),
       freqBuckets: FREQ_BUCKETS.map((b) => ({ id: b.id, label: b.label })),
       unclassified: classified
@@ -208,7 +221,9 @@ export class OnboardingService {
    * its thresholds and the record of what they were promised has to survive.
    */
   async publish(clinicId: string, programId: string): Promise<OnboardingProgram> {
-    return this.prisma.$transaction(async (tx) => {
+    let replaced = false;
+
+    const published = await this.prisma.$transaction(async (tx) => {
       const draft = await tx.onboardingProgram.findFirst({ where: { id: programId, clinicId } });
 
       if (!draft) throw new OnboardingError("No existe ese programa para este centro.", 404);
@@ -232,16 +247,27 @@ export class OnboardingService {
         );
       }
 
-      await tx.onboardingProgram.updateMany({
+      const superseded = await tx.onboardingProgram.updateMany({
         where: { clinicId, status: OnboardingProgramStatus.ACTIVO },
         data: { status: OnboardingProgramStatus.SUSTITUIDO }
       });
+
+      replaced = superseded.count > 0;
 
       return tx.onboardingProgram.update({
         where: { id: draft.id },
         data: { status: OnboardingProgramStatus.ACTIVO, publishedAt: new Date() }
       });
     });
+
+    // A new version replacing a live one: place each member on the new ladder by her progress,
+    // which is stored in euros and so carries across. Rewards already issued stay valid until
+    // their own expiry, and a step she has already passed on the new ladder is not issued again,
+    // because issuing is judged on crossing. The first programme a centre ever publishes is left
+    // alone, as migrating members who were on the old scheme is a separate, deliberate step.
+    if (replaced) await placeMembersOnProgram(this.prisma, clinicId);
+
+    return published;
   }
 
   /** Every version for a clinic, newest first. Metadata only: the output can be large. */

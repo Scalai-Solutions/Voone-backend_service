@@ -272,6 +272,16 @@ export const OBJECTIVES: Record<Objective, ObjectiveConfig> = {
   mas_clientes_nuevos: { pos: [0.8, 1, 1.2], mult: [2, 1, 1, 1], ref: 1.5 }
 };
 
+/**
+ * The ranges the centre's own ticket and visits figures may take. Outside them a figure is almost
+ * certainly a typo, and a typo rebuilds the whole programme around it. Shared by the schema that
+ * refuses a bad one and by the estimates the screen reads, so the two cannot disagree.
+ */
+export const ANSWER_LIMITS = {
+  ticket: { min: 10, max: 1000 },
+  visits: { min: 0.5, max: 26 }
+} as const;
+
 export const TIERS: TierCode[] = ["bronce", "plata", "oro", "platino", "diamante"];
 
 export const TIER_NAMES: Record<TierCode, string> = {

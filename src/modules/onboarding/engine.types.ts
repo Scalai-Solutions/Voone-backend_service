@@ -77,6 +77,14 @@ export interface ClassifiedItem extends CatalogItem {
 export interface Answers {
   ticket?: string | null;
   freq?: string | null;
+  /**
+   * The centre's own exact figures, which win over the buckets above when set. The buckets stay
+   * as quick picks; these are what the programme is actually built from. Everything downstream
+   * — every threshold, budget and reward — flows from annual spend (ticket × visits), so
+   * changing either one regenerates the whole programme.
+   */
+  ticketValue?: number | null;
+  visitsValue?: number | null;
   objective: Objective;
   investment: InvestmentLevel;
   occupancy: OccupancyLevel;

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { CATEGORIES } from "./engine.config";
+import { ANSWER_LIMITS, CATEGORIES } from "./engine.config";
 
 /**
  * What the onboarding and runtime routes accept.
@@ -17,6 +17,24 @@ export const answersSchema = z.object({
   // Null or absent means "use your own estimate", which is the common case.
   ticket: z.enum(["t1", "t2", "t3", "t4"]).nullable().optional(),
   freq: z.enum(["f1", "f2", "f3", "f4", "f5"]).nullable().optional(),
+  // The centre's own exact figures. They win over the buckets above. Null or absent means "use
+  // the recommended value". The ranges are the founders': outside them a figure is almost
+  // certainly a typo, and a typo here rebuilds the whole programme around it.
+  ticketValue: z
+    .number({ message: "El ticket medio tiene que ser un número" })
+    .int("El ticket medio tiene que ser un número entero de euros")
+    .min(ANSWER_LIMITS.ticket.min, "El ticket medio tiene que estar entre 10 y 1.000 €")
+    .max(ANSWER_LIMITS.ticket.max, "El ticket medio tiene que estar entre 10 y 1.000 €")
+    .nullable()
+    .optional(),
+  visitsValue: z
+    .number({ message: "Las visitas al año tienen que ser un número" })
+    .min(ANSWER_LIMITS.visits.min, "Las visitas al año tienen que estar entre 0,5 y 26")
+    .max(ANSWER_LIMITS.visits.max, "Las visitas al año tienen que estar entre 0,5 y 26")
+    // One decimal is all anyone can mean, and it keeps the stored answer reproducible.
+    .transform((value) => Math.round(value * 10) / 10)
+    .nullable()
+    .optional(),
   objective: z.enum(["equilibrado", "mas_visitas", "mas_gasto", "mas_clientes_nuevos"], {
     message: "Elige un objetivo"
   }),
@@ -127,6 +145,12 @@ export const visitSchema = z.discriminatedUnion("kind", [
 export const redeemSchema = z.object({
   visitId: z.string().min(1, "Indica la visita en la que se canjea"),
   surpriseItem: z.string().min(1).max(64).optional()
+});
+
+/** Both optional: an absent figure means "the default for this programme". */
+export const calculatorSchema = z.object({
+  clients: z.number({ message: "Los clientes tienen que ser un número" }).optional(),
+  ticket: z.number({ message: "El ticket medio tiene que ser un número" }).optional()
 });
 
 export const swapSchema = z.object({

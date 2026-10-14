@@ -160,7 +160,7 @@ export class VisitService {
       tier = row?.tier ?? null;
     }
 
-    const issued = await this.issue(visit, active.id, active.view, before, after);
+    const issued = await this.issue(visit, active.id, active.version, active.view, before, after);
 
     if (visit.kind === VisitKind.PAYMENT && visit.hasTreatment) {
       await this.countReferral(visit, active.id, active.view);
@@ -340,10 +340,20 @@ export class VisitService {
     return { cents: earningCents(asLines), hasTreatment: includesTreatment(asLines) };
   }
 
-  /** Issue every reward the visit's progress crossed. Idempotent on (member, sourceKey). */
+  /**
+   * Issue every reward the visit's progress crossed. Idempotent on (member, sourceKey).
+   *
+   * The key carries the programme VERSION. A milestone's number is only its position, and a new
+   * version puts a different threshold at the same position: without the version, a member who
+   * was issued the old seventh milestone would silently never be issued the new one, because the
+   * key already exists. Progress is stored in euros, so a member keeps hers across a version
+   * and is simply placed on the new ladder; crossing is judged on progress, so a step she has
+   * already passed on the new ladder is not issued again.
+   */
   private async issue(
     visit: { id: string; clinicId: string; memberId: string; occurredAt: Date },
     programId: string,
+    version: number,
     view: ProgramView,
     before: number,
     after: number
@@ -361,14 +371,14 @@ export class VisitService {
       ...milestonesCrossed(view, before, after).map((m) => ({
         ...base,
         kind: m.issue!.kind === "PREMIO" ? MemberRewardKind.PREMIO : MemberRewardKind.VENTAJA,
-        sourceKey: `m:${m.n}`,
+        sourceKey: `v${version}:m:${m.n}`,
         title: m.issue!.title,
         detail: m.issue!.detail as unknown as Prisma.InputJsonValue
       })),
       ...recurringCrossed(view, before, after).map((k) => ({
         ...base,
         kind: MemberRewardKind.RECURRENTE,
-        sourceKey: `rec:${k}`,
+        sourceKey: `v${version}:rec:${k}`,
         title: view.recurring.title,
         detail: { every: view.recurring.every } as Prisma.InputJsonValue
       }))
