@@ -69,6 +69,7 @@ model User {
   onboardingPasswordGeneratedAt DateTime?
   onboardingCredentialsSentAt   DateTime?
   role                          UserRole
+  permissions                   String[]  @default([])
   createdAt                     DateTime  @default(now())
 
   passwordSetupTokens PasswordSetupToken[]
@@ -222,10 +223,12 @@ model Member {
 
   locale String @default("es-ES")
 
-  /// Year of birth rather than an age, because an age is wrong within a year of being
-  /// stored and nothing would ever correct it. Optional: members who signed up before
-  /// this field existed have none, and it cannot be backfilled.
+  /// Year of birth retained for members captured before the form collected a full date.
   birthYear Int?
+
+  /// Full date of birth, stored as a Postgres DATE. Optional: members who signed up
+  /// before this field existed have no honest day/month to backfill.
+  birthDate DateTime? @db.Date
 
   /// Self-declared, and free text within a small set rather than an enum: "prefer not to
   /// say" has to be a first-class answer, and a database enum would make adding one a

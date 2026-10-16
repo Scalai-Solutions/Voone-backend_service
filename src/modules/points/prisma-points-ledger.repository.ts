@@ -9,7 +9,7 @@ import type {
   SpendOutcome
 } from "./points-ledger.repository";
 import { tierRewardsSchema } from "../templates/templates.schema";
-import type { TierDefinition } from "./tier-engine";
+import { normaliseScale, type TierDefinition } from "./tier-engine";
 
 /** Postgres unique violation, surfaced by Prisma as P2002. */
 const UNIQUE_VIOLATION = "P2002";
@@ -30,6 +30,43 @@ const LIFETIME_KINDS = [
   PointsTransactionKind.REFERRAL,
   PointsTransactionKind.ADJUSTMENT
 ];
+
+export const tierScaleForClinic = async (
+  prisma: PrismaClient,
+  clinicId: string
+): Promise<TierDefinition[]> => {
+  const template = await prisma.clinicTemplate.findUnique({
+    where: { clinicId },
+    select: { tierRewards: true }
+  });
+
+  const parsed = tierRewardsSchema.safeParse(template?.tierRewards ?? []);
+
+  if (!parsed.success) {
+    // A template authored before tiers carried points, or hand-edited into something
+    // unusable. Reported and treated as no scale: putting a member in a tier derived
+    // from a scale we could not read would be worse than showing none.
+    console.warn(`[points] clinic ${clinicId} has an unreadable tier scale; no tier applied.`);
+
+    return [];
+  }
+
+  return parsed.data.map((tier) => ({
+    // The name is the code: it is what the clinic typed, what the pass shows, and
+    // there is no second identifier for a clinic owner to keep in step.
+    code: tier.name,
+    label: tier.name,
+    minLifetimePoints: tier.minLifetimePoints,
+    milestoneCount: tier.milestoneCount,
+    pointsToNextMilestone: tier.pointsToNextMilestone
+  }));
+};
+
+export const baseTierCodeForClinic = async (
+  prisma: PrismaClient,
+  clinicId: string
+): Promise<string | null> =>
+  normaliseScale(await tierScaleForClinic(prisma, clinicId))[0]?.code ?? null;
 
 export class PrismaPointsLedgerRepository implements PointsLedgerRepository {
   constructor(private readonly prisma: PrismaClient) {}
@@ -93,31 +130,7 @@ export class PrismaPointsLedgerRepository implements PointsLedgerRepository {
    * produced the other duplications this month.
    */
   async tierScaleFor(clinicId: string): Promise<TierDefinition[]> {
-    const template = await this.prisma.clinicTemplate.findUnique({
-      where: { clinicId },
-      select: { tierRewards: true }
-    });
-
-    const parsed = tierRewardsSchema.safeParse(template?.tierRewards ?? []);
-
-    if (!parsed.success) {
-      // A template authored before tiers carried points, or hand-edited into something
-      // unusable. Reported and treated as no scale: putting a member in a tier derived
-      // from a scale we could not read would be worse than showing none.
-      console.warn(`[points] clinic ${clinicId} has an unreadable tier scale; no tier applied.`);
-
-      return [];
-    }
-
-    return parsed.data.map((tier) => ({
-      // The name is the code: it is what the clinic typed, what the pass shows, and
-      // there is no second identifier for a clinic owner to keep in step.
-      code: tier.name,
-      label: tier.name,
-      minLifetimePoints: tier.minLifetimePoints,
-      milestoneCount: tier.milestoneCount,
-      pointsToNextMilestone: tier.pointsToNextMilestone
-    }));
+    return tierScaleForClinic(this.prisma, clinicId);
   }
 
   async appendSpend(entry: PointsEntry): Promise<SpendOutcome> {

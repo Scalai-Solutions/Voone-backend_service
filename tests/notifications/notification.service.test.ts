@@ -1,6 +1,7 @@
 import { NotificationDeliveryStatus, WalletProviderType, WalletSyncStatus } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
+import { PERMISSIONS } from "../../src/modules/auth/rbac";
 import { NotificationService } from "../../src/modules/notifications/notification.service";
 
 const queuedDelivery = {
@@ -64,6 +65,41 @@ describe("NotificationService", () => {
         actionUrl: "https://example.com/book"
       }
     ]);
+  });
+
+  it("requires explicit notification permission for staff readers", async () => {
+    let queried = false;
+    const service = new NotificationService(
+      {
+        notification: {
+          findMany: async () => {
+            queried = true;
+            return [];
+          }
+        }
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never
+    );
+
+    await expect(
+      service.list("clinic-1", {}, { role: "STAFF", clinicId: "clinic-1" })
+    ).rejects.toThrow("Notifications permission is required");
+    expect(queried).toBe(false);
+
+    await expect(
+      service.list(
+        "clinic-1",
+        {},
+        {
+          role: "STAFF",
+          clinicId: "clinic-1",
+          permissions: [PERMISSIONS.notificationsSend]
+        }
+      )
+    ).resolves.toEqual({ items: [], nextCursor: null });
+    expect(queried).toBe(true);
   });
 
   it("resolves tier and inactivity segment filters inside the clinic", async () => {

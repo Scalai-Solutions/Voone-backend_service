@@ -16,6 +16,8 @@ const summary = {
   templateId: "tpl-1",
   templateName: "AURÉA Clinic Club",
   points: 500,
+  moneySpent: 120,
+  lastVisitedAt: "2026-09-04T00:00:00.000Z",
   tier: "",
   walletStatus: { apple: "added", google: "unavailable" },
   history: [{ id: "h1", label: "Hydrafacial", points: 120, date: "2026-09-04" }]

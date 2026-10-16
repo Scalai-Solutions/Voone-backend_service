@@ -40,12 +40,16 @@ const actorFrom = (req: Request): NotificationActor => {
   const role = req.get("x-voone-role")?.trim().toUpperCase();
   const clinicId = req.get("x-voone-clinic-id")?.trim();
   const userId = req.get("x-voone-user-id")?.trim();
+  const permissions = (req.get("x-voone-permissions") ?? "")
+    .split(",")
+    .map((permission) => permission.trim())
+    .filter(Boolean);
 
   if (!role) {
     throw new NotificationForbiddenError("Missing staff session role");
   }
 
-  return { role, clinicId, userId };
+  return { role, clinicId, userId, permissions };
 };
 
 const idempotencyKey = (req: Request): string | undefined =>

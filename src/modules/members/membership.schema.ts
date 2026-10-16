@@ -143,17 +143,34 @@ export const membershipSignupSchema = z
     consentMarketing: z.boolean("Indica si aceptas recibir comunicaciones comerciales"),
 
     /**
-     * Year of birth, not an age.
-     *
-     * An age is wrong within a year of being stored and nothing here would ever correct
-     * it, so the form asks for a year and the dashboard derives the age when it needs
-     * one. Optional: the field is new, and refusing a sign-up over it would cost a
-     * member to gain a demographic.
-     *
-     * The bounds are sanity, not policy — 120 years back, and nothing in the future.
-     * Anyone genuinely younger than the lower bound is a data-protection question for
-     * the clinic, not a validation one for this form.
+     * Full date of birth, captured going forward so age can be derived accurately.
+     * Optional: refusing sign-up over a demographic costs a member to gain a data point.
+     * birthYear remains accepted only for older clients and is converted to a fallback.
      */
+    birthDate: z
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Introduce una fecha de nacimiento válida")
+      .transform((value, ctx) => {
+        const date = new Date(`${value}T00:00:00.000Z`);
+        const year = date.getUTCFullYear();
+        const normalized = date.toISOString().slice(0, 10);
+
+        if (
+          normalized !== value ||
+          year < CURRENT_YEAR - 120 ||
+          year > CURRENT_YEAR ||
+          date.getTime() > Date.now()
+        ) {
+          ctx.addIssue({ code: "custom", message: "Introduce una fecha de nacimiento válida" });
+
+          return z.NEVER;
+        }
+
+        return date;
+      })
+      .optional(),
+
     birthYear: z.coerce
       .number("Introduce un año de nacimiento válido")
       .int("Introduce un año de nacimiento válido")
@@ -196,13 +213,24 @@ export const membershipSignupSchema = z
   // Flattened here rather than in the service so the parsed value is already shaped like
   // the row it becomes, and the raw submission cannot be dropped by a forgetful caller.
   .transform(
-    ({ name, phone, email, birthYear, sex, consentMarketing, consentSource, referredByCode }) => ({
+    ({
+      name,
+      phone,
+      email,
+      birthDate,
+      birthYear,
+      sex,
+      consentMarketing,
+      consentSource,
+      referredByCode
+    }) => ({
       name,
       email,
       phone: phone.e164,
       phoneRaw: phone.raw,
       phoneRegionAssumed: phone.regionAssumed,
-      birthYear,
+      birthDate,
+      birthYear: birthDate ? birthDate.getUTCFullYear() : birthYear,
       sex,
       consentMarketing,
       consentSource,

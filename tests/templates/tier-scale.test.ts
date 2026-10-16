@@ -89,11 +89,10 @@ describe("a clinic's authored tier scale", () => {
     expect(nextTier(660, tiers)).toEqual({ tier: tiers[1], pointsAway: 340 });
   });
 
-  it("holds no tier when the clinic's lowest floor is above the member", () => {
-    // A scale that does not start at zero is a choice the clinic is allowed to make.
+  it("uses the clinic's lowest tier as the member's base tier", () => {
     const tiers = scale([{ name: "VIP", minLifetimePoints: 5000 }]);
 
-    expect(tierFor(100, tiers)).toBeNull();
+    expect(tierFor(100, tiers)?.code).toBe("VIP");
   });
 
   it("treats an empty scale as no tiers rather than an error", () => {

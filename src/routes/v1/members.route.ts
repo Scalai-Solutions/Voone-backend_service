@@ -31,6 +31,7 @@ import {
 import { ReferralService } from "../../modules/onboarding/runtime/referral.service";
 import { PointsService } from "../../modules/points/points.service";
 import {
+  baseTierCodeForClinic,
   PrismaMemberPointsCache,
   PrismaPointsLedgerRepository
 } from "../../modules/points/prisma-points-ledger.repository";
@@ -96,6 +97,8 @@ const toMemberSummary = (member: Awaited<ReturnType<typeof findMemberForSummary>
   templateId: member.clinic.template?.id ?? "",
   templateName: member.clinic.template?.programName ?? member.clinic.name,
   points: member.pointsBalance,
+  moneySpent: 0,
+  lastVisitedAt: null,
   tier: member.tier ?? "Nuevo",
   walletStatus: member.walletObjects.reduce(
     (statuses, walletObject) => ({
@@ -427,8 +430,10 @@ membersRouter.post(
             lastSignupAt: new Date()
           }
         })
-      : await withMemberCode((code) =>
-          prisma.member.create({
+      : await withMemberCode(async (code) => {
+          const baseTier = await baseTierCodeForClinic(prisma, clinic.id);
+
+          return prisma.member.create({
             data: {
               clinicId: clinic.id,
               name: parsed.data.name,
@@ -438,13 +443,14 @@ membersRouter.post(
               phoneRegionAssumed: parsed.data.phoneRegionAssumed,
               code,
               memberSince: new Date().getFullYear(),
+              tier: baseTier,
               consentMarketing: false,
               consentSource: "staff_entry",
               privacyPolicyVersion: clinic.privacyPolicyVersion,
               lastSignupAt: new Date()
             }
-          })
-        );
+          });
+        });
 
     const wallet = await issueWalletPasses(member.id);
     const summary = await findMemberForSummary(member.id);

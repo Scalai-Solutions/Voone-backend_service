@@ -66,8 +66,11 @@ const passwordSetupSchema = z
 
 type AdminClinicSummaryUser = {
   id: string;
+  name?: string | null;
   email: string;
   role: string;
+  permissions: string[];
+  hasPassword?: boolean;
   passwordHash?: string | null;
   onboardingPasswordGeneratedAt?: Date | null;
   onboardingCredentialsSentAt?: Date | null;
@@ -110,7 +113,14 @@ const toAdminClinicSummary = (clinic: AdminClinicSummaryInput) => ({
     priceEuro: treatment.priceEuro,
     points: treatment.pointsAllotted
   })),
-  users: clinic.users.map((user) => ({ id: user.id, email: user.email, role: user.role })),
+  users: clinic.users.map((user) => ({
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    permissions: user.permissions,
+    hasPassword: Boolean(user.passwordHash)
+  })),
   onboardingCredentials: (() => {
     const owner = clinic.users.find((user) => user.role === "OWNER") ?? clinic.users[0];
     const setupToken = owner?.passwordSetupTokens?.[0];
@@ -157,6 +167,8 @@ const toAdminMemberSummary = (member: Awaited<ReturnType<typeof listAdminMembers
   templateId: member.clinic.template?.id ?? "",
   templateName: member.clinic.template?.programName ?? member.clinic.name,
   points: member.pointsBalance,
+  moneySpent: 0,
+  lastVisitedAt: null,
   tier: member.tier ?? "Nuevo",
   walletStatus: member.walletObjects.reduce(
     (statuses, walletObject) => ({
@@ -341,6 +353,7 @@ adminClinicsRouter.post(
       name: user.name ?? user.email,
       email: user.email,
       role: user.role.toLowerCase(),
+      permissions: user.permissions,
       clinicId: user.clinicId ?? "",
       clinicSlug: user.clinic?.slug ?? ""
     });

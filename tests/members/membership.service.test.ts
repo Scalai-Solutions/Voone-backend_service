@@ -26,6 +26,7 @@ const INPUT = {
   phoneRegionAssumed: true,
   // Both optional on the form. A member who skipped them is the ordinary case, so that
   // is what the shared fixture represents.
+  birthDate: undefined,
   birthYear: undefined,
   sex: undefined,
   consentMarketing: true,
@@ -43,7 +44,18 @@ const uniqueViolation = () =>
     meta: { target: ["clinicId", "phone"] }
   });
 
-const db = (member: Record<string, unknown>) => ({ member }) as unknown as PrismaClient;
+const db = (member: Record<string, unknown>) =>
+  ({
+    member,
+    clinicTemplate: {
+      findUnique: vi.fn().mockResolvedValue({
+        tierRewards: [
+          { name: "Bronze", minLifetimePoints: 0 },
+          { name: "Gold", minLifetimePoints: 3000 }
+        ]
+      })
+    }
+  }) as unknown as PrismaClient;
 
 describe("signUpMember", () => {
   it("gives the new member the code that goes on their card", async () => {
@@ -84,11 +96,15 @@ describe("signUpMember", () => {
         phone: "+34612345678",
         phoneRaw: "612 34 56 78",
         phoneRegionAssumed: true,
+        birthDate: undefined,
+        birthYear: undefined,
+        sex: undefined,
         // Generated, so only its presence is asserted here. Its shape is owned by the
         // test above and by tests/common/short-code.test.ts.
         code: expect.any(String),
         normalizerVersion: 1,
         memberSince: 2026,
+        tier: "Bronze",
         consentMarketing: true,
         consentMarketingAt: NOW,
         consentSource: "qr_signup",
@@ -167,22 +183,24 @@ describe("signUpMember", () => {
         NOW
       );
 
+      expect(update.mock.calls[0][0].data).not.toHaveProperty("birthDate");
       expect(update.mock.calls[0][0].data).not.toHaveProperty("birthYear");
       expect(update.mock.calls[0][0].data).not.toHaveProperty("sex");
     });
 
     it("stores the demographics a member did give", async () => {
       const create = vi.fn().mockResolvedValue({});
+      const birthDate = new Date("1994-05-18T00:00:00.000Z");
 
       await signUpMember(
         db({ create }),
         AUREA,
-        { ...INPUT, birthYear: 1994, sex: "mujer" },
+        { ...INPUT, birthDate, birthYear: 1994, sex: "mujer" },
         "qr_signup",
         NOW
       );
 
-      expect(create.mock.calls[0][0].data).toMatchObject({ birthYear: 1994, sex: "mujer" });
+      expect(create.mock.calls[0][0].data).toMatchObject({ birthDate, birthYear: 1994, sex: "mujer" });
     });
   });
 
