@@ -200,7 +200,11 @@ describe("signUpMember", () => {
         NOW
       );
 
-      expect(create.mock.calls[0][0].data).toMatchObject({ birthDate, birthYear: 1994, sex: "mujer" });
+      expect(create.mock.calls[0][0].data).toMatchObject({
+        birthDate,
+        birthYear: 1994,
+        sex: "mujer"
+      });
     });
   });
 

@@ -86,13 +86,15 @@ const baseTierFromTemplate = (tierRewards: unknown): string => {
   if (!parsed.success) return "";
 
   try {
-    return normaliseScale(
-      parsed.data.map((tier) => ({
-        code: tier.name,
-        label: tier.name,
-        minLifetimePoints: tier.minLifetimePoints,
-      })),
-    )[0]?.code ?? "";
+    return (
+      normaliseScale(
+        parsed.data.map((tier) => ({
+          code: tier.name,
+          label: tier.name,
+          minLifetimePoints: tier.minLifetimePoints
+        }))
+      )[0]?.code ?? ""
+    );
   } catch {
     return "";
   }
@@ -171,7 +173,9 @@ export class MemberDirectoryService {
       pointsBalance: true,
       tier: true,
       erasedAt: true,
-      clinic: { select: { template: { select: { id: true, programName: true, tierRewards: true } } } },
+      clinic: {
+        select: { template: { select: { id: true, programName: true, tierRewards: true } } }
+      },
       walletObjects: { select: { provider: true, status: true } },
       pointsLedger: {
         orderBy: { createdAt: "desc" as const },
