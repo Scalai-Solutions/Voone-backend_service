@@ -29,6 +29,7 @@ what the partners validated against their spreadsheet. A copy of the reference l
 | C1–C10 | Further decisions found while building           | See Part C                                        |
 | D      | What is **not** built                            | See Part D                                        |
 | E1–E12 | The frontend: wizard, staff screens, safety      | See Part E                                        |
+| F1–F9  | Founders' feedback, round 1                      | See Part F                                        |
 
 ---
 
@@ -385,3 +386,119 @@ anything the browser sends.
 
 **Action needed.** That branch should be reviewed and deployed **independently and soon**; it
 does not depend on this work.
+
+---
+
+## Part F: founders' feedback, round 1
+
+Six changes to the centre-facing page, from the document `Voone_Onboarding_Feedback_Round1`
+(13 Oct 2026). All six are built. Where the document left something open, or where building it
+showed a problem, the approach taken while waiting for an answer is recorded here.
+
+### F1. Exact ticket and visits
+
+**Built.** Each of the first two questions keeps its chips as quick picks and has an exact
+number beside them, pre-filled with the recommendation, tagged "Recomendado", with a link back
+to it. The number is what the programme is built from, and changing it regenerates the whole
+programme. Ranges are the document's: ticket 10 to 1,000 € (whole euros), visits 0.5 to 26 (one
+decimal). Outside them the box shows the reason and the programme is **not** rebuilt. The
+existing review note for figures more than three times the catalogue's annual spend is kept.
+Choosing a chip clears a typed figure, and typing a figure clears the chip.
+
+**Question.** None on the rule itself. One detail: if a centre types exactly the recommended
+figure, it is stored as "no answer", so the engine keeps its unrounded estimate.
+
+### F2. Replacing a live programme: what happens to members
+
+**Built, with one correction found on the way.** After a programme is live, the same edit makes a
+new draft that the centre must approve. On approval:
+
+- Members keep their progress. It is stored in euros, so nothing is converted.
+- Each member is placed on the new ladder by her progress, **moved up where it now earns a higher
+  tier and never down.**
+- A step she has already passed on the new ladder is not issued again.
+- Rewards already issued stay valid until their own 60-day expiry, and can be redeemed under the
+  new version.
+- Every issued reward already records its programme (the version is its programme row).
+
+**Correction.** Rewards were de-duplicated on "milestone number", but a new version puts a
+different threshold at the same number. A member who had received the old milestone 7 would
+silently never have received the new one. The key now includes the version. A test fails if the
+version is removed.
+
+**Question for Sergio.** "Placed on the new ladder by her current progress" can be read as
+allowing a **demotion** when the new ladder is harder. The guide says tiers are not lost, so none
+is made. Confirm that is wanted.
+
+**Not done.** Passes (Apple and Google Wallet) of members promoted this way refresh at their next
+visit, not at the moment of approval. Publishing the first programme a centre has ever had does
+not place members at all (D5 still applies).
+
+### F3. No gift value anywhere on the centre's page
+
+**Built.** The backend no longer sends a value for any gift: ladder rows, alternatives, the
+recurring reward and referral rows carry names only. A test fails if a `value`, `cost`, `budget`
+or `price` key, or a "(45 €)" style text, ever appears in what a centre sees. Value stays in the
+engine and the stored programme, where choosing rewards needs it. The internal toggle for Voone
+does not show gift values either; it can if Voone wants them.
+
+### F4. "La clienta ha gastado" on milestones
+
+**Built.** The right-hand column is the real spend, not the progress threshold (they match up to
+Oro and then diverge because progress counts ×1.1, ×1.2 and ×1.3). Diamante shows 1,500 € for
+the Sapphira fixture, as the document says. The left shows only the month ("Mes 30"), taken as
+real spend ÷ annual spend × 12, rounded. Tier cards and the band headers use real spend too.
+Amounts are shown in whole euros.
+
+**Decision.** The recurring reward after Diamante used to read "every 250 € of progress". It now
+reads in euros actually paid (250 ÷ 1.3 ≈ 192 €), so no progress figure remains on the page. The
+document does not mention it; change it back if the founders prefer progress there.
+
+### F5. "Has generado como mínimo" on referrals
+
+**Built.** Referral count × the programme's ticket (650 € at the tenth referral with 65 €). It
+follows the ticket when the centre edits it.
+
+### F6. Family & Friends: "Próximamente"
+
+**Built.** The card stays, dimmed, with a "Próximamente" badge and nothing to press. No backend
+work.
+
+### F7. The five-year calculator
+
+**Built.** Two inputs (clients in the programme, default half of question 6's answer; average
+ticket, default the programme's own), a generates-versus-costs chart with the net line, members
+by tier per year, a table, a collapsed "Cómo se calcula" and the footnote the document asks for.
+Visits per year are not an input; they come from the programme. It never changes the programme.
+All the founders' percentages are named values in `calculator.config.ts`.
+
+**The reference code was not available.** The document points to `src/calculator.cjs` and
+`fixtures/sapphira.calculator.expected.json` in the developer package, but neither is in the
+package we were given. The model was written from the formulas in the document. It reproduces the
+document's own Sapphira table **to the euro in every year** (members, members by tier, what it
+generates, what it costs, the net), and a test checks it. Two details the document does not
+spell out were fixed to match that table: occasional clients are charged a tier's benefits as
+priced at the repeater's spend, scaled to 30%; and the referral cost uses the programme's overall
+cost rate. **If the reference code exists, send it so the two can be compared on other
+catalogues.**
+
+**Deviation: it runs on the server.** The document says "client-side". The calculator needs what
+every reward costs the centre, and sending that to the browser would put every gift's cost in
+the page's data, which the guide forbids even if it were never shown. So the browser sends the
+two figures and gets back yearly totals only, after a short pause in typing. The cost is a
+network round trip per change instead of none. **Question:** is that acceptable, or is the
+founders' wish for fully client-side worth sending costs to the browser?
+
+**Fee.** The subscription uses Voone's monthly fee for the kind of centre (49.99, 99.99 or
+149.99 €), as in the reference engine. Confirm those are still the prices.
+
+### F8. Out of scope, as the document says
+
+Happy Hour discounts and retained revenue from medical treatments are not modelled.
+
+### F9. Browser translation, again
+
+**Finding.** The live preview and the calculator are re-created for each new answer, because a
+browser that auto-translates the page makes React's later edits invisible: the preview showed an
+earlier answer's figures. The recommendation in E12 (tell browsers not to translate these
+screens) still stands.

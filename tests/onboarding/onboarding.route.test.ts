@@ -852,3 +852,306 @@ describe("adding points by hand, at a clinic on a programme", () => {
     expect(credited).toEqual(["credit"]);
   });
 });
+
+describe("ticket and visits typed by the centre", () => {
+  it("tells the screen the ranges a figure may take", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const r = await call("GET", admin("/estimates"));
+
+    expect(r.body.limits).toEqual({
+      ticket: { min: 10, max: 1000 },
+      visits: { min: 0.5, max: 26 }
+    });
+  });
+
+  it("builds a different programme from the exact figures, and says so in the answers it stores", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const plain = await call("POST", admin("/programs"), ANSWERS);
+    const typed = await call("POST", admin("/programs"), {
+      ...ANSWERS,
+      ticketValue: 80,
+      visitsValue: 4
+    });
+
+    expect(typed.status).toBe(201);
+    expect(typed.body.program.estimates).toMatchObject({
+      ticket: 80,
+      visitsPerYear: 4,
+      annualSpend: 320
+    });
+    expect(typed.body.answers).toMatchObject({ ticketValue: 80, visitsValue: 4 });
+    expect(typed.body.program.ladder).not.toEqual(plain.body.program.ladder);
+  });
+
+  it("returns to the original programme when the figures are cleared", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const plain = await call("POST", admin("/preview"), ANSWERS);
+    const reset = await call("POST", admin("/preview"), {
+      ...ANSWERS,
+      ticketValue: null,
+      visitsValue: null
+    });
+
+    expect(reset.body.program).toEqual(plain.body.program);
+  });
+
+  it("previews exactly what saving would store, with the figures typed", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const typed = { ...ANSWERS, ticketValue: 90, visitsValue: 4.5 };
+    const preview = await call("POST", admin("/preview"), typed);
+    const saved = await call("POST", admin("/programs"), typed);
+
+    expect(preview.body.program).toEqual(saved.body.program);
+  });
+
+  it("refuses a figure outside the ranges, in Spanish and as a 422", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+
+    for (const [extra, text] of [
+      [{ ticketValue: 9 }, "entre 10 y 1.000"],
+      [{ ticketValue: 1001 }, "entre 10 y 1.000"],
+      [{ ticketValue: 65.5 }, "número entero"],
+      [{ visitsValue: 0.4 }, "entre 0,5 y 26"],
+      [{ visitsValue: 27 }, "entre 0,5 y 26"]
+    ] as const) {
+      const r = await call("POST", admin("/preview"), { ...ANSWERS, ...extra });
+
+      expect(r.status, JSON.stringify(extra)).toBe(422);
+      expect(r.body.message).toContain(text);
+    }
+  });
+
+  it("flags figures far from the catalogue and refuses to publish them", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const draft = await call("POST", admin("/programs"), {
+      ...ANSWERS,
+      ticketValue: 300,
+      visitsValue: 5.1
+    });
+
+    expect(draft.body.program.review.join(" ")).toContain("Con tus respuestas");
+
+    const live = await call("POST", admin(`/programs/${draft.body.id}/publish`));
+
+    expect(live.status).toBe(409);
+  });
+});
+
+describe("what a centre sees of a stored programme", () => {
+  it("carries no gift value, shows real spend and minimum revenue, and marks Family & Friends", async () => {
+    await goLive();
+    const staff = await call("GET", `/clinics/${SLUG}/program`);
+    const program = staff.body.program;
+
+    expect(JSON.stringify(program)).not.toMatch(/"value"|"cost|"budget/i);
+    expect(program.ladder.at(-1).realSpend).toBe(1500);
+    expect(program.referrals.find((r: { n: number }) => r.n === 10).minRevenue).toBe(650);
+    expect(program.familyAndFriends.comingSoon).toBe(true);
+  });
+});
+
+describe("the five-year calculator", () => {
+  const calc = (programId: string, body?: unknown) =>
+    call("POST", admin(`/programs/${programId}/calculator`), body ?? {});
+
+  it("answers for a draft with the programme's own defaults", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const draft = await call("POST", admin("/programs"), ANSWERS);
+    const r = await calc(draft.body.id);
+
+    expect(r.status).toBe(200);
+    expect(r.body.years).toHaveLength(5);
+    expect(r.body.input).toEqual({ clients: 300, ticket: 65 });
+    expect(r.body.defaults).toEqual({ clients: 300, ticket: 65 });
+    expect(Math.round(r.body.years[0].avgMembers)).toBe(163);
+    expect(Math.round(r.body.years[4].net)).toBe(11380);
+  });
+
+  it("follows the inputs and leaves the stored programme untouched", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const draft = await call("POST", admin("/programs"), ANSWERS);
+    const before = await call("GET", admin(`/programs/${draft.body.id}`));
+    const r = await calc(draft.body.id, { clients: 150, ticket: 100 });
+
+    expect(r.body.input).toEqual({ clients: 150, ticket: 100 });
+    expect(r.body.defaults).toEqual({ clients: 300, ticket: 65 });
+    expect(Math.round(r.body.years[4].avgMembers)).toBe(150);
+
+    const after = await call("GET", admin(`/programs/${draft.body.id}`));
+
+    expect(after.body).toEqual(before.body);
+  });
+
+  it("works on the live programme", async () => {
+    const id = await goLive();
+
+    expect((await calc(id)).status).toBe(200);
+  });
+
+  it("sends only yearly totals, never anything about an individual gift", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const draft = await call("POST", admin("/programs"), ANSWERS);
+    const r = await calc(draft.body.id);
+
+    expect(JSON.stringify(r.body)).not.toMatch(/"value"|"cost"|"items"|"reward"|"name"/i);
+  });
+
+  it("refuses figures outside the ranges in Spanish, and an unknown programme", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const draft = await call("POST", admin("/programs"), ANSWERS);
+
+    const few = await calc(draft.body.id, { clients: 5 });
+    const cheap = await calc(draft.body.id, { ticket: 5 });
+    const text = await calc(draft.body.id, { clients: "muchos" });
+    const ghost = await calc("00000000-0000-4000-8000-00000000dead");
+
+    expect(few.status).toBe(422);
+    expect(few.body.message).toContain("entre 10 y 5000");
+    expect(cheap.status).toBe(422);
+    expect(cheap.body.message).toContain("entre 10 y 1000");
+    expect(text.status).toBe(422);
+    expect(text.body.message).toContain("tienen que ser un número");
+    expect(ghost.status).toBe(404);
+  });
+});
+
+describe("replacing a live programme with a new version", () => {
+  const pay = async (memberId: string, euros: number, key: string) => {
+    const r = await call("POST", `/clinics/${SLUG}/members/${memberId}/visits`, {
+      kind: "PAYMENT",
+      lines: [{ amountEuro: euros }],
+      idempotencyKey: key
+    });
+
+    // Asserted here so a refused visit fails the test that made it, not a later assertion about
+    // its effects: a too-short key once made these visits vanish without a word.
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+
+    return r;
+  };
+
+  /** Draft with the given figures, published, replacing whatever was live. */
+  const replaceWith = async (figures: { ticketValue: number; visitsValue: number }) => {
+    const draft = await call("POST", admin("/programs"), { ...ANSWERS, ...figures });
+    const live = await call("POST", admin(`/programs/${draft.body.id}/publish`));
+
+    expect(live.status, JSON.stringify(live.body)).toBe(200);
+
+    return draft.body;
+  };
+
+  it("keeps each member's progress and moves her up to the tier it now earns, never down", async () => {
+    await goLive();
+    const climber = await newMember();
+    const holder = await newMember();
+
+    // 150 € is short of Plata at 190 € under the first version; 300 € is past it.
+    await pay(climber.id, 150, "visit-key-climber");
+    await pay(holder.id, 300, "visit-key-holder");
+
+    const tierOf = async (id: string) =>
+      (await db.member.findUniqueOrThrow({ where: { id }, select: { tier: true } })).tier;
+
+    expect(await tierOf(climber.id)).not.toBe("Plata");
+    expect(await tierOf(holder.id)).toBe("Plata");
+
+    // A cheaper ladder: Plata now starts at 120 €. Nobody has done anything since.
+    await replaceWith({ ticketValue: 40, visitsValue: 3 });
+
+    expect(await tierOf(climber.id)).toBe("Plata");
+
+    const lifetime = async (id: string) =>
+      (
+        await db.pointsTransaction.aggregate({
+          where: { memberId: id },
+          _sum: { points: true }
+        })
+      )._sum.points;
+
+    expect(await lifetime(climber.id)).toBe(150);
+    expect(await lifetime(holder.id)).toBe(300);
+
+    // A dearer ladder: Plata now starts above what the holder has paid. She keeps it.
+    await replaceWith({ ticketValue: 120, visitsValue: 6 });
+
+    expect(await tierOf(holder.id)).toBe("Plata");
+    expect(await lifetime(holder.id)).toBe(300);
+  });
+
+  it("leaves members alone when it is the first programme a centre has published", async () => {
+    const m = await newMember();
+
+    await db.pointsTransaction.create({
+      data: {
+        memberId: m.id,
+        clinicId: clinic.id,
+        kind: PointsTransactionKind.EARN,
+        points: 500,
+        reason: "antes del programa",
+        idempotencyKey: "before-program"
+      }
+    });
+    await db.member.update({ where: { id: m.id }, data: { tier: "Bronze" } });
+    await goLive();
+
+    // Migrating members who were on the old scheme is a separate, deliberate step.
+    expect((await db.member.findUniqueOrThrow({ where: { id: m.id } })).tier).toBe("Bronze");
+  });
+
+  it("keeps rewards already issued, and still issues the new version's own", async () => {
+    await goLive();
+    const m = await newMember();
+
+    await pay(m.id, 150, "visit-key-v1");
+
+    const issuedUnderV1 = await db.memberReward.findMany({ where: { memberId: m.id } });
+
+    expect(issuedUnderV1.length).toBeGreaterThan(0);
+    expect(issuedUnderV1.every((r) => r.sourceKey.startsWith("v1:"))).toBe(true);
+
+    const v2 = await replaceWith({ ticketValue: 40, visitsValue: 3 });
+
+    // Nothing is issued by the switch itself, and what was issued is untouched.
+    expect(await db.memberReward.count({ where: { memberId: m.id } })).toBe(issuedUnderV1.length);
+
+    const second = await pay(m.id, 250, "visit-key-v2");
+    const all = await db.memberReward.findMany({ where: { memberId: m.id } });
+    const underV2 = all.filter((r) => r.sourceKey.startsWith("v2:"));
+
+    // Exactly the steps of the new ladder between what she had and what she has now, as progress:
+    // steps she had already passed on the new ladder are not issued again. The range comes from
+    // the visit itself, because a double-points perk issued under the first version is still
+    // waiting and doubles this payment.
+    const { lifetimeBefore, lifetimeAfter } = second.body;
+    const expected = (v2.program.ladder as Array<{ type: string; threshold: number }>).filter(
+      (s) => s.type !== "nivel" && s.threshold > lifetimeBefore && s.threshold <= lifetimeAfter
+    );
+
+    expect(expected.length).toBeGreaterThan(0);
+    expect(underV2).toHaveLength(expected.length);
+    expect(all.filter((r) => r.sourceKey.startsWith("v1:"))).toHaveLength(issuedUnderV1.length);
+    expect(new Set(all.map((r) => r.sourceKey)).size).toBe(all.length);
+  });
+
+  it("lets a reward issued under the old version be redeemed under the new one", async () => {
+    await goLive();
+    const m = await newMember();
+
+    await pay(m.id, 65, "visit-key-old");
+
+    const premio = (await db.memberReward.findMany({ where: { memberId: m.id } })).find(
+      (r) => r.kind === "PREMIO"
+    )!;
+
+    await replaceWith({ ticketValue: 40, visitsValue: 3 });
+
+    const visit = await pay(m.id, 40, "visit-key-new");
+    const redeemed = await call(
+      "POST",
+      `/clinics/${SLUG}/members/${m.id}/rewards/${premio.id}/redeem`,
+      { visitId: visit.body.visitId }
+    );
+
+    expect(redeemed.status, JSON.stringify(redeemed.body)).toBe(200);
+  });
+});

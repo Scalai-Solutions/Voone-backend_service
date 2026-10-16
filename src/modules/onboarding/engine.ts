@@ -136,12 +136,17 @@ export const estimate = (items: ClassifiedItem[], ans: Answers): Estimates | { e
 
   // An answer that matches the pre-selected bucket means "yes, your estimate", so the
   // exact estimate is kept rather than the bucket's coarser representative value.
+  //
+  // An exact figure typed by the centre takes precedence over any bucket. Nothing else in the
+  // engine changes for it: the rest of the programme already flows from annual spend.
   const ticket =
-    !ans.ticket || ans.ticket === tPre ? tEst : buckets.find((b) => b.id === ans.ticket)!.value;
+    ans.ticketValue ??
+    (!ans.ticket || ans.ticket === tPre ? tEst : buckets.find((b) => b.id === ans.ticket)!.value);
   const visits =
-    !ans.freq || ans.freq === fPre
+    ans.visitsValue ??
+    (!ans.freq || ans.freq === fPre
       ? fEst
-      : r1(52 / FREQ_BUCKETS.find((b) => b.id === ans.freq)!.weeks);
+      : r1(52 / FREQ_BUCKETS.find((b) => b.id === ans.freq)!.weeks));
 
   return {
     hasDia: items.some((i) => i.cat === "DIA" && !i.review),

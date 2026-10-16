@@ -8,6 +8,7 @@ import {
 import { asyncHandler } from "../../common/middleware/async-handler";
 import { createRequireStaffKey } from "../../common/middleware/staff-key";
 import { config } from "../../config/env";
+import { calcDefaults, simulate5y, validateCalcInput } from "../../modules/onboarding/calculator";
 import { parseCatalogCsv } from "../../modules/onboarding/catalog-csv";
 import {
   toEngineCatalog,
@@ -21,6 +22,7 @@ import {
   catalogReplaceSchema,
   csvImportSchema,
   redeemSchema,
+  calculatorSchema,
   swapSchema,
   visitSchema
 } from "../../modules/onboarding/onboarding.schema";
@@ -312,6 +314,36 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
       const clinicId = await clinicOr404(req.params.clinicId);
 
       res.json(forAdmin(await deps.onboarding.publish(clinicId, req.params.programId)));
+    })
+  );
+
+  /**
+   * Five years of what a programme costs and brings in, for a number of clients and a ticket.
+   *
+   * Computed here rather than in the browser because it needs what every reward costs the
+   * centre, and those figures never leave the server. Only yearly totals come back. It reads the
+   * stored programme and never changes it: the calculator's ticket only changes how much the
+   * simulated clients spend, not a single threshold or reward.
+   */
+  router.post(
+    "/admin/clinics/:clinicId/onboarding/programs/:programId/calculator",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const clinicId = await clinicOr404(req.params.clinicId);
+      const body = parse(calculatorSchema, req.body ?? {});
+      const row = await deps.onboarding.getProgram(clinicId, req.params.programId);
+      const program = row.output as unknown as Program;
+      const answers = row.answers as unknown as { members?: string };
+      const defaults = calcDefaults(program, answers.members);
+      const input = {
+        clients: body.clients ?? defaults.clients,
+        ticket: body.ticket ?? defaults.ticket
+      };
+      const problem = validateCalcInput(input);
+
+      if (problem) throw new OnboardingError(problem, 422);
+
+      res.json(simulate5y(program, input, defaults));
     })
   );
 
