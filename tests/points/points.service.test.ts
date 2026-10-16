@@ -254,12 +254,12 @@ describe("PointsService", () => {
   });
 
   describe("tier scale resolution", () => {
-    it("writes no tier when the clinic's scale reaches nobody", async () => {
+    it("writes the clinic's lowest tier when the scale reaches nobody", async () => {
       ledger.scale = [{ code: "gold", label: "Oro", minLifetimePoints: 2000 }];
 
       await credit(10, "visit-1");
 
-      expect(cache.last.tierCode).toBeNull();
+      expect(cache.last.tierCode).toBe("gold");
     });
 
     it("uses whatever scale the clinic resolves to", async () => {

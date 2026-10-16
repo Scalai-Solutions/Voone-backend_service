@@ -37,6 +37,7 @@ import { createAppleRefreshChannel } from "../../wallet/providers/apple/apple-re
 import { createAppleWalletProvider } from "../../wallet/providers/apple/apple-wallet.provider";
 import { adminClinicsRouter } from "./admin-clinics.route";
 import { createApplePassesRouter } from "./apple-passes.route";
+import { clinicUsersRouter } from "./clinic-users.route";
 import { clinicsRouter } from "./clinics.route";
 import { healthRouter } from "./health.route";
 import { membersRouter } from "./members.route";
@@ -49,6 +50,7 @@ const notificationService = buildNotificationService(prisma);
 
 v1Router.use(healthRouter);
 v1Router.use(adminClinicsRouter);
+v1Router.use(clinicUsersRouter);
 v1Router.use(clinicsRouter);
 v1Router.use(membersRouter);
 v1Router.use(templatesRouter);

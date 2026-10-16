@@ -5,6 +5,7 @@ import { isUniqueViolation } from "../../common/utils/prisma-errors";
 import { withMemberCode } from "./member-code";
 import { madridYear } from "./member-since";
 import type { MembershipSignupInput, signupSourceSchema } from "./membership.schema";
+import { baseTierCodeForClinic } from "../points/prisma-points-ledger.repository";
 import { NORMALIZER_VERSION } from "./phone-es";
 
 /**
@@ -83,14 +84,16 @@ export const signUpMember = async (
  * re-scan at reception, which is an ordinary event handled by signUpMember. Only the
  * generated code is retried, inside withMemberCode.
  */
-const insertMember = (
+const insertMember = async (
   db: PrismaClient,
   clinic: Clinic,
   input: MembershipSignupInput,
   source: SignupSource,
   now: Date
-): Promise<Member> =>
-  withMemberCode((code) =>
+): Promise<Member> => {
+  const baseTier = await baseTierCodeForClinic(db, clinic.id);
+
+  return withMemberCode((code) =>
     db.member.create({
       data: {
         clinicId: clinic.id,
@@ -99,11 +102,13 @@ const insertMember = (
         phone: input.phone,
         phoneRaw: input.phoneRaw,
         phoneRegionAssumed: input.phoneRegionAssumed,
+        birthDate: input.birthDate,
         birthYear: input.birthYear,
         sex: input.sex,
         code,
         normalizerVersion: NORMALIZER_VERSION,
         memberSince: madridYear(now),
+        tier: baseTier,
         consentMarketing: input.consentMarketing,
         consentMarketingAt: input.consentMarketing ? now : null,
         consentSource: source,
@@ -114,3 +119,4 @@ const insertMember = (
       }
     })
   );
+};

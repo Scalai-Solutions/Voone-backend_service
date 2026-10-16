@@ -53,11 +53,10 @@ export const normaliseScale = (tiers: readonly TierDefinition[]): TierDefinition
 };
 
 /**
- * The highest tier whose floor the member has reached, or null if they have reached none.
+ * The highest tier whose floor the member has reached.
  *
- * Null rather than an invented bottom tier: a scale that does not start at zero is a
- * configuration choice, and inventing a "no tier" entry here would put a label on the
- * member's pass that the clinic never wrote.
+ * If the member has not reached any authored floor yet, they still hold the clinic's
+ * lowest tier. The bottom tier is the programme's base level, not an absence of tier.
  */
 export const tierFor = (
   lifetimePoints: number,
@@ -65,7 +64,9 @@ export const tierFor = (
 ): TierDefinition | null => {
   const scale = normaliseScale(tiers);
 
-  let held: TierDefinition | null = null;
+  if (scale.length === 0) return null;
+
+  let held: TierDefinition = scale[0];
 
   for (const tier of scale) {
     if (lifetimePoints >= tier.minLifetimePoints) {

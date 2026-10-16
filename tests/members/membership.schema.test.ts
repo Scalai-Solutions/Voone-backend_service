@@ -280,6 +280,35 @@ describe("clinicSlugSchema messages", () => {
   });
 });
 
+describe("birthDate", () => {
+  const withDate = (birthDate: unknown) =>
+    membershipSignupSchema.safeParse({ ...VALID, birthDate });
+
+  it("is optional", () => {
+    expect(membershipSignupSchema.safeParse(VALID).success).toBe(true);
+  });
+
+  it("accepts a full date and keeps birthYear as a fallback", () => {
+    const parsed = withDate("1994-05-18");
+
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.birthDate?.toISOString()).toBe("1994-05-18T00:00:00.000Z");
+      expect(parsed.data.birthYear).toBe(1994);
+    }
+  });
+
+  it("rejects impossible dates", () => {
+    expect(withDate("1994-02-31").success).toBe(false);
+  });
+
+  it("rejects future dates", () => {
+    const nextYear = new Date().getUTCFullYear() + 1;
+
+    expect(withDate(`${nextYear}-01-01`).success).toBe(false);
+  });
+});
+
 describe("birthYear", () => {
   const withYear = (birthYear: unknown) =>
     membershipSignupSchema.safeParse({ ...VALID, birthYear });

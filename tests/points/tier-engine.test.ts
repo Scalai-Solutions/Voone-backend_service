@@ -34,12 +34,10 @@ describe("tierFor", () => {
     expect(tierFor(600, shuffled)?.code).toBe("silver");
   });
 
-  it("returns null when the member has reached no tier at all", () => {
-    // A scale that does not start at zero is a configuration choice. Inventing a bottom
-    // tier here would put a label on the pass that the clinic never wrote.
+  it("returns the lowest tier when the member has reached no authored floor yet", () => {
     const noFloor = SCALE.filter((tier) => tier.minLifetimePoints > 0);
 
-    expect(tierFor(10, noFloor)).toBeNull();
+    expect(tierFor(10, noFloor)?.code).toBe("silver");
   });
 
   it("returns null for an empty scale rather than throwing", () => {

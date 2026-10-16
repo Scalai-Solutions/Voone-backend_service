@@ -15,6 +15,7 @@ import {
   WalletNotificationTransientError
 } from "../../common/errors/wallet.errors";
 import type { WalletPassEngine } from "../../wallet/engine/wallet-pass.engine";
+import { hasPermission, PERMISSIONS } from "../auth/rbac";
 import {
   NotificationForbiddenError,
   NotificationNotFoundError,
@@ -37,6 +38,7 @@ export interface NotificationActor {
   userId?: string;
   clinicId?: string;
   role: string;
+  permissions?: string[];
 }
 
 export interface PointsCreditNotificationJob {
@@ -764,14 +766,17 @@ export class NotificationService {
   private assertSender(actor: NotificationActor, clinicId: string): void {
     this.assertReader(actor, clinicId);
 
-    if (!["OWNER", "MANAGER", "VOONE_ADMIN"].includes(actor.role.toUpperCase())) {
-      throw new NotificationForbiddenError("Only owners and managers can send notifications");
+    if (!hasPermission(actor, PERMISSIONS.notificationsSend)) {
+      throw new NotificationForbiddenError("Notifications permission is required");
     }
   }
 
   private assertReader(actor: NotificationActor, clinicId: string): void {
     if (actor.role.toUpperCase() === "VOONE_ADMIN") return;
     if (actor.clinicId !== clinicId) throw new NotificationForbiddenError();
+    if (!hasPermission(actor, PERMISSIONS.notificationsSend)) {
+      throw new NotificationForbiddenError("Notifications permission is required");
+    }
   }
 
   private async bestEffortRemove(
