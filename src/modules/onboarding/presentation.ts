@@ -82,6 +82,13 @@ export interface PresentedProgram {
   review: string[];
 }
 
+/**
+ * The engine explains when a prize leans on more than its own budget. The centre has no use for
+ * that: it is about how the programme was balanced, and it quotes the total cost, which stays
+ * internal. The note stays in the engine's output; it is only not shown.
+ */
+const COST_NOTE_PREFIX = "Algunos premios usan algo más de su presupuesto individual";
+
 const itemsOf = (items: Array<{ name: string }>): PresentedItem[] =>
   items.map((i) => ({ name: i.name }));
 
@@ -196,13 +203,12 @@ export const presentProgram = (program: Program): PresentedProgram => {
 
     familyAndFriends: {
       title: "Family & Friends",
-      description:
-        "Un nivel aparte para las personas cercanas al centro. El centro las añade a mano y define sus ventajas. No acumulan progreso, no tienen hitos y no suben de nivel.",
+      description: "Un nivel aparte para las personas cercanas al centro.",
       // Not available yet: the card stays visible so centres know it is coming.
       comingSoon: true
     },
 
-    adaptations: program.adapt,
+    adaptations: program.adapt.filter((note) => !note.startsWith(COST_NOTE_PREFIX)),
     review: program.review
   };
 };
