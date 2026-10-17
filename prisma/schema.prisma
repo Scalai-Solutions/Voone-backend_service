@@ -375,6 +375,7 @@ enum NotificationType {
   SINGLE
   POINTS
   TIER
+  BIRTHDAY
 }
 
 enum NotificationStatus {
@@ -441,13 +442,18 @@ model NotificationDelivery {
 }
 
 model ClinicNotificationSettings {
-  id               String               @id @default(uuid())
-  clinicId         String               @unique
-  clinic           Clinic               @relation(fields: [clinicId], references: [id], onDelete: Cascade)
-  notifyOnCredit   ClinicNotifyOnCredit @default(MILESTONE_AND_TIER)
-  marketingEnabled Boolean              @default(true)
-  createdAt        DateTime             @default(now())
-  updatedAt        DateTime             @updatedAt
+  id                  String               @id @default(uuid())
+  clinicId            String               @unique
+  clinic              Clinic               @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  notifyOnCredit      ClinicNotifyOnCredit @default(MILESTONE_AND_TIER)
+  marketingEnabled    Boolean              @default(true)
+  birthdayEnabled     Boolean              @default(true)
+  birthdayHeader      String               @default("¡Feliz cumpleaños!")
+  birthdayBody        String               @default("¡Feliz cumpleaños! Disfruta de un 10% de descuento en nuestros servicios. Esperamos verte pronto.")
+  birthdayNotify      Boolean              @default(true)
+  birthdayLastRunDate String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 }
 
 model ClinicLocation {

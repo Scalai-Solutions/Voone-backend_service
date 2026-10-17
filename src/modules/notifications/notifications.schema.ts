@@ -34,7 +34,11 @@ export const notificationListQuerySchema = z.object({
 
 export const notificationSettingsSchema = z.object({
   notifyOnCredit: z.enum(["NEVER", "MILESTONE_AND_TIER", "ALWAYS"]),
-  marketingEnabled: z.boolean()
+  marketingEnabled: z.boolean(),
+  birthdayEnabled: z.boolean(),
+  birthdayHeader: z.string().trim().min(1).max(60),
+  birthdayBody: z.string().trim().min(1).max(500),
+  birthdayNotify: z.boolean()
 });
 
 export const clinicLocationSchema = z.object({

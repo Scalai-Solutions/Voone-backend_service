@@ -118,12 +118,15 @@ export const buildNotificationService = (prisma: PrismaClient): NotificationServ
   );
 };
 
-export const startInProcessNotificationWorker = (prisma: PrismaClient): Worker | null => {
+export const startInProcessNotificationWorker = (
+  prisma: PrismaClient,
+  service = buildNotificationService(prisma)
+): Worker | null => {
   if (config.WALLET_SYNC_MODE !== "queue" || !config.WALLET_WORKER_IN_PROCESS) {
     return null;
   }
 
-  const worker = createNotificationWorker(config.REDIS_URL, buildNotificationService(prisma), 3);
+  const worker = createNotificationWorker(config.REDIS_URL, service, 3);
 
   worker.on("error", createRepeatingErrorLogger("[notifications] worker error:"));
 
