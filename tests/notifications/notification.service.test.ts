@@ -7,6 +7,7 @@ import { NotificationService } from "../../src/modules/notifications/notificatio
 const queuedDelivery = {
   id: "delivery-1",
   notificationId: "notification-1",
+  provider: WalletProviderType.GOOGLE,
   status: NotificationDeliveryStatus.QUEUED,
   notification: {
     id: "notification-1",
@@ -100,6 +101,123 @@ describe("NotificationService", () => {
       )
     ).resolves.toEqual({ items: [], nextCursor: null });
     expect(queried).toBe(true);
+  });
+
+  it("marks Apple notification deliveries as an explicit placeholder", async () => {
+    let deliveryStatus: NotificationDeliveryStatus = NotificationDeliveryStatus.QUEUED;
+    let errorCode: string | null | undefined;
+    const service = new NotificationService(
+      {
+        notificationDelivery: {
+          findUnique: async () => ({
+            ...queuedDelivery,
+            provider: WalletProviderType.APPLE,
+            member: { walletObjects: [] }
+          }),
+          update: async ({
+            data
+          }: {
+            data: { status: NotificationDeliveryStatus; errorCode?: string | null };
+          }) => {
+            deliveryStatus = data.status;
+            errorCode = data.errorCode;
+          },
+          findMany: async () => [{ status: deliveryStatus }]
+        },
+        notification: { update: async () => undefined }
+      } as never,
+      { addObjectMessage: async () => ({ messageId: "should-not-run" }) } as never,
+      { canMarketingPush: async () => true, recordPush: async () => undefined } as never,
+      {} as never
+    );
+
+    await service.processDelivery("delivery-apple");
+
+    expect(deliveryStatus).toBe(NotificationDeliveryStatus.SKIPPED);
+    expect(errorCode).toBe("APPLE_NOTIFICATION_PLACEHOLDER");
+  });
+
+  it("creates birthday notifications for members with synced wallet passes", async () => {
+    const enqueued: string[] = [];
+    const settings = {
+      marketingEnabled: true,
+      birthdayEnabled: true,
+      birthdayLastRunDate: null,
+      birthdayHeader: "¡Feliz cumpleaños!",
+      birthdayBody: "Disfruta de un 10% de descuento.",
+      birthdayNotify: true
+    };
+    const service = new NotificationService(
+      {
+        clinic: {
+          findMany: async () => [
+            {
+              id: "clinic-1",
+              isActive: true,
+              createdAt: new Date("2026-01-01T00:00:00.000Z"),
+              notificationSettings: settings
+            }
+          ]
+        },
+        member: {
+          findMany: async () => [
+            {
+              id: "member-1",
+              birthDate: new Date("1990-10-17T00:00:00.000Z"),
+              walletObjects: [
+                {
+                  provider: WalletProviderType.GOOGLE,
+                  status: WalletSyncStatus.SYNCED
+                },
+                {
+                  provider: WalletProviderType.APPLE,
+                  status: WalletSyncStatus.SYNCED
+                }
+              ]
+            },
+            {
+              id: "member-2",
+              birthDate: new Date("1990-10-18T00:00:00.000Z"),
+              walletObjects: [
+                {
+                  provider: WalletProviderType.GOOGLE,
+                  status: WalletSyncStatus.SYNCED
+                }
+              ]
+            }
+          ]
+        },
+        notification: {
+          findFirst: async () => null,
+          create: async ({
+            data
+          }: {
+            data: {
+              deliveries: { create: Array<{ memberId: string; provider: WalletProviderType }> };
+            };
+          }) => ({
+            id: "notification-birthday",
+            deliveries: data.deliveries.create.map((_, index) => ({ id: `delivery-${index + 1}` }))
+          })
+        },
+        notificationAuditLog: { create: async () => undefined },
+        clinicNotificationSettings: { update: async () => undefined }
+      } as never,
+      {} as never,
+      {} as never,
+      { enqueueDelivery: async (deliveryId: string) => enqueued.push(deliveryId) } as never
+    );
+
+    const result = await service.runBirthdayAutomations(new Date("2026-10-17T07:05:00.000Z"));
+
+    expect(result).toMatchObject({
+      date: "2026-10-17",
+      clinicsChecked: 1,
+      candidates: 1,
+      notificationsCreated: 1,
+      deliveriesCreated: 2
+    });
+    expect(enqueued).toEqual(["delivery-1", "delivery-2"]);
   });
 
   it("resolves tier and inactivity segment filters inside the clinic", async () => {
