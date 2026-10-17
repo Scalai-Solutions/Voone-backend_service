@@ -219,6 +219,17 @@ describe("what a centre sees of a programme", () => {
     expect(shown.familyAndFriends.comingSoon).toBe(true);
   });
 
+  it("never shows the centre the budget note, which quotes the total cost", () => {
+    // Sapphira's own programme raises it, so the engine has it and the centre does not.
+    expect(sapphira.adapt.some((n) => n.startsWith("Algunos premios usan algo más"))).toBe(true);
+    expect(shown.adaptations.some((n) => n.includes("presupuesto individual"))).toBe(false);
+    expect(shown.adaptations.some((n) => /% del gasto/.test(n))).toBe(false);
+  });
+
+  it("keeps the Family & Friends description to one short line", () => {
+    expect(shown.familyAndFriends.description.length).toBeLessThan(80);
+  });
+
   it("states the recurring reward in euros actually paid", () => {
     // Every 250 of progress, at ×1.3 in Diamante, is a reward every ~192 € paid.
     expect(shown.recurring.every).toBe(Math.round(sapphira.rec.every / 1.3));
