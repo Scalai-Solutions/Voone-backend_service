@@ -140,16 +140,26 @@ export class VisitService {
     let tier: string | null = null;
 
     if (progress > 0) {
-      const credit = await this.points.credit({
-        memberId: input.memberId,
-        clinicId: input.clinicId,
-        points: progress,
-        kind: PointsTransactionKind.EARN,
-        reason: visit.kind === VisitKind.PAYMENT ? "Visita de pago" : "Sesión de bono",
-        sourceRef: visit.id,
-        idempotencyKey: `visit:${visit.id}`,
-        createdBy: input.createdBy
-      });
+      // One credit at a time per member. The ledger append is safe on its own, but settling
+      // reads the balance and then writes the member's cached total: two credits settling at once
+      // can each read a balance that misses the other and the later write leaves a stale total.
+      const credit = await this.prisma.$transaction(
+        async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`visit-credit:${input.memberId}`}))`;
+
+          return this.points.credit({
+            memberId: input.memberId,
+            clinicId: input.clinicId,
+            points: progress,
+            kind: PointsTransactionKind.EARN,
+            reason: visit.kind === VisitKind.PAYMENT ? "Visita de pago" : "Sesión de bono",
+            sourceRef: visit.id,
+            idempotencyKey: `visit:${visit.id}`,
+            createdBy: input.createdBy
+          });
+        },
+        { timeout: 15_000, maxWait: 15_000 }
+      );
 
       tier = credit.tier?.label ?? null;
     } else {
