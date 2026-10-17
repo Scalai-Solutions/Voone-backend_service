@@ -7,6 +7,7 @@ import { LoyaltyCard } from "../../engine/loyalty-card";
 import { BuiltPass, PassBuilder, PassUpdateBinding } from "../../engine/pass-builder.interface";
 import { buildStoreCardFields } from "./apple-pass.fields";
 import { PASS_TRANSLATIONS } from "./apple-pass.strings";
+import { PassImageSource } from "./apple-pass.images";
 import { deriveAppleTheme } from "./apple-pass.theme";
 import { PKPassInstance, loadPasskit } from "./passkit";
 
@@ -16,6 +17,8 @@ export interface ApplePassBuilderOptions {
   organizationName: string;
   modelDirectory: string;
   certificates: AppleWalletCertificates;
+  /** The clinic's own logo and hero. Absent: every pass carries the bundled Voone logo. */
+  images?: PassImageSource;
 }
 
 const PASS_STYLE = "storeCard";
@@ -98,6 +101,7 @@ export class ApplePassBuilder implements PassBuilder {
     }
 
     this.applyFields(pass, data, PassType);
+    await this.applyImages(pass, data);
 
     pass.setBarcodes({
       message: data.redemptionCode,
@@ -121,6 +125,27 @@ export class ApplePassBuilder implements PassBuilder {
           "and key do not match or the key passphrase is wrong.",
         error
       );
+    }
+  }
+
+  /**
+   * The clinic's logo and hero, in place of the bundled ones. Each is optional and each can fail
+   * on its own: the card still works with the Voone logo and no strip.
+   */
+  private async applyImages(pass: PKPassInstance, data: LoyaltyCard): Promise<void> {
+    const source = this.options.images;
+
+    if (!source) return;
+
+    const [logo, strip] = await Promise.all([
+      data.template.logoUrl ? source.logo(data.template.logoUrl) : null,
+      data.template.heroImageUrl ? source.strip(data.template.heroImageUrl) : null
+    ]);
+
+    for (const set of [logo, strip]) {
+      if (!set) continue;
+
+      for (const [name, bytes] of Object.entries(set.files)) pass.addBuffer(name, bytes);
     }
   }
 

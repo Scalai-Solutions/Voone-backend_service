@@ -21,6 +21,7 @@ import {
 } from "../../engine/wallet-pass-provider.interface";
 import { WalletSyncRepository } from "../../engine/wallet-sync.repository";
 import { ApplePassBuilder } from "./apple-pass.builder";
+import { RemotePassImageSource } from "./apple-pass.images";
 import { resolvePassModelDirectory } from "./apple-pass.model";
 
 /** 256 bits, base64url. Long enough that guessing is not a threat model. */
@@ -275,6 +276,8 @@ export class AppleWalletProvider extends BaseWalletProvider implements PassDevic
  * Separate from the constructor so tests inject a fake builder, and so nothing reads the
  * certificate until a pass is actually built.
  */
+const passImages = new RemotePassImageSource();
+
 export const createAppleWalletProvider = (
   repo: WalletSyncRepository,
   refresh: PassRefreshChannel,
@@ -291,7 +294,8 @@ export const createAppleWalletProvider = (
         teamIdentifier: config.teamIdentifier,
         organizationName: config.organizationName,
         modelDirectory: resolvePassModelDirectory(config.modelDirectory),
-        certificates: config.certificates
+        certificates: config.certificates,
+        images: passImages
       });
     },
     refresh,
