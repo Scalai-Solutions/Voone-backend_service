@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 import {
-  DEFAULT_WALLET_BACKGROUND_COLOR,
   DEFAULT_WALLET_BENEFITS_TEXT,
   DEFAULT_WALLET_INFO_TEXT,
   DEFAULT_WALLET_POINTS_LABEL,
@@ -126,7 +125,7 @@ const defaultTierRewards = [
 export const createTemplateSchema = z.object({
   presetId: idSchema,
   programName: z.string().trim().min(2).max(120),
-  hexBackgroundColor: hexColorSchema.default(DEFAULT_WALLET_BACKGROUND_COLOR),
+  hexBackgroundColor: hexColorSchema,
   logoUrl: optionalUrlSchema,
   heroImageUrl: optionalUrlSchema,
   websiteUrl: optionalUrlSchema,
@@ -168,7 +167,7 @@ export const createVooneTemplateSchema = z.object({
   name: z.string().trim().min(2).max(120),
   description: z.string().trim().max(500).optional().or(z.literal("")),
   programName: z.string().trim().min(2).max(120),
-  hexBackgroundColor: hexColorSchema.default(DEFAULT_WALLET_BACKGROUND_COLOR),
+  hexBackgroundColor: hexColorSchema,
   logoUrl: optionalUrlSchema,
   heroImageUrl: optionalUrlSchema,
   pointsLabel: defaultedString(DEFAULT_WALLET_POINTS_LABEL, 2, 80),
