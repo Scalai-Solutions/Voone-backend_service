@@ -1,17 +1,13 @@
 import { z } from "zod";
 
 import { newClinicSlugSchema } from "../members/membership.schema";
+import {
+  DEFAULT_WALLET_BENEFITS_TEXT,
+  DEFAULT_WALLET_INFO_TEXT,
+  DEFAULT_WALLET_POINTS_LABEL,
+  DEFAULT_WALLET_TIER_LABEL
+} from "../templates/default-voone-template";
 import { createTemplateSchema } from "../templates/templates.schema";
-
-/**
- * Defaults for the copy a clinic will refine later. Present so provisioning needs only the
- * facts an operator actually has to hand — a name, an address, a colour — while still
- * producing a template complete enough that /alta/<slug> works immediately.
- */
-const DEFAULT_POINTS_LABEL = "Puntos";
-const DEFAULT_TIER_LABEL = "Nivel";
-const DEFAULT_BENEFITS_TEXT = "Acumula puntos en cada visita y canjéalos por tratamientos.";
-const DEFAULT_INFO_TEXT = "Presenta tu pase en recepción para sumar puntos.";
 
 /**
  * Onboards a clinic.
@@ -55,10 +51,10 @@ export const provisionClinicSchema = z.object({
   appointmentUrl: createTemplateSchema.shape.appointmentUrl,
   appLinkText: createTemplateSchema.shape.appLinkText,
   appLinkDescription: createTemplateSchema.shape.appLinkDescription,
-  pointsLabel: z.string().trim().min(2).max(80).default(DEFAULT_POINTS_LABEL),
-  tierLabel: z.string().trim().min(2).max(80).default(DEFAULT_TIER_LABEL),
-  benefitsText: z.string().trim().min(8).max(1200).default(DEFAULT_BENEFITS_TEXT),
-  infoText: z.string().trim().min(8).max(1200).default(DEFAULT_INFO_TEXT),
+  pointsLabel: createTemplateSchema.shape.pointsLabel.default(DEFAULT_WALLET_POINTS_LABEL),
+  tierLabel: createTemplateSchema.shape.tierLabel.default(DEFAULT_WALLET_TIER_LABEL),
+  benefitsText: createTemplateSchema.shape.benefitsText.default(DEFAULT_WALLET_BENEFITS_TEXT),
+  infoText: createTemplateSchema.shape.infoText.default(DEFAULT_WALLET_INFO_TEXT),
   tierRewards: createTemplateSchema.shape.tierRewards,
   milestoneRewards: createTemplateSchema.shape.milestoneRewards,
   treatments: createTemplateSchema.shape.treatments.default([

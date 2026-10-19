@@ -42,7 +42,9 @@ if (!isAppleWalletConfigured()) {
 const notificationService = buildNotificationService(prisma);
 const walletWorker = startInProcessWalletWorker(prisma);
 const notificationWorker = startInProcessNotificationWorker(prisma, notificationService);
-const birthdayCron = startBirthdayNotificationCron(notificationService);
+const birthdayCron = config.BIRTHDAY_NOTIFICATION_CRON_ENABLED
+  ? startBirthdayNotificationCron(notificationService)
+  : null;
 
 if (walletWorker) {
   console.log("[wallet] consuming the sync queue in this process");
@@ -62,7 +64,7 @@ const shutdown = async (signal: string): Promise<void> => {
   console.log(`${signal} received, shutting down`);
 
   server.close();
-  birthdayCron.stop();
+  birthdayCron?.stop();
   await walletWorker?.close();
   await notificationWorker?.close();
   await prisma.$disconnect();

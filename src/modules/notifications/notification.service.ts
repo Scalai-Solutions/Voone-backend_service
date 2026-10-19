@@ -9,6 +9,7 @@ import {
   type PrismaClient
 } from "@prisma/client";
 
+import { config } from "../../config/env";
 import {
   WalletNotificationNotFoundError,
   WalletNotificationQuotaExceededError,
@@ -33,11 +34,12 @@ import { NotificationQuotaService } from "./quota.service";
 const BROADCAST_LIMIT = 3;
 const BROADCAST_WINDOW_MS = 24 * 60 * 60 * 1_000;
 const PAGE_SIZE = 25;
-const BIRTHDAY_TIME_ZONE = "Europe/Madrid";
-
-const madridDay = (date: Date): { dateKey: string; month: number; day: number } => {
+const birthdayDay = (
+  date: Date,
+  timeZone = config.BIRTHDAY_NOTIFICATION_TIME_ZONE
+): { dateKey: string; month: number; day: number } => {
   const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: BIRTHDAY_TIME_ZONE,
+    timeZone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit"
@@ -259,8 +261,11 @@ export class NotificationService {
     await this.jobs.enqueuePointsCredit({ memberId, newBalance, ...flags });
   }
 
-  async runBirthdayAutomations(now = new Date()): Promise<BirthdayAutomationResult> {
-    const today = madridDay(now);
+  async runBirthdayAutomations(
+    now = new Date(),
+    timeZone = config.BIRTHDAY_NOTIFICATION_TIME_ZONE
+  ): Promise<BirthdayAutomationResult> {
+    const today = birthdayDay(now, timeZone);
     const result: BirthdayAutomationResult = {
       date: today.dateKey,
       clinicsChecked: 0,
@@ -284,11 +289,7 @@ export class NotificationService {
           update: {}
         }));
 
-      if (
-        !settings.marketingEnabled ||
-        !settings.birthdayEnabled ||
-        settings.birthdayLastRunDate === today.dateKey
-      ) {
+      if (!settings.marketingEnabled || !settings.birthdayEnabled) {
         continue;
       }
 
@@ -320,31 +321,52 @@ export class NotificationService {
       if (candidates.length > 0) {
         const idempotencyKey = `birthday:${clinic.id}:${today.dateKey}`;
         const existing = await this.findIdempotent(clinic.id, idempotencyKey);
+        const deliveries = candidates.flatMap((member) =>
+          member.walletObjects
+            .filter(
+              (walletObject) =>
+                walletObject.status === WalletSyncStatus.SYNCED &&
+                (walletObject.provider === WalletProviderType.GOOGLE ||
+                  walletObject.provider === WalletProviderType.APPLE)
+            )
+            .map((walletObject) => ({
+              memberId: member.id,
+              provider: walletObject.provider,
+              status: NotificationDeliveryStatus.QUEUED
+            }))
+        );
 
         if (existing) {
-          const queuedDeliveries = await this.prisma.notificationDelivery.findMany({
-            where: { notificationId: existing.id, status: NotificationDeliveryStatus.QUEUED },
-            select: { id: true }
+          const existingDeliveries = await this.prisma.notificationDelivery.findMany({
+            where: { notificationId: existing.id },
+            select: { id: true, memberId: true, provider: true, status: true }
           });
+          const existingKeys = new Set(
+            existingDeliveries.map((delivery) => `${delivery.memberId}:${delivery.provider}`)
+          );
+          const missingDeliveries = deliveries.filter(
+            (delivery) => !existingKeys.has(`${delivery.memberId}:${delivery.provider}`)
+          );
+          const createdDeliveries = await Promise.all(
+            missingDeliveries.map((delivery) =>
+              this.prisma.notificationDelivery.create({
+                data: { notificationId: existing.id, ...delivery },
+                select: { id: true }
+              })
+            )
+          );
+          const queuedDeliveryIds = [
+            ...existingDeliveries
+              .filter((delivery) => delivery.status === NotificationDeliveryStatus.QUEUED)
+              .map((delivery) => delivery.id),
+            ...createdDeliveries.map((delivery) => delivery.id)
+          ];
 
           await Promise.all(
-            queuedDeliveries.map((delivery) => this.jobs.enqueueDelivery(delivery.id))
+            queuedDeliveryIds.map((deliveryId) => this.jobs.enqueueDelivery(deliveryId))
           );
+          result.deliveriesCreated += createdDeliveries.length;
         } else {
-          const deliveries = candidates.flatMap((member) =>
-            member.walletObjects
-              .filter(
-                (walletObject) =>
-                  walletObject.status === WalletSyncStatus.SYNCED &&
-                  (walletObject.provider === WalletProviderType.GOOGLE ||
-                    walletObject.provider === WalletProviderType.APPLE)
-              )
-              .map((walletObject) => ({
-                memberId: member.id,
-                provider: walletObject.provider,
-                status: NotificationDeliveryStatus.QUEUED
-              }))
-          );
           const notification = await this.prisma.notification.create({
             data: {
               clinicId: clinic.id,
@@ -356,7 +378,7 @@ export class NotificationService {
               segmentJson: {
                 automation: "birthday",
                 date: today.dateKey,
-                timeZone: BIRTHDAY_TIME_ZONE
+                timeZone
               },
               deliveries: { create: deliveries }
             },
@@ -371,7 +393,7 @@ export class NotificationService {
             candidates.length,
             {
               date: today.dateKey,
-              timeZone: BIRTHDAY_TIME_ZONE
+              timeZone
             }
           );
 

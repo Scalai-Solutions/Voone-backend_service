@@ -1,8 +1,21 @@
 import { z } from "zod";
 
+import {
+  DEFAULT_WALLET_BACKGROUND_COLOR,
+  DEFAULT_WALLET_BENEFITS_TEXT,
+  DEFAULT_WALLET_INFO_TEXT,
+  DEFAULT_WALLET_POINTS_LABEL,
+  DEFAULT_WALLET_TIER_LABEL
+} from "./default-voone-template";
+
 const hexColorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Expected a 6-digit hex color");
 const optionalUrlSchema = z.string().url().max(2048).optional().or(z.literal(""));
 const idSchema = z.string().trim().min(1).max(120);
+const defaultedString = (defaultValue: string, min: number, max: number) =>
+  z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    z.string().trim().min(min).max(max).default(defaultValue)
+  );
 
 export const clinicContextSchema = z.object({
   clinicId: idSchema
@@ -113,17 +126,17 @@ const defaultTierRewards = [
 export const createTemplateSchema = z.object({
   presetId: idSchema,
   programName: z.string().trim().min(2).max(120),
-  hexBackgroundColor: hexColorSchema,
+  hexBackgroundColor: hexColorSchema.default(DEFAULT_WALLET_BACKGROUND_COLOR),
   logoUrl: optionalUrlSchema,
   heroImageUrl: optionalUrlSchema,
   websiteUrl: optionalUrlSchema,
   appointmentUrl: optionalUrlSchema,
   appLinkText: z.string().trim().min(1).max(30).optional().or(z.literal("")),
   appLinkDescription: z.string().trim().min(1).max(120).optional().or(z.literal("")),
-  pointsLabel: z.string().trim().min(2).max(80),
-  tierLabel: z.string().trim().min(2).max(80),
-  benefitsText: z.string().trim().min(8).max(1200),
-  infoText: z.string().trim().min(8).max(1200),
+  pointsLabel: defaultedString(DEFAULT_WALLET_POINTS_LABEL, 2, 80),
+  tierLabel: defaultedString(DEFAULT_WALLET_TIER_LABEL, 2, 80),
+  benefitsText: defaultedString(DEFAULT_WALLET_BENEFITS_TEXT, 8, 1200),
+  infoText: defaultedString(DEFAULT_WALLET_INFO_TEXT, 8, 1200),
   tierRewards: tierRewardsSchema.default(defaultTierRewards),
   milestoneRewards: milestoneRewardsSchema.default({
     milestoneCount: 10,
@@ -155,13 +168,13 @@ export const createVooneTemplateSchema = z.object({
   name: z.string().trim().min(2).max(120),
   description: z.string().trim().max(500).optional().or(z.literal("")),
   programName: z.string().trim().min(2).max(120),
-  hexBackgroundColor: hexColorSchema,
+  hexBackgroundColor: hexColorSchema.default(DEFAULT_WALLET_BACKGROUND_COLOR),
   logoUrl: optionalUrlSchema,
   heroImageUrl: optionalUrlSchema,
-  pointsLabel: z.string().trim().min(2).max(80),
-  tierLabel: z.string().trim().min(2).max(80),
-  benefitsText: z.string().trim().max(1200).optional().or(z.literal("")),
-  infoText: z.string().trim().max(1200).optional().or(z.literal("")),
+  pointsLabel: defaultedString(DEFAULT_WALLET_POINTS_LABEL, 2, 80),
+  tierLabel: defaultedString(DEFAULT_WALLET_TIER_LABEL, 2, 80),
+  benefitsText: defaultedString(DEFAULT_WALLET_BENEFITS_TEXT, 0, 1200),
+  infoText: defaultedString(DEFAULT_WALLET_INFO_TEXT, 0, 1200),
   buttons: z.array(vooneTemplateButtonSchema).max(10),
   textModules: z.array(vooneTemplateTextModuleSchema).max(20)
 });

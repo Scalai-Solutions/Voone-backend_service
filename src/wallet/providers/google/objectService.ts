@@ -136,18 +136,22 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
       `/loyaltyObject/${encodeURIComponent(objectId)}`
     );
     const existingTextModules = existingObject.textModulesData ?? [];
+    const existingHeaderFor = (id: string, fallback: string): string =>
+      existingTextModules.find((module) => module.id === id)?.header ?? fallback;
 
     body.textModulesData = upsertTextModules(existingTextModules, [
       ...(patch.loyaltyPointsBalance !== undefined
         ? [
             {
               id: "points",
-              header: existingObject.loyaltyPoints?.label ?? "Points",
+              header: existingObject.loyaltyPoints?.label ?? existingHeaderFor("points", "Puntos"),
               body: String(patch.loyaltyPointsBalance)
             }
           ]
         : []),
-      ...(patch.tier !== undefined ? [{ id: "tier", header: "Tier", body: patch.tier }] : [])
+      ...(patch.tier !== undefined
+        ? [{ id: "tier", header: existingHeaderFor("tier", "Nivel"), body: patch.tier }]
+        : [])
     ]);
   }
 
@@ -302,23 +306,19 @@ const toGoogleLoyaltyObjectBody = (input: LoyaltyObjectInput): GoogleLoyaltyObje
       },
       {
         id: "member_id",
-        header: "Member ID",
+        header: "N.º de socia",
         body: accountId
       },
       {
         id: "member_since",
-        header: "Member Since",
+        header: "Miembro desde",
         body: input.memberSince ?? "—"
       },
-      ...(input.tier
-        ? [
-            {
-              id: "tier",
-              header: "Tier",
-              body: input.tier
-            }
-          ]
-        : [])
+      {
+        id: "tier",
+        header: input.tierLabel ?? "Nivel",
+        body: input.tier ?? "—"
+      }
     ],
     // TODO: Verify object-level tier support against https://developers.google.com/wallet/retail/loyalty-cards/rest/v1/loyaltyclass before relying on this field in production.
     // As of now, this field has no effect when written on a LoyaltyObject; only LoyaltyClass.rewardsTier is real.

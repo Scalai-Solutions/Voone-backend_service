@@ -3,6 +3,26 @@ import { z } from "zod";
 
 dotenv.config();
 
+const booleanEnv = z
+  .enum(["true", "false"])
+  .default("true")
+  .transform((value) => value === "true");
+
+const timeZoneEnv = z
+  .string()
+  .default("Europe/Madrid")
+  .refine(
+    (value) => {
+      try {
+        new Intl.DateTimeFormat("en-US", { timeZone: value });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: "must be a valid IANA time zone" }
+  );
+
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   REDIS_URL: z.string().min(1, "REDIS_URL is required"),
@@ -77,10 +97,16 @@ const envSchema = z.object({
   // Set it false on the API when a dedicated worker service exists (`npm run worker`) —
   // at that point pass signing should stop competing with request handling for the event
   // loop, which is the only reason to separate them.
-  WALLET_WORKER_IN_PROCESS: z
-    .enum(["true", "false"])
-    .default("true")
-    .transform((value) => value === "true"),
+  WALLET_WORKER_IN_PROCESS: booleanEnv,
+
+  // Birthday automation schedule. Defaults to once daily at 09:00 Europe/Madrid. Lowering
+  // the frequency makes the scheduler wake more often, but a member still receives at most
+  // one birthday message per clinic day because the job is idempotent by date.
+  BIRTHDAY_NOTIFICATION_CRON_ENABLED: booleanEnv,
+  BIRTHDAY_NOTIFICATION_TIME_ZONE: timeZoneEnv,
+  BIRTHDAY_NOTIFICATION_HOUR: z.coerce.number().int().min(0).max(23).default(9),
+  BIRTHDAY_NOTIFICATION_MINUTE: z.coerce.number().int().min(0).max(59).default(0),
+  BIRTHDAY_NOTIFICATION_FREQUENCY_MINUTES: z.coerce.number().int().min(1).max(1440).default(1440),
 
   SENDGRID_API_KEY: z.string().min(1).optional(),
   SENDGRID_FROM_EMAIL: z.string().email("SENDGRID_FROM_EMAIL must be a valid email").optional()
