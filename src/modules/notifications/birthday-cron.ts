@@ -1,14 +1,26 @@
+import { config } from "../../config/env";
 import type { NotificationService } from "./notification.service";
 
-const MADRID_TIME_ZONE = "Europe/Madrid";
-const HOUR = 9;
-const MINUTE = 0;
+export interface BirthdayCronSchedule {
+  timeZone: string;
+  hour: number;
+  minute: number;
+  frequencyMinutes: number;
+}
 
-const madridParts = (
-  date: Date
+const defaultSchedule = (): BirthdayCronSchedule => ({
+  timeZone: config.BIRTHDAY_NOTIFICATION_TIME_ZONE,
+  hour: config.BIRTHDAY_NOTIFICATION_HOUR,
+  minute: config.BIRTHDAY_NOTIFICATION_MINUTE,
+  frequencyMinutes: config.BIRTHDAY_NOTIFICATION_FREQUENCY_MINUTES
+});
+
+const zonedParts = (
+  date: Date,
+  timeZone: string
 ): { year: number; month: number; day: number; hour: number; minute: number; second: number } => {
   const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: MADRID_TIME_ZONE,
+    timeZone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -29,8 +41,8 @@ const madridParts = (
   };
 };
 
-const madridOffsetMinutes = (date: Date): number => {
-  const parts = madridParts(date);
+const zonedOffsetMinutes = (date: Date, timeZone: string): number => {
+  const parts = zonedParts(date, timeZone);
   const asUtc = Date.UTC(
     parts.year,
     parts.month - 1,
@@ -43,32 +55,59 @@ const madridOffsetMinutes = (date: Date): number => {
   return Math.round((asUtc - date.getTime()) / 60_000);
 };
 
-const madridWallTimeToUtc = (
+const zonedWallTimeToUtc = (
   year: number,
   month: number,
   day: number,
   hour: number,
-  minute: number
+  minute: number,
+  timeZone: string
 ): Date => {
   const firstGuess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0));
-  const offset = madridOffsetMinutes(firstGuess);
+  const offset = zonedOffsetMinutes(firstGuess, timeZone);
   const secondGuess = new Date(
     Date.UTC(year, month - 1, day, hour, minute, 0, 0) - offset * 60_000
   );
-  const correctedOffset = madridOffsetMinutes(secondGuess);
+  const correctedOffset = zonedOffsetMinutes(secondGuess, timeZone);
 
   return new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0) - correctedOffset * 60_000);
 };
 
-export const nextBirthdayCronRun = (now = new Date()): Date => {
-  const parts = madridParts(now);
-  let target = madridWallTimeToUtc(parts.year, parts.month, parts.day, HOUR, MINUTE);
+export const nextBirthdayCronRun = (
+  now = new Date(),
+  schedule: BirthdayCronSchedule = defaultSchedule()
+): Date => {
+  const parts = zonedParts(now, schedule.timeZone);
+  const todayAnchor = zonedWallTimeToUtc(
+    parts.year,
+    parts.month,
+    parts.day,
+    schedule.hour,
+    schedule.minute,
+    schedule.timeZone
+  );
 
-  if (target <= now) {
-    target = madridWallTimeToUtc(parts.year, parts.month, parts.day + 1, HOUR, MINUTE);
+  if (schedule.frequencyMinutes === 1440) {
+    if (todayAnchor > now) return todayAnchor;
+
+    return zonedWallTimeToUtc(
+      parts.year,
+      parts.month,
+      parts.day + 1,
+      schedule.hour,
+      schedule.minute,
+      schedule.timeZone
+    );
   }
 
-  return target;
+  const frequencyMs = schedule.frequencyMinutes * 60_000;
+
+  if (todayAnchor > now) return todayAnchor;
+
+  return new Date(
+    todayAnchor.getTime() +
+      (Math.floor((now.getTime() - todayAnchor.getTime()) / frequencyMs) + 1) * frequencyMs
+  );
 };
 
 export interface BirthdayCronHandle {
@@ -76,15 +115,16 @@ export interface BirthdayCronHandle {
 }
 
 export const startBirthdayNotificationCron = (
-  notifications: NotificationService
+  notifications: NotificationService,
+  cronSchedule: BirthdayCronSchedule = defaultSchedule()
 ): BirthdayCronHandle => {
   let timer: NodeJS.Timeout | null = null;
   let stopped = false;
 
-  const schedule = () => {
+  const scheduleNext = () => {
     if (stopped) return;
 
-    const nextRun = nextBirthdayCronRun();
+    const nextRun = nextBirthdayCronRun(new Date(), cronSchedule);
     const delayMs = Math.max(1_000, nextRun.getTime() - Date.now());
 
     timer = setTimeout(() => {
@@ -102,11 +142,11 @@ export const startBirthdayNotificationCron = (
         error: error instanceof Error ? error.message : String(error)
       });
     } finally {
-      schedule();
+      scheduleNext();
     }
   };
 
-  schedule();
+  scheduleNext();
 
   return {
     stop() {

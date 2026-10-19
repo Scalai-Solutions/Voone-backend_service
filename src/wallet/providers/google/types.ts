@@ -58,6 +58,7 @@ export interface LoyaltyObjectInput {
   memberSince?: string;
   loyaltyPointsLabel: string;
   loyaltyPointsBalance: number;
+  tierLabel?: string;
   tier?: string;
   state?: LoyaltyObjectState;
 }

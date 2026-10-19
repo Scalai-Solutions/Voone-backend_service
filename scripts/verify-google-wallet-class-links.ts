@@ -8,13 +8,13 @@ dotenv.config();
 
 const sapphiraWebsiteUrl = "https://voone.app";
 const sapphiraScheduleAppointmentUrl = "https://voone.app/alta/sapphira-prive";
-const sapphiraCardBackgroundColor = "#ECCFBF";
+const sapphiraCardBackgroundColor = "#30221f";
 const sapphiraLogoUrl =
   process.env.GOOGLE_WALLET_SAPPHIRA_LOGO_URL ??
   "https://i.ibb.co/C5qhWHMk/Whats-App-Image-2026-08-31-at-12-18-49-PM-1.jpg";
 const sapphiraHeroImageUrl =
   process.env.GOOGLE_WALLET_SAPPHIRA_HERO_IMAGE_URL ??
-  "https://i.ibb.co/GvVfjxJG/Gemini-Generated-Image-897qly897qly897q.png";
+  "https://i.ibb.co/Hfy7XNtb/Gemini-Generated-Image-viollgviollgviol.png";
 const expectedDisplayText = "Schedule Appointment";
 const expectedLinkCount = 2;
 
@@ -76,30 +76,35 @@ const main = async (): Promise<void> => {
 
 const buildSapphiraClassInput = (classId: string): LoyaltyClassInput => ({
   classId,
-  issuerName: "Sapphira Privé",
-  programName: "Sapphira Privé",
+  issuerName: "Sapphira Carranza Privé",
+  programName: "Club Diamante",
   hexBackgroundColor: sapphiraCardBackgroundColor,
   logoUrl: sapphiraLogoUrl,
   heroImageUrl: sapphiraHeroImageUrl,
   heroImageDescription: "Imagen de Sapphira Privé Clinic",
   homepageUrl: sapphiraWebsiteUrl,
-  accountNameLabel: "Member",
-  accountIdLabel: "Member ID",
+  accountNameLabel: "Nombre de socia",
+  accountIdLabel: "N.º de socia",
   textModules: [
     {
       id: "clinic",
-      header: "Clinic",
-      body: "Sapphira Privé"
+      header: "Centro",
+      body: "Sapphira Carranza Privé"
+    },
+    {
+      id: "benefit_cta",
+      header: "Beneficio",
+      body: "Ver beneficios"
     },
     {
       id: "benefits",
-      header: "Benefits",
-      body: "10% off facial treatments and birthday surprises."
+      header: "Beneficios",
+      body: "Ventajas exclusivas, prioridad de reserva y sorpresas de cumpleaños."
     },
     {
       id: "info",
-      header: "Information",
-      body: "This membership card is personal and non-transferable."
+      header: "Información",
+      body: "Esta tarjeta de fidelización es personal e intransferible."
     }
   ],
   linkModules: [

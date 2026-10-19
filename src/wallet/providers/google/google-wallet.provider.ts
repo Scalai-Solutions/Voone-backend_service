@@ -1,6 +1,11 @@
 import { WalletProviderType } from "@prisma/client";
 
 import { config } from "../../../config/env";
+import {
+  DEFAULT_WALLET_BENEFIT_CTA,
+  DEFAULT_WALLET_HERO_IMAGE_URL,
+  DEFAULT_WALLET_LOGO_URL
+} from "../../../modules/templates/default-voone-template";
 import { BaseWalletProvider } from "../../engine/base-wallet-provider";
 import type { LoyaltyCard } from "../../engine/loyalty-card";
 import type {
@@ -37,17 +42,6 @@ const GOOGLE_ID_SAFE_CHARACTER = /[^A-Za-z0-9._-]/g;
 
 const toGoogleSafeSuffix = (value: string): string =>
   value.replace(/-/g, "_").replace(GOOGLE_ID_SAFE_CHARACTER, "_");
-
-const placeholderImageUrl = (
-  programName: string,
-  hexBackgroundColor: string,
-  label: string
-): string => {
-  const background = hexBackgroundColor.replace("#", "");
-  const text = encodeURIComponent(`${programName} ${label}`);
-
-  return `https://placehold.co/1032x336/${background}/FFFFFF.png?text=${text}`;
-};
 
 export class GoogleWalletProvider extends BaseWalletProvider {
   readonly provider = WalletProviderType.GOOGLE;
@@ -184,28 +178,29 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       classId,
       programName: template.programName,
       hexBackgroundColor: template.backgroundColor,
-      logoUrl:
-        template.logoUrl ??
-        placeholderImageUrl(template.programName, template.backgroundColor, "Logo"),
-      heroImageUrl:
-        template.heroImageUrl ??
-        placeholderImageUrl(template.programName, template.backgroundColor, "Hero"),
+      logoUrl: template.logoUrl ?? DEFAULT_WALLET_LOGO_URL,
+      heroImageUrl: template.heroImageUrl ?? DEFAULT_WALLET_HERO_IMAGE_URL,
       heroImageDescription: `${template.programName} hero image`,
       homepageUrl: websiteUrl,
-      accountNameLabel: "Member",
-      accountIdLabel: "Member ID",
+      accountNameLabel: "Nombre de socia",
+      accountIdLabel: "N.º de socia",
       rewardsTierLabel: template.tierLabel,
       textModules: [
         {
           id: "clinic",
-          header: "Clinic",
+          header: "Centro",
           body: program.clinicName
+        },
+        {
+          id: "benefit_cta",
+          header: "Beneficio",
+          body: DEFAULT_WALLET_BENEFIT_CTA
         },
         ...(template.benefitsText
           ? [
               {
                 id: "benefits",
-                header: "Benefits",
+                header: "Beneficios",
                 body: template.benefitsText
               }
             ]
@@ -214,7 +209,7 @@ export class GoogleWalletProvider extends BaseWalletProvider {
           ? [
               {
                 id: "info",
-                header: "Information",
+                header: "Información",
                 body: template.infoText
               }
             ]
@@ -259,6 +254,7 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       memberSince: card.member.memberSince,
       loyaltyPointsLabel: card.template.pointsLabel,
       loyaltyPointsBalance: card.points,
+      tierLabel: card.template.tierLabel,
       tier: card.tier,
       state: "ACTIVE"
     };

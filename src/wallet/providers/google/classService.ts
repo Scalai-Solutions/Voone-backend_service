@@ -261,12 +261,13 @@ const toGoogleLoyaltyClassBody = (input: LoyaltyClassInput): GoogleLoyaltyClassR
   homepageUri: {
     uri: input.homepageUrl
   },
-  // The template expects benefits and info as shared class modules. Points and tier live on each object.
-  textModulesData: input.textModules?.map((module) => ({
-    id: module.id,
-    header: module.header,
-    body: module.body
-  })),
+  textModulesData: withDefaultCardTextModules(input.textModules, input.issuerName).map(
+    (module) => ({
+      id: module.id,
+      header: module.header,
+      body: module.body
+    })
+  ),
   linksModuleData: input.linkModules
     ? {
         uris: input.linkModules.map((linkModule) => ({
@@ -300,21 +301,16 @@ const toGoogleLoyaltyClassBody = (input: LoyaltyClassInput): GoogleLoyaltyClassR
     cardTemplateOverride: {
       cardRowTemplateInfos: [
         {
-          oneItem: {
-            item: toTemplateItem("object.accountName")
-          }
-        },
-        {
           twoItems: {
-            startItem: toTemplateItem("class.textModulesData['clinic']"),
-            endItem: toTemplateItem("object.textModulesData['member_id']")
+            startItem: toTemplateItem("object.accountName"),
+            endItem: toTemplateItem("object.textModulesData['points']")
           }
         },
         {
           threeItems: {
-            startItem: toTemplateItem("object.textModulesData['member_since']"),
+            startItem: toTemplateItem("object.textModulesData['member_id']"),
             middleItem: toTemplateItem("object.textModulesData['tier']"),
-            endItem: toTemplateItem("object.textModulesData['points']")
+            endItem: toTemplateItem("class.textModulesData['benefit_cta']")
           }
         }
       ]
@@ -332,6 +328,21 @@ const toGoogleLoyaltyClassBody = (input: LoyaltyClassInput): GoogleLoyaltyClassR
     }
   }
 });
+
+const withDefaultCardTextModules = (
+  modules: LoyaltyClassInput["textModules"] = [],
+  clinicName: string
+): NonNullable<LoyaltyClassInput["textModules"]> => {
+  const hasModule = (id: string): boolean => modules.some((module) => module.id === id);
+
+  return [
+    ...(!hasModule("clinic") ? [{ id: "clinic", header: "Centro", body: clinicName }] : []),
+    ...(!hasModule("benefit_cta")
+      ? [{ id: "benefit_cta", header: "Beneficio", body: "Ver beneficios" }]
+      : []),
+    ...modules
+  ];
+};
 
 const toGoogleImage = (uri: string, description?: string): GoogleImage => ({
   sourceUri: {
