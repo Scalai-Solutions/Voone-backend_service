@@ -97,6 +97,7 @@ export interface MemberPointsCache {
   write(
     memberId: string,
     balance: { spendable: number; lifetime: number },
-    tierCode: string | null
+    tierCode: string | null,
+    options?: { allowDecrease?: boolean }
   ): Promise<void>;
 }

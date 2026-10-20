@@ -213,18 +213,27 @@ export class PrismaMemberPointsCache implements MemberPointsCache {
   async write(
     memberId: string,
     balance: { spendable: number; lifetime: number },
-    tierCode: string | null
+    tierCode: string | null,
+    options: { allowDecrease?: boolean } = {}
   ): Promise<void> {
-    await this.prisma.member.update({
-      where: { id: memberId },
+    const data = {
+      pointsBalance: balance.spendable,
+      lifetimePoints: balance.lifetime,
+      tier: tierCode
+    };
+
+    if (options.allowDecrease) {
+      await this.prisma.member.update({ where: { id: memberId }, data });
+      return;
+    }
+
+    await this.prisma.member.updateMany({
+      where: { id: memberId, lifetimePoints: { lte: balance.lifetime } },
       // All three together: a pass reads the balance, the tier and the milestone
       // rhythm in one go, and writing them separately would let a card render a tier
-      // the lifetime total does not justify.
-      data: {
-        pointsBalance: balance.spendable,
-        lifetimePoints: balance.lifetime,
-        tier: tierCode
-      }
+      // the lifetime total does not justify. Guarded so an older concurrent settlement
+      // cannot overwrite a newer lifetime snapshot.
+      data
     });
   }
 }
