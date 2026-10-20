@@ -135,6 +135,7 @@ export const visitSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("BONO_SESSION"),
     package: z.object({
+      name: z.string().trim().min(1).max(120).optional(),
       priceEuro: z.number().positive("El bono tiene que tener un precio"),
       sessions: z.number().int().min(1, "El bono tiene al menos una sesión").max(100)
     }),
