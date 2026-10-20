@@ -7,7 +7,7 @@ import {
   DEFAULT_WALLET_POINTS_LABEL,
   DEFAULT_WALLET_TIER_LABEL
 } from "../templates/default-voone-template";
-import { createTemplateSchema } from "../templates/templates.schema";
+import { createTemplateSchema, treatmentInputSchema } from "../templates/templates.schema";
 
 /**
  * Onboards a clinic.
@@ -57,7 +57,7 @@ export const provisionClinicSchema = z.object({
   infoText: createTemplateSchema.shape.infoText.default(DEFAULT_WALLET_INFO_TEXT),
   tierRewards: createTemplateSchema.shape.tierRewards,
   milestoneRewards: createTemplateSchema.shape.milestoneRewards,
-  treatments: createTemplateSchema.shape.treatments.default([]),
+  treatments: z.array(treatmentInputSchema).max(50).default([]),
 
   privacyPolicyVersion: z.string().trim().min(1).max(32).optional()
 });

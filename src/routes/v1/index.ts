@@ -229,6 +229,21 @@ v1Router.use(
       return clinic?.id ?? null;
     },
     treatmentsFor: async (clinicId) => {
+      const catalogItems = await prisma.catalogItem.findMany({
+        where: { clinicId, isProduct: false },
+        orderBy: [{ position: "asc" }, { externalId: "asc" }],
+        select: { id: true, name: true, priceCents: true }
+      });
+
+      if (catalogItems.length > 0) {
+        return catalogItems.map((item) => ({
+          id: item.id,
+          name: item.name,
+          priceEuro: Math.round(item.priceCents / 100),
+          points: Math.max(1, Math.round(item.priceCents / 10))
+        }));
+      }
+
       const treatments = await prisma.clinicTreatment.findMany({
         where: { clinicId },
         orderBy: { name: "asc" },

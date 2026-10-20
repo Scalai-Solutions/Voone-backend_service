@@ -193,7 +193,7 @@ export class NotificationService {
     );
 
     if (members.length === 0) {
-      await this.refreshNotificationStatus(notification.id);
+      await this.refreshNotificationStatus(notification.id, notification);
       return (await this.findNotification(notification.id)) ?? notification;
     }
 
@@ -488,7 +488,7 @@ export class NotificationService {
         NotificationDeliveryStatus.SKIPPED,
         "APPLE_NOTIFICATION_PLACEHOLDER"
       );
-      await this.refreshNotificationStatus(delivery.notificationId);
+      await this.refreshNotificationStatus(delivery.notificationId, delivery.notification);
       return;
     }
 
@@ -500,7 +500,7 @@ export class NotificationService {
 
     if (!object) {
       await this.markDelivery(delivery.id, NotificationDeliveryStatus.SKIPPED, "NO_GOOGLE_PASS");
-      await this.refreshNotificationStatus(delivery.notificationId);
+      await this.refreshNotificationStatus(delivery.notificationId, delivery.notification);
       return;
     }
 
@@ -523,7 +523,7 @@ export class NotificationService {
       if (notify) await this.quota.recordPush(object.externalObjectId);
 
       await this.markDelivery(delivery.id, status, null, message.messageId);
-      await this.refreshNotificationStatus(delivery.notificationId);
+      await this.refreshNotificationStatus(delivery.notificationId, delivery.notification);
     } catch (error) {
       if (error instanceof WalletNotificationQuotaExceededError && wantsPush) {
         const message = await this.wallet.addObjectMessage(object.externalObjectId, {
@@ -539,7 +539,7 @@ export class NotificationService {
           "QUOTA_EXCEEDED",
           message.messageId
         );
-        await this.refreshNotificationStatus(delivery.notificationId);
+        await this.refreshNotificationStatus(delivery.notificationId, delivery.notification);
         return;
       }
 
@@ -552,7 +552,7 @@ export class NotificationService {
           : NotificationDeliveryStatus.FAILED,
         error instanceof Error ? error.name : "UNKNOWN"
       );
-      await this.refreshNotificationStatus(delivery.notificationId);
+      await this.refreshNotificationStatus(delivery.notificationId, delivery.notification);
     }
   }
 
@@ -590,7 +590,7 @@ export class NotificationService {
     });
 
     if (!object) {
-      await this.refreshNotificationStatus(notification.id);
+      await this.refreshNotificationStatus(notification.id, notification);
       return;
     }
 
@@ -617,7 +617,7 @@ export class NotificationService {
           : NotificationDeliveryStatus.SENT,
         shouldNotify && !notify ? "QUOTA_RESERVED" : null
       );
-      await this.refreshNotificationStatus(notification.id);
+      await this.refreshNotificationStatus(notification.id, notification);
     } catch (error) {
       if (error instanceof WalletNotificationQuotaExceededError) {
         await this.wallet.patchPoints(object.externalObjectId, {
@@ -630,7 +630,7 @@ export class NotificationService {
           NotificationDeliveryStatus.DOWNGRADED,
           "QUOTA_EXCEEDED"
         );
-        await this.refreshNotificationStatus(notification.id);
+        await this.refreshNotificationStatus(notification.id, notification);
         return;
       }
 
@@ -640,7 +640,7 @@ export class NotificationService {
           NotificationDeliveryStatus.SKIPPED,
           "NOT_FOUND"
         );
-        await this.refreshNotificationStatus(notification.id);
+        await this.refreshNotificationStatus(notification.id, notification);
         return;
       }
 
@@ -914,8 +914,11 @@ export class NotificationService {
     });
   }
 
-  private async refreshNotificationStatus(notificationId: string): Promise<void> {
-    const notification = await this.findNotification(notificationId);
+  private async refreshNotificationStatus(
+    notificationId: string,
+    notificationRecord?: { clinicId: string; type: NotificationType; status: NotificationStatus }
+  ): Promise<void> {
+    const notification = notificationRecord ?? (await this.findNotification(notificationId));
 
     if (!notification) throw new NotificationNotFoundError();
 

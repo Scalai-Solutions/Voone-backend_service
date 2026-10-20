@@ -143,7 +143,7 @@ export const createTemplateSchema = z.object({
     priceAmount: 10,
     pointsAwarded: 100
   }),
-  treatments: z.array(treatmentInputSchema).max(50).default([])
+  treatments: z.array(treatmentInputSchema).min(1).max(50)
 });
 
 export const updateTemplateSchema = createTemplateSchema;

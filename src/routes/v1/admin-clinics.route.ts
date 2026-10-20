@@ -59,6 +59,16 @@ const planQuota = (plan: string): number => {
   return 8;
 };
 
+const pointsRateFor = (milestoneRewards: unknown): number => {
+  if (typeof milestoneRewards !== "object" || milestoneRewards === null) return 10;
+
+  const rewards = milestoneRewards as { priceAmount?: unknown; pointsAwarded?: unknown };
+  const priceAmount = typeof rewards.priceAmount === "number" ? rewards.priceAmount : 10;
+  const pointsAwarded = typeof rewards.pointsAwarded === "number" ? rewards.pointsAwarded : 100;
+
+  return priceAmount > 0 && pointsAwarded >= 0 ? pointsAwarded / priceAmount : 10;
+};
+
 const passwordSetupSchema = z
   .object({
     password: z.string().min(8, "Password must be at least 8 characters").max(128),
@@ -105,6 +115,32 @@ const hasLiveProgram = (clinic: AdminClinicSummaryInput): boolean =>
   Array.isArray(clinic.onboardingPrograms) &&
   clinic.onboardingPrograms.some((program) => program.status === OnboardingProgramStatus.ACTIVO);
 
+const treatmentSummaryFor = (clinic: AdminClinicSummaryInput) => {
+  if (
+    "catalogItems" in clinic &&
+    Array.isArray(clinic.catalogItems) &&
+    clinic.catalogItems.length > 0
+  ) {
+    const pointsRate = pointsRateFor(clinic.template?.milestoneRewards);
+
+    return clinic.catalogItems
+      .filter((item) => !item.isProduct)
+      .map((item) => ({
+        id: item.id,
+        name: item.name,
+        priceEuro: Math.round(item.priceCents / 100),
+        points: Math.max(1, Math.round((item.priceCents / 100) * pointsRate))
+      }));
+  }
+
+  return clinic.treatments.map((treatment) => ({
+    id: treatment.id,
+    name: treatment.name,
+    priceEuro: treatment.priceEuro,
+    points: treatment.pointsAllotted
+  }));
+};
+
 const toAdminClinicSummary = (clinic: AdminClinicSummaryInput) => ({
   id: clinic.id,
   slug: clinic.slug,
@@ -123,12 +159,7 @@ const toAdminClinicSummary = (clinic: AdminClinicSummaryInput) => ({
   status: clinic.isActive && clinic.template && hasLiveProgram(clinic) ? "active" : "setup",
   members: clinic._count.members,
   templates: clinic.template ? 1 : 0,
-  treatments: clinic.treatments.map((treatment) => ({
-    id: treatment.id,
-    name: treatment.name,
-    priceEuro: treatment.priceEuro,
-    points: treatment.pointsAllotted
-  })),
+  treatments: treatmentSummaryFor(clinic),
   users: clinic.users.map((user) => ({
     id: user.id,
     name: user.name,
@@ -263,6 +294,7 @@ const listAdminClinics = (query: AdminClinicsQuery = { limit: 10, offset: 0 }) =
         }
       },
       treatments: { orderBy: { createdAt: "asc" } },
+      catalogItems: { orderBy: [{ position: "asc" }, { externalId: "asc" }] },
       template: { include: { walletClasses: true } },
       onboardingPrograms: {
         where: { status: OnboardingProgramStatus.ACTIVO },
@@ -289,6 +321,7 @@ const getAdminClinic = (clinicId: string) =>
         }
       },
       treatments: { orderBy: { createdAt: "asc" } },
+      catalogItems: { orderBy: [{ position: "asc" }, { externalId: "asc" }] },
       template: { include: { walletClasses: true } },
       onboardingPrograms: {
         where: { status: OnboardingProgramStatus.ACTIVO },
@@ -307,6 +340,7 @@ const listAdminClinicsWithoutSetupTokens = (query: AdminClinicsQuery = { limit: 
     include: {
       users: { orderBy: { createdAt: "asc" } },
       treatments: { orderBy: { createdAt: "asc" } },
+      catalogItems: { orderBy: [{ position: "asc" }, { externalId: "asc" }] },
       template: { include: { walletClasses: true } },
       onboardingPrograms: {
         where: { status: OnboardingProgramStatus.ACTIVO },
@@ -324,6 +358,7 @@ const getAdminClinicWithoutSetupTokens = (clinicId: string) =>
     include: {
       users: { orderBy: { createdAt: "asc" } },
       treatments: { orderBy: { createdAt: "asc" } },
+      catalogItems: { orderBy: [{ position: "asc" }, { externalId: "asc" }] },
       template: { include: { walletClasses: true } },
       onboardingPrograms: {
         where: { status: OnboardingProgramStatus.ACTIVO },
