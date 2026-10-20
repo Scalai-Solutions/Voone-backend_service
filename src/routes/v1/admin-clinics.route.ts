@@ -1,5 +1,10 @@
 import { Router } from "express";
-import { OnboardingProgramStatus, Prisma, WalletProviderType, WalletSyncStatus } from "@prisma/client";
+import {
+  OnboardingProgramStatus,
+  Prisma,
+  WalletProviderType,
+  WalletSyncStatus
+} from "@prisma/client";
 import { z } from "zod";
 
 import { MembershipValidationError } from "../../common/errors/membership.errors";
