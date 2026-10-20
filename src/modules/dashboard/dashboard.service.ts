@@ -1,8 +1,5 @@
 import { WalletProviderType, WalletSyncStatus, type PrismaClient } from "@prisma/client";
 
-import { CLINIC_TIME_ZONE, startOfMonthIn } from "../../common/utils/zoned-month";
-import { countsTowardsLifetime } from "../points/points-balance";
-
 export interface DashboardOverview {
   activeMembers: number;
   pointsIssuedThisMonth: number;
@@ -41,22 +38,13 @@ export class DashboardService {
     private readonly googlePublishing: () => "demo" | "live"
   ) {}
 
-  async clinicOverview(clinicId: string, now: Date = new Date()): Promise<DashboardOverview> {
-    const monthStart = startOfMonthIn(CLINIC_TIME_ZONE, now);
-
-    const [activeMembers, issued, walletAdds, recent] = await Promise.all([
+  async clinicOverview(clinicId: string): Promise<DashboardOverview> {
+    const [activeMembers, revenue, walletAdds, recent] = await Promise.all([
       this.prisma.member.count({ where: { clinicId, erasedAt: null } }),
 
-      // Positive movements only, and only the kinds that represent points actually
-      // granted — the same rule as lifetime. A redemption is not negative issuance, and
-      // a clawback should reduce the figure rather than be counted as an issue.
-      this.prisma.pointsTransaction.aggregate({
-        where: {
-          clinicId,
-          createdAt: { gte: monthStart },
-          kind: { in: this.issuingKinds() }
-        },
-        _sum: { points: true }
+      this.prisma.paidVisit.aggregate({
+        where: { clinicId },
+        _sum: { amountCents: true }
       }),
 
       // Cards that reached the provider. PENDING is issued-but-unconfirmed and counting
@@ -75,7 +63,7 @@ export class DashboardService {
 
     return {
       activeMembers,
-      pointsIssuedThisMonth: issued._sum.points ?? 0,
+      pointsIssuedThisMonth: Math.round((revenue._sum.amountCents ?? 0) / 100),
       walletAdds,
       recentActivity: recent.map((row) => ({
         id: row.id,
@@ -120,9 +108,4 @@ export class DashboardService {
     };
   }
 
-  private issuingKinds() {
-    return (["EARN", "REFERRAL", "ADJUSTMENT"] as const).filter((kind) =>
-      countsTowardsLifetime(kind)
-    );
-  }
 }

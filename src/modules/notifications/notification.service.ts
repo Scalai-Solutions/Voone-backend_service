@@ -34,6 +34,11 @@ import { NotificationQuotaService } from "./quota.service";
 const BROADCAST_LIMIT = 3;
 const BROADCAST_WINDOW_MS = 24 * 60 * 60 * 1_000;
 const PAGE_SIZE = 25;
+const MANUAL_NOTIFICATION_TYPES = new Set<NotificationType>([
+  NotificationType.BROADCAST,
+  NotificationType.SEGMENT,
+  NotificationType.SINGLE
+]);
 const birthdayDay = (
   date: Date,
   timeZone = config.BIRTHDAY_NOTIFICATION_TIME_ZONE
@@ -186,6 +191,11 @@ export class NotificationService {
       members.length,
       input.segment
     );
+
+    if (members.length === 0) {
+      await this.refreshNotificationStatus(notification.id);
+      return (await this.findNotification(notification.id)) ?? notification;
+    }
 
     for (const chunk of this.chunks(members, 100)) {
       const deliveries = await this.prisma.notificationDelivery.findMany({
@@ -419,7 +429,12 @@ export class NotificationService {
     const notification = await this.findNotification(notificationId);
 
     if (!notification) throw new NotificationNotFoundError();
-    if (notification.status === NotificationStatus.CANCELLED) return;
+    if (
+      notification.status === NotificationStatus.CANCELLED ||
+      notification.status === NotificationStatus.SENT
+    ) {
+      return;
+    }
 
     if (notification.type !== NotificationType.BROADCAST) return;
 
@@ -430,22 +445,31 @@ export class NotificationService {
       data: { status: NotificationStatus.PROCESSING }
     });
 
-    const message = await this.wallet.addClassMessage(walletClass.externalClassId, {
-      header: notification.header,
-      body: this.bodyWithAction(notification.body, notification.actionUrl),
-      notify: notification.notify,
-      actionUrl: notification.actionUrl ?? undefined
-    });
+    try {
+      const message = await this.wallet.addClassMessage(walletClass.externalClassId, {
+        header: notification.header,
+        body: this.bodyWithAction(notification.body, notification.actionUrl),
+        notify: notification.notify,
+        actionUrl: notification.actionUrl ?? undefined
+      });
 
-    await this.prisma.notification.update({
-      where: { id: notification.id },
-      data: { status: NotificationStatus.SENT, providerMessageId: message.messageId }
-    });
+      await this.prisma.notification.update({
+        where: { id: notification.id },
+        data: { status: NotificationStatus.SENT, providerMessageId: message.messageId }
+      });
+      await this.countManualNotification(notification.clinicId, notification.type);
 
-    console.info("[notifications] broadcast sent", {
-      notificationId: notification.id,
-      clinicId: notification.clinicId
-    });
+      console.info("[notifications] broadcast sent", {
+        notificationId: notification.id,
+        clinicId: notification.clinicId
+      });
+    } catch (error) {
+      await this.prisma.notification.update({
+        where: { id: notification.id },
+        data: { status: NotificationStatus.FAILED }
+      });
+      throw error;
+    }
   }
 
   async processDelivery(deliveryId: string): Promise<void> {
@@ -891,6 +915,10 @@ export class NotificationService {
   }
 
   private async refreshNotificationStatus(notificationId: string): Promise<void> {
+    const notification = await this.findNotification(notificationId);
+
+    if (!notification) throw new NotificationNotFoundError();
+
     const deliveries = await this.prisma.notificationDelivery.findMany({
       where: { notificationId },
       select: { status: true }
@@ -909,18 +937,25 @@ export class NotificationService {
         delivery.status === NotificationDeliveryStatus.DOWNGRADED ||
         delivery.status === NotificationDeliveryStatus.SKIPPED
     );
+    const nextStatus =
+      failed && completed
+        ? NotificationStatus.PARTIAL_FAILED
+        : failed
+          ? NotificationStatus.FAILED
+          : NotificationStatus.SENT;
 
     await this.prisma.notification.update({
       where: { id: notificationId },
-      data: {
-        status:
-          failed && completed
-            ? NotificationStatus.PARTIAL_FAILED
-            : failed
-              ? NotificationStatus.FAILED
-              : NotificationStatus.SENT
-      }
+      data: { status: nextStatus }
     });
+
+    if (
+      notification.status !== NotificationStatus.SENT &&
+      notification.status !== NotificationStatus.PARTIAL_FAILED &&
+      (nextStatus === NotificationStatus.SENT || nextStatus === NotificationStatus.PARTIAL_FAILED)
+    ) {
+      await this.countManualNotification(notification.clinicId, notification.type);
+    }
   }
 
   private async countsFor(
@@ -954,6 +989,15 @@ export class NotificationService {
       failed: count(NotificationDeliveryStatus.FAILED),
       skipped: count(NotificationDeliveryStatus.SKIPPED)
     };
+  }
+
+  private async countManualNotification(clinicId: string, type: NotificationType): Promise<void> {
+    if (!MANUAL_NOTIFICATION_TYPES.has(type)) return;
+
+    await this.prisma.clinic.update({
+      where: { id: clinicId },
+      data: { notificationsUsedThisMonth: { increment: 1 } }
+    });
   }
 
   private assertSender(actor: NotificationActor, clinicId: string): void {

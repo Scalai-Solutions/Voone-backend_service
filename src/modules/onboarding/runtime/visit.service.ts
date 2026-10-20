@@ -56,7 +56,7 @@ export interface RecordVisitInput {
   /** PAYMENT: what was paid, by category, so retail and medicine can be told apart. */
   lines?: VisitLine[];
   /** BONO_SESSION: the package this session came out of. */
-  package?: { priceEuro: number; sessions: number };
+  package?: { name?: string; priceEuro: number; sessions: number };
   /** Cosmetics bought at the tier discount in this visit. */
   discountedProducts?: number;
   /** Minted by the caller, so a double tap cannot pay a client twice. */

@@ -57,9 +57,7 @@ export const provisionClinicSchema = z.object({
   infoText: createTemplateSchema.shape.infoText.default(DEFAULT_WALLET_INFO_TEXT),
   tierRewards: createTemplateSchema.shape.tierRewards,
   milestoneRewards: createTemplateSchema.shape.milestoneRewards,
-  treatments: createTemplateSchema.shape.treatments.default([
-    { name: "Consulta", priceEuro: 0, pointsAllotted: 60 }
-  ]),
+  treatments: createTemplateSchema.shape.treatments.default([]),
 
   privacyPolicyVersion: z.string().trim().min(1).max(32).optional()
 });

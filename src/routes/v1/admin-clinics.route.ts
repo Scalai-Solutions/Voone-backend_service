@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { WalletProviderType, WalletSyncStatus } from "@prisma/client";
+import { OnboardingProgramStatus, Prisma, WalletProviderType, WalletSyncStatus } from "@prisma/client";
 import { z } from "zod";
 
 import { MembershipValidationError } from "../../common/errors/membership.errors";
@@ -64,6 +64,17 @@ const passwordSetupSchema = z
     message: "Passwords do not match"
   });
 
+const passwordChangeSchema = z
+  .object({
+    currentPassword: z.string().min(1, "Current password is required"),
+    newPassword: z.string().min(8, "Password must be at least 8 characters").max(128),
+    confirmPassword: z.string().min(1, "Confirm your password")
+  })
+  .refine((value) => value.newPassword === value.confirmPassword, {
+    path: ["confirmPassword"],
+    message: "Passwords do not match"
+  });
+
 type AdminClinicSummaryUser = {
   id: string;
   name?: string | null;
@@ -84,10 +95,10 @@ type AdminClinicSummaryInput = Omit<
   users: AdminClinicSummaryUser[];
 };
 
-type AdminClinicDetail = AdminClinicSummaryInput | null;
-
-const ADMIN_CLINIC_DETAIL_CACHE_MS = 10_000;
-const adminClinicDetailCache = new Map<string, { expiresAt: number; clinic: AdminClinicDetail }>();
+const hasLiveProgram = (clinic: AdminClinicSummaryInput): boolean =>
+  "onboardingPrograms" in clinic &&
+  Array.isArray(clinic.onboardingPrograms) &&
+  clinic.onboardingPrograms.some((program) => program.status === OnboardingProgramStatus.ACTIVO);
 
 const toAdminClinicSummary = (clinic: AdminClinicSummaryInput) => ({
   id: clinic.id,
@@ -104,7 +115,7 @@ const toAdminClinicSummary = (clinic: AdminClinicSummaryInput) => ({
     0,
     clinic.notificationsMonthlyQuota - clinic.notificationsUsedThisMonth
   ),
-  status: clinic.isActive && clinic.template ? "active" : "setup",
+  status: clinic.isActive && clinic.template && hasLiveProgram(clinic) ? "active" : "setup",
   members: clinic._count.members,
   templates: clinic.template ? 1 : 0,
   treatments: clinic.treatments.map((treatment) => ({
@@ -181,8 +192,60 @@ const toAdminMemberSummary = (member: Awaited<ReturnType<typeof listAdminMembers
   history: []
 });
 
-const listAdminClinics = () =>
+const adminClinicsQuerySchema = z.object({
+  q: z.string().trim().max(100).optional(),
+  status: z.enum(["active", "setup"]).optional(),
+  plan: z.enum(["starter", "medium", "pro"]).optional(),
+  limit: z.coerce.number().int().positive().max(100).default(10),
+  offset: z.coerce.number().int().nonnegative().default(0)
+});
+
+type AdminClinicsQuery = z.infer<typeof adminClinicsQuerySchema>;
+
+const adminClinicsWhere = (query: AdminClinicsQuery): Prisma.ClinicWhereInput => {
+  const clauses: Prisma.ClinicWhereInput[] = [];
+
+  if (query.q) {
+    clauses.push({
+      OR: [
+        { name: { contains: query.q, mode: "insensitive" } },
+        { slug: { contains: query.q, mode: "insensitive" } },
+        { addressLine: { contains: query.q, mode: "insensitive" } },
+        { pincode: { contains: query.q, mode: "insensitive" } },
+        { voonePlan: { contains: query.q, mode: "insensitive" } },
+        { users: { some: { email: { contains: query.q, mode: "insensitive" } } } }
+      ]
+    });
+  }
+
+  if (query.plan) clauses.push({ voonePlan: query.plan });
+
+  if (query.status === "active") {
+    clauses.push({
+      isActive: true,
+      template: { isNot: null },
+      onboardingPrograms: { some: { status: OnboardingProgramStatus.ACTIVO } }
+    });
+  }
+
+  if (query.status === "setup") {
+    clauses.push({
+      OR: [
+        { isActive: false },
+        { template: null },
+        { onboardingPrograms: { none: { status: OnboardingProgramStatus.ACTIVO } } }
+      ]
+    });
+  }
+
+  return clauses.length ? { AND: clauses } : {};
+};
+
+const listAdminClinics = (query: AdminClinicsQuery = { limit: 10, offset: 0 }) =>
   prisma.clinic.findMany({
+    where: adminClinicsWhere(query),
+    take: query.limit,
+    skip: query.offset,
     include: {
       users: {
         orderBy: { createdAt: "asc" },
@@ -196,6 +259,11 @@ const listAdminClinics = () =>
       },
       treatments: { orderBy: { createdAt: "asc" } },
       template: { include: { walletClasses: true } },
+      onboardingPrograms: {
+        where: { status: OnboardingProgramStatus.ACTIVO },
+        select: { id: true, status: true },
+        take: 1
+      },
       _count: { select: { members: true } }
     },
     orderBy: { createdAt: "desc" }
@@ -217,16 +285,29 @@ const getAdminClinic = (clinicId: string) =>
       },
       treatments: { orderBy: { createdAt: "asc" } },
       template: { include: { walletClasses: true } },
+      onboardingPrograms: {
+        where: { status: OnboardingProgramStatus.ACTIVO },
+        select: { id: true, status: true },
+        take: 1
+      },
       _count: { select: { members: true } }
     }
   });
 
-const listAdminClinicsWithoutSetupTokens = () =>
+const listAdminClinicsWithoutSetupTokens = (query: AdminClinicsQuery = { limit: 10, offset: 0 }) =>
   prisma.clinic.findMany({
+    where: adminClinicsWhere(query),
+    take: query.limit,
+    skip: query.offset,
     include: {
       users: { orderBy: { createdAt: "asc" } },
       treatments: { orderBy: { createdAt: "asc" } },
       template: { include: { walletClasses: true } },
+      onboardingPrograms: {
+        where: { status: OnboardingProgramStatus.ACTIVO },
+        select: { id: true, status: true },
+        take: 1
+      },
       _count: { select: { members: true } }
     },
     orderBy: { createdAt: "desc" }
@@ -239,13 +320,18 @@ const getAdminClinicWithoutSetupTokens = (clinicId: string) =>
       users: { orderBy: { createdAt: "asc" } },
       treatments: { orderBy: { createdAt: "asc" } },
       template: { include: { walletClasses: true } },
+      onboardingPrograms: {
+        where: { status: OnboardingProgramStatus.ACTIVO },
+        select: { id: true, status: true },
+        take: 1
+      },
       _count: { select: { members: true } }
     }
   });
 
-const listAdminClinicsSafe = async () => {
+const listAdminClinicsSafe = async (query: AdminClinicsQuery) => {
   try {
-    return await listAdminClinics();
+    return await listAdminClinics(query);
   } catch (error) {
     if (
       typeof error === "object" &&
@@ -257,7 +343,7 @@ const listAdminClinicsSafe = async () => {
         "[admin] PasswordSetupToken table is missing; returning clinic details without setup links. Run the password setup migration."
       );
 
-      return listAdminClinicsWithoutSetupTokens();
+      return listAdminClinicsWithoutSetupTokens(query);
     }
 
     throw error;
@@ -265,21 +351,8 @@ const listAdminClinicsSafe = async () => {
 };
 
 const getAdminClinicSafe = async (clinicId: string) => {
-  const cached = adminClinicDetailCache.get(clinicId);
-
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.clinic;
-  }
-
   try {
-    const clinic = await getAdminClinic(clinicId);
-
-    adminClinicDetailCache.set(clinicId, {
-      expiresAt: Date.now() + ADMIN_CLINIC_DETAIL_CACHE_MS,
-      clinic
-    });
-
-    return clinic;
+    return await getAdminClinic(clinicId);
   } catch (error) {
     if (
       typeof error === "object" &&
@@ -291,14 +364,7 @@ const getAdminClinicSafe = async (clinicId: string) => {
         "[admin] PasswordSetupToken table is missing; returning clinic details without setup links. Run the password setup migration."
       );
 
-      const clinic = await getAdminClinicWithoutSetupTokens(clinicId);
-
-      adminClinicDetailCache.set(clinicId, {
-        expiresAt: Date.now() + ADMIN_CLINIC_DETAIL_CACHE_MS,
-        clinic
-      });
-
-      return clinic;
+      return getAdminClinicWithoutSetupTokens(clinicId);
     }
 
     throw error;
@@ -318,10 +384,55 @@ const listAdminMembers = () =>
 adminClinicsRouter.get(
   "/admin/clinics",
   createRequireStaffKey(config.STAFF_API_KEY),
-  asyncHandler(async (_req, res) => {
-    const clinics = await listAdminClinicsSafe();
+  asyncHandler(async (req, res) => {
+    const parsed = adminClinicsQuerySchema.safeParse(req.query);
+
+    if (!parsed.success) {
+      throw new MembershipValidationError(
+        parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")
+      );
+    }
+
+    const clinics = await listAdminClinicsSafe(parsed.data);
 
     res.json(clinics.map(toAdminClinicSummary));
+  })
+);
+
+adminClinicsRouter.post(
+  "/auth/password",
+  createRequireStaffKey(config.STAFF_API_KEY),
+  asyncHandler(async (req, res) => {
+    const parsed = passwordChangeSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      const details = parsed.error.issues
+        .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+        .join("; ");
+
+      throw new MembershipValidationError(details);
+    }
+
+    const userId = req.header("x-voone-user-id") ?? "";
+
+    if (!userId) {
+      res.status(401).json({ message: "Authenticated user is required" });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+
+    if (!user || !verifyPassword(parsed.data.currentPassword, user.passwordHash)) {
+      res.status(401).json({ message: "Current password is incorrect" });
+      return;
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: hashPassword(parsed.data.newPassword) }
+    });
+
+    res.json({ status: "ok" });
   })
 );
 
@@ -511,8 +622,7 @@ adminClinicsRouter.patch(
       }
     });
 
-    const clinics = await listAdminClinicsSafe();
-    const updated = clinics.find((item) => item.id === clinic.id);
+    const updated = await getAdminClinicSafe(clinic.id);
 
     res.json(updated ? toAdminClinicSummary(updated) : { status: "ok" });
   })

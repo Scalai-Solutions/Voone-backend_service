@@ -36,6 +36,16 @@ const toCents = (euro: number): number => Math.sign(euro) * Math.round(Math.abs(
  */
 const toEuro = (cents: number): number => cents / 100;
 
+const pointsRateFor = (milestoneRewards: unknown): number => {
+  if (typeof milestoneRewards !== "object" || milestoneRewards === null) return 10;
+
+  const rewards = milestoneRewards as { priceAmount?: unknown; pointsAwarded?: unknown };
+  const priceAmount = typeof rewards.priceAmount === "number" ? rewards.priceAmount : 10;
+  const pointsAwarded = typeof rewards.pointsAwarded === "number" ? rewards.pointsAwarded : 100;
+
+  return priceAmount > 0 && pointsAwarded >= 0 ? pointsAwarded / priceAmount : 10;
+};
+
 /** Only a category the engine knows is honoured; anything else is treated as unset. */
 const asCategory = (value: string | null): CategoryCode | undefined =>
   value && value in CATEGORIES ? (value as CategoryCode) : undefined;
@@ -133,6 +143,26 @@ export class PrismaCatalogRepository implements CatalogRepository {
             position: row.position
           },
           create: { clinicId, ...row }
+        });
+      }
+
+      const template = await tx.clinicTemplate.findUnique({
+        where: { clinicId },
+        select: { milestoneRewards: true }
+      });
+      const pointsRate = pointsRateFor(template?.milestoneRewards);
+      const treatmentRows = prepared.filter((row) => !row.isProduct);
+
+      await tx.clinicTreatment.deleteMany({ where: { clinicId } });
+
+      if (treatmentRows.length > 0) {
+        await tx.clinicTreatment.createMany({
+          data: treatmentRows.map((row) => ({
+            clinicId,
+            name: row.name,
+            priceEuro: Math.round(toEuro(row.priceCents)),
+            pointsAllotted: Math.max(1, Math.round(toEuro(row.priceCents) * pointsRate))
+          }))
         });
       }
     });
