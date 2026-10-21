@@ -950,6 +950,61 @@ describe("what a centre sees of a stored programme", () => {
   });
 });
 
+describe("benefits the centre writes for a tier (founders' E2E item 27)", () => {
+  const benefitsPath = (programId: string, tier: string) =>
+    admin(`/programs/${programId}/tiers/${tier}/benefits`);
+
+  it("stores them on a draft and shows them after the derived ones", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const draft = await call("POST", admin("/programs"), ANSWERS);
+    const r = await call("PUT", benefitsPath(draft.body.id, "oro"), {
+      benefits: ["Café de bienvenida", "Parking gratis"]
+    });
+
+    expect(r.status).toBe(200);
+
+    const oro = r.body.program.tiers.find((t: { key: string }) => t.key === "oro");
+
+    expect(oro.customBenefits).toEqual(["Café de bienvenida", "Parking gratis"]);
+    expect(oro.benefits.slice(-2)).toEqual(["Café de bienvenida", "Parking gratis"]);
+    expect(JSON.stringify(r.body.program)).not.toMatch(/"cost|costPct/i);
+  });
+
+  it("removes them again when the list is emptied", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const draft = await call("POST", admin("/programs"), ANSWERS);
+
+    await call("PUT", benefitsPath(draft.body.id, "plata"), { benefits: ["Algo"] });
+    const r = await call("PUT", benefitsPath(draft.body.id, "plata"), { benefits: [] });
+
+    expect(
+      r.body.program.tiers.find((t: { key: string }) => t.key === "plata").customBenefits
+    ).toEqual([]);
+  });
+
+  it("refuses blank, over-long and too many, and an unknown tier", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const draft = await call("POST", admin("/programs"), ANSWERS);
+    const id = draft.body.id as string;
+
+    expect((await call("PUT", benefitsPath(id, "oro"), { benefits: [" "] })).status).toBe(422);
+    expect(
+      (await call("PUT", benefitsPath(id, "oro"), { benefits: ["x".repeat(81)] })).status
+    ).toBe(422);
+    expect(
+      (await call("PUT", benefitsPath(id, "oro"), { benefits: Array(7).fill("a") })).status
+    ).toBe(422);
+    expect((await call("PUT", benefitsPath(id, "mitico"), { benefits: ["a"] })).status).toBe(422);
+  });
+
+  it("refuses to edit a programme that is already live", async () => {
+    const id = await goLive();
+    const r = await call("PUT", benefitsPath(id, "oro"), { benefits: ["Tarde"] });
+
+    expect(r.status).toBe(409);
+  });
+});
+
 describe("the five-year calculator", () => {
   const calc = (programId: string, body?: unknown) =>
     call("POST", admin(`/programs/${programId}/calculator`), body ?? {});

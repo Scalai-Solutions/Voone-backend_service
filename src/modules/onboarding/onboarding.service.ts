@@ -16,7 +16,7 @@ import {
   TICKET_BUCKETS
 } from "./engine.config";
 import { classify, estimate } from "./engine";
-import type { Answers, EngineError, Program } from "./engine.types";
+import type { Answers, EngineError, Program, TierCode } from "./engine.types";
 import { isEngineError } from "./engine.types";
 import { placeMembersOnProgram } from "./runtime/placement";
 import { recalibrationAdvice, type RecalibrationAdvice } from "./runtime/rules";
@@ -308,6 +308,43 @@ export class OnboardingService {
    * each read it, each swap a different reward, and the second write would silently erase the
    * first.
    */
+  /** Replaces the benefits the centre wrote for one tier. Drafts only. */
+  async setTierBenefits(
+    clinicId: string,
+    programId: string,
+    tier: TierCode,
+    benefits: string[]
+  ): Promise<OnboardingProgram> {
+    const row = await this.getProgram(clinicId, programId);
+
+    if (row.status !== OnboardingProgramStatus.BORRADOR) {
+      throw new OnboardingError(
+        "Solo se pueden editar los beneficios de un borrador. Genera un borrador nuevo para editar un programa activo.",
+        409
+      );
+    }
+
+    const output = row.output as unknown as Program;
+    const next: Program = {
+      ...output,
+      customBenefits: { ...(output.customBenefits ?? {}), [tier]: benefits }
+    };
+
+    const updated = await this.prisma.onboardingProgram.updateMany({
+      where: { id: row.id, updatedAt: row.updatedAt },
+      data: { output: next as unknown as object }
+    });
+
+    if (updated.count === 0) {
+      throw new OnboardingError(
+        "El borrador ha cambiado mientras lo editabas. Recarga la página y vuelve a intentarlo.",
+        409
+      );
+    }
+
+    return this.getProgram(clinicId, programId);
+  }
+
   async swapMilestone(
     clinicId: string,
     programId: string,

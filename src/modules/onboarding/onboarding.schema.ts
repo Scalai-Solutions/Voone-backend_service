@@ -154,6 +154,14 @@ export const calculatorSchema = z.object({
   ticket: z.number({ message: "El ticket medio tiene que ser un número" }).optional()
 });
 
+export const tierBenefitsSchema = z.object({
+  benefits: z
+    .array(
+      z.string().trim().min(1, "Un beneficio no puede estar vacío").max(80, "Máximo 80 caracteres")
+    )
+    .max(6, "Máximo 6 beneficios por nivel")
+});
+
 export const swapSchema = z.object({
   alternative: z.number().int().min(0).max(1)
 });

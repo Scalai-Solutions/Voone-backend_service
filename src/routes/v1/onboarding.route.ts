@@ -15,7 +15,8 @@ import {
   type CatalogRepository
 } from "../../modules/onboarding/catalog.repository";
 import { classify } from "../../modules/onboarding/engine";
-import type { CategoryCode, Program } from "../../modules/onboarding/engine.types";
+import { TIERS } from "../../modules/onboarding/engine.config";
+import type { CategoryCode, Program, TierCode } from "../../modules/onboarding/engine.types";
 import {
   answersSchema,
   catalogPatchSchema,
@@ -24,6 +25,7 @@ import {
   redeemSchema,
   calculatorSchema,
   swapSchema,
+  tierBenefitsSchema,
   visitSchema
 } from "../../modules/onboarding/onboarding.schema";
 import {
@@ -367,6 +369,26 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
             milestone,
             alternative
           )
+        )
+      );
+    })
+  );
+
+  router.put(
+    "/admin/clinics/:clinicId/onboarding/programs/:programId/tiers/:tier/benefits",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const clinicId = await clinicOr404(req.params.clinicId);
+      const { benefits } = parse(tierBenefitsSchema, req.body);
+      const tier = req.params.tier as TierCode;
+
+      if (!TIERS.includes(tier)) {
+        throw new MembershipValidationError("tier: indica un nivel válido");
+      }
+
+      res.json(
+        forAdmin(
+          await deps.onboarding.setTierBenefits(clinicId, req.params.programId, tier, benefits)
         )
       );
     })

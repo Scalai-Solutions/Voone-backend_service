@@ -60,6 +60,8 @@ export interface PresentedTier {
   threshold: number;
   minTenureMonths: number;
   benefits: string[];
+  /** The ones the centre wrote itself: the only ones it can add or remove. */
+  customBenefits: string[];
 }
 
 export interface PresentedProgram {
@@ -150,7 +152,8 @@ export const presentProgram = (program: Program): PresentedProgram => {
       label: TIER_NAMES[key],
       threshold: floors[i] ?? 0,
       minTenureMonths: MIN_TENURE[key],
-      benefits: benefitsFor(key, program)
+      benefits: [...benefitsFor(key, program), ...(program.customBenefits?.[key] ?? [])],
+      customBenefits: program.customBenefits?.[key] ?? []
     })),
 
     ladder: program.lad.ms.map((m): PresentedMilestone => {
