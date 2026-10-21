@@ -586,6 +586,18 @@ describe("a centre's own staff", () => {
     expect(r.body).toMatchObject({ points: 600, pointsTotal: 600 });
   });
 
+  it("counts a product bought with the treatment: 60 + 40 euros is 1000 points", async () => {
+    await goLive();
+    const m = await newMember();
+    const r = await call("POST", `/clinics/${SLUG}/members/${m.id}/visits`, {
+      kind: "PAYMENT",
+      lines: [{ amountEuro: 60 }, { amountEuro: 40, category: "COS" }],
+      idempotencyKey: "route-visit-product"
+    });
+
+    expect(r.body).toMatchObject({ progress: 100, points: 1000, pointsTotal: 1000 });
+  });
+
   it("gives the visit form the centre's catalogue with no cost in it", async () => {
     await call("PUT", admin("/catalog"), { items: fixtureItems });
     const r = await call("GET", `/clinics/${SLUG}/catalog`);
@@ -1030,6 +1042,36 @@ describe("benefits the centre writes for a tier (founders' E2E item 27)", () => 
     const r = await call("PUT", benefitsPath(id, "oro"), { benefits: ["Tarde"] });
 
     expect(r.status).toBe(409);
+  });
+});
+
+describe("giving a milestone any catalogue item (founders' E2E item 28)", () => {
+  it("accepts a catalogue item the engine did not propose, and refuses one that cannot be a reward", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const draft = await call("POST", admin("/programs"), ANSWERS);
+    const first = draft.body.program.ladder.find((m: { reward: unknown }) => m.reward) as {
+      n: number;
+      reward: { name: string };
+    };
+    const path = admin(`/programs/${draft.body.id}/milestones/${first.n}`);
+
+    // The first milestone sits in Bronce, which is exempt from ordering, so some item fits.
+    let swapped: { name: string } | null = null;
+
+    for (const item of fixtureItems) {
+      const r = await call("PATCH", path, { itemId: item.externalId });
+
+      if (r.status === 200) {
+        swapped = { name: item.name };
+        const now = r.body.program.ladder.find((m: { n: number }) => m.n === first.n);
+
+        expect(now.reward.name).toContain(item.name);
+        break;
+      }
+    }
+
+    expect(swapped).not.toBeNull();
+    expect((await call("PATCH", path, { itemId: "no-such-item" })).status).toBe(409);
   });
 });
 

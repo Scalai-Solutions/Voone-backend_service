@@ -354,7 +354,7 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
     requireStaff,
     asyncHandler(async (req, res) => {
       const clinicId = await clinicOr404(req.params.clinicId);
-      const { alternative } = parse(swapSchema, req.body);
+      const choice = parse(swapSchema, req.body);
       const milestone = Number(req.params.milestone);
 
       if (!Number.isInteger(milestone) || milestone < 1) {
@@ -363,12 +363,7 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
 
       res.json(
         forAdmin(
-          await deps.onboarding.swapMilestone(
-            clinicId,
-            req.params.programId,
-            milestone,
-            alternative
-          )
+          await deps.onboarding.swapMilestone(clinicId, req.params.programId, milestone, choice)
         )
       );
     })
