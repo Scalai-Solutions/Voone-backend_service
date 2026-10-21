@@ -33,8 +33,7 @@ describe("membershipSignupSchema", () => {
       phone: "+34612345678",
       phoneRaw: "(+34) 612-34-56-78",
       phoneRegionAssumed: false,
-      consentMarketing: true,
-      acceptedPrivacy: false
+      consentMarketing: true
     });
   });
 

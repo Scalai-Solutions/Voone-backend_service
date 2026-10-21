@@ -241,7 +241,8 @@ export const membershipSignupSchema = z
       birthYear: birthDate ? birthDate.getUTCFullYear() : birthYear,
       sex,
       consentMarketing,
-      acceptedPrivacy: acceptedPrivacy === true,
+      // Only present when ticked, so the parsed shape stays what it was for staff-entered members.
+      ...(acceptedPrivacy === true ? { acceptedPrivacy: true } : {}),
       consentSource,
       // Only present when given, so the parsed shape stays what it was for everyone else.
       ...(referredByCode ? { referredByCode } : {})
@@ -259,6 +260,6 @@ export const PRIVACY_REQUIRED_MESSAGE =
   "Debes aceptar el tratamiento de tus datos personales para unirte.";
 
 export const privacyAcceptanceMissing = (
-  input: { acceptedPrivacy: boolean },
+  input: { acceptedPrivacy?: boolean },
   source: "qr_signup" | "staff_entry"
 ): boolean => source === "qr_signup" && !input.acceptedPrivacy;
