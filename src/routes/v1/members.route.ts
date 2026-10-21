@@ -40,7 +40,11 @@ import {
   MEMBER_NAME_MIN,
   cleanMemberName
 } from "../../modules/members/member-name";
-import { membershipSignupSchema } from "../../modules/members/membership.schema";
+import {
+  membershipSignupSchema,
+  PRIVACY_REQUIRED_MESSAGE,
+  privacyAcceptanceMissing
+} from "../../modules/members/membership.schema";
 import { signUpMember } from "../../modules/members/membership.service";
 import { normalizeSpanishMobile } from "../../modules/members/phone-es";
 import { buildWalletRegistry, buildWalletSyncQueue } from "../../wallet/wallet.composition";
@@ -670,6 +674,11 @@ membersRouter.post(
       !isStaffRequest(req, config.STAFF_API_KEY)
     ) {
       throw new MembershipValidationError("consentSource: no autorizado");
+    }
+
+    // The person has to accept the processing of their data themselves, before a pass exists.
+    if (privacyAcceptanceMissing(parsed.data, parsed.data.consentSource ?? "qr_signup")) {
+      throw new MembershipValidationError(PRIVACY_REQUIRED_MESSAGE);
     }
 
     // The default lives here rather than in the schema or the service: it is an API

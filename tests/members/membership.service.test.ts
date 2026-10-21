@@ -110,6 +110,7 @@ describe("signUpMember", () => {
         consentSource: "qr_signup",
         // Snapshot of the notice the member was actually shown, taken from the clinic.
         privacyPolicyVersion: "v3",
+        privacyAcceptedAt: null,
         lastSignupAt: NOW
       }
     });

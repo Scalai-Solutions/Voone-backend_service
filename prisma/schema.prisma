@@ -248,6 +248,10 @@ model Member {
   /// member read, and a reference to an editable row destroys it.
   privacyPolicyVersion String?
 
+  /// When the person ticked acceptance of the processing of their data on the QR form. Null for
+  /// members entered by staff, who are not asked.
+  privacyAcceptedAt DateTime?
+
   /// How the member was collected — "qr_signup", "staff_entry". Required for the same
   /// reason as consentMarketing: provenance is not a safe thing to assume.
   consentSource String
