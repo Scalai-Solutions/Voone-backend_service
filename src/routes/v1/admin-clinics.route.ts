@@ -679,6 +679,41 @@ adminClinicsRouter.patch(
   })
 );
 
+/**
+ * Takes a draft centre live. The one moment onboarding ends: it needs the card and a live
+ * programme, and from here the public sign-up page answers and the centre can operate.
+ * Idempotent: activating an active centre is a no-op.
+ */
+adminClinicsRouter.post(
+  "/admin/clinics/:clinicId/activate",
+  createRequireStaffKey(config.STAFF_API_KEY),
+  asyncHandler(async (req, res) => {
+    const clinic = await getAdminClinicSafe(req.params.clinicId);
+
+    if (!clinic) {
+      res.status(404).json({ message: "Clinic not found" });
+      return;
+    }
+
+    const missing = [
+      !clinic.template ? "la tarjeta" : null,
+      !hasLiveProgram(clinic) ? "un programa activo" : null
+    ].filter((item): item is string => item !== null);
+
+    if (missing.length > 0) {
+      throw new MembershipValidationError(`Falta ${missing.join(" y ")} para activar el centro.`);
+    }
+
+    if (!clinic.isActive) {
+      await prisma.clinic.update({ where: { id: clinic.id }, data: { isActive: true } });
+    }
+
+    const updated = await getAdminClinicSafe(clinic.id);
+
+    res.json(updated ? toAdminClinicSummary(updated) : { status: "ok" });
+  })
+);
+
 adminClinicsRouter.delete(
   "/admin/clinics/:clinicId",
   createRequireStaffKey(config.STAFF_API_KEY),
