@@ -574,6 +574,34 @@ describe("a centre's own staff", () => {
     expect(r.body.issued.length).toBeGreaterThan(0);
   });
 
+  it("states the visit in points, ten per euro (founders' E2E 48-49)", async () => {
+    await goLive();
+    const m = await newMember();
+    const r = await call("POST", `/clinics/${SLUG}/members/${m.id}/visits`, {
+      kind: "PAYMENT",
+      lines: [{ amountEuro: 60 }],
+      idempotencyKey: "route-visit-points"
+    });
+
+    expect(r.body).toMatchObject({ points: 600, pointsTotal: 600 });
+  });
+
+  it("gives the visit form the centre's catalogue with no cost in it", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const r = await call("GET", `/clinics/${SLUG}/catalog`);
+
+    expect(r.status).toBe(200);
+    expect(r.body.items).toHaveLength(fixtureItems.length);
+    expect(r.body.items.find((i: { externalId: string }) => i.externalId === "F2")).toEqual({
+      externalId: "F2",
+      name: expect.any(String),
+      priceEuro: 75,
+      category: "APF",
+      isProduct: false
+    });
+    expect(JSON.stringify(r.body)).not.toMatch(/cost/i);
+  });
+
   it("answers a retry with the same result and not an error", async () => {
     await goLive();
     const m = await newMember();

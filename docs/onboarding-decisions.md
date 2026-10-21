@@ -502,3 +502,64 @@ Happy Hour discounts and retained revenue from medical treatments are not modell
 browser that auto-translates the page makes React's later edits invisible: the preview showed an
 earlier answer's figures. The recommendation in E12 (tell browsers not to translate these
 screens) still stands.
+
+## Part G: founders' end-to-end test (19 October 2026)
+
+Groups B, C, D and G of `Voone_E2E_Test_Feedback.pdf`. Where this contradicts the guide, the
+feedback wins, as agreed.
+
+### G1. Points are ten per euro, converted at the edge (B 48–50)
+
+The engine keeps progress in euros: every threshold, tier and reward is a euro figure, and the
+ledger stores it. Storing ×10 would mean rescaling every threshold, the reward-crossing logic and
+every existing balance. Instead `POINTS_PER_EURO = 10` (`runtime/points-unit.ts`) converts when a
+programme centre's figure leaves the system: the members list, the scan lookup, the pass, and the
+visit outcome (`points`, `pointsTotal`). Centres without a programme are unchanged.
+
+- **Overrides the guide.** The guide says the pass states the distance to the next reward in euros,
+  "never points". The pass now says "te faltan N puntos" (B 50).
+- **Money spent** (B 48) is the sum of the visits' amounts. That is the amount that earns progress,
+  so a retail-only line that earns nothing is not counted as spent, and a voucher session counts
+  its price divided by its sessions. **Question for Sergio:** should "spent" include retail that
+  earns no points? It needs a new column to record the full amount paid.
+- **0 % progress** (B 49): the pass is rebuilt on every credit, so the bar follows the visit. If a
+  client still sees 0 % after a visit, check that the pass actually re-synced; refreshing a pass
+  when a new programme version goes live is still not built.
+
+### G2. Consent (C 1, 44)
+
+A person who signs up through the QR form has to tick acceptance of the processing of their data;
+the backend refuses a sign-up without it and stores when (`Member.privacyAcceptedAt`). Staff-entered
+members are not asked. The centre's own consent at onboarding already blocked "Continue"; it now
+links to the full document.
+
+**The legal text is not engineering's to write.** `/privacidad` and `/legal/tratamiento-datos` are
+placeholders, marked "texto provisional" on the page. **Request for Sergio:** the real privacy
+notice and the centre's data-processing agreement, ideally as final text per language.
+
+### G3. Tier benefits (G 27)
+
+A centre can add and remove its own benefits per tier on a draft. They are text only. The
+benefits the engine derives (multiplier, cosmetics discount, birthday gift, events, tests) stay
+fixed, because each one has a runtime effect and an editable line could promise something the
+system does not do. Up to 6 per tier, 80 characters each.
+
+### G4. Questions and referral copy (G 24, 25, 29, 30)
+
+- **Referral copy (G 29).** The feedback says the referred person gets ×1.5 points on her first
+  treatment. The engine does something different: she starts with a **welcome amount already
+  earned** (half the first milestone), and the referrer's reward is unlocked by her first paid
+  treatment. The copy now states what the engine does. **Question for Sergio:** is ×1.5 the intended
+  rule? If so it is a rule change, and the reference fixtures pin the current behaviour.
+- **300 clients (G 30).** The calculator's default came from the sixth answer (150–400 gave 138).
+  The sixth question now starts on "400 to 800", which gives 300.
+
+### G5. Not done, and why
+
+- **G 28, editable milestone rewards.** The swap exists and is wired for drafts, offering the two
+  alternatives that keep the ladder's cost guarantees. "Choose any item from the catalogue" would
+  let a centre break those guarantees. **Question for Sergio:** keep the two alternatives, or allow
+  any item with a warning when the cost target is exceeded?
+- **G 26, blank screen when scrolling.** Needs a reproduction in the browser; not diagnosed.
+- **D 15, 16, 17, 19, 38, restructuring onboarding so the centre is created only at the end.** It
+  reverses the round-2 removal of the programme step and needs an approach decision (see below).

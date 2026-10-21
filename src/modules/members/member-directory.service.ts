@@ -1,6 +1,12 @@
-import { WalletProviderType, WalletSyncStatus, type PrismaClient } from "@prisma/client";
+import {
+  OnboardingProgramStatus,
+  WalletProviderType,
+  WalletSyncStatus,
+  type PrismaClient
+} from "@prisma/client";
 
 import { MemberNotFoundError } from "../../common/errors/membership.errors";
+import { toPoints } from "../onboarding/runtime/points-unit";
 import { tierRewardsSchema } from "../templates/templates.schema";
 import { normaliseScale } from "../points/tier-engine";
 
@@ -275,6 +281,21 @@ export class MemberDirectoryService {
         .map((treatment) => [treatment.name.trim().toLowerCase(), treatment.priceEuro ?? 0])
     );
     const stats = new Map<string, SpendingStats>();
+    const programme = await this.programmeSpending(
+      clinicId,
+      summaries.map((member) => member.id)
+    );
+
+    // A centre with a live programme: points are ten per euro of progress, and the money spent is
+    // what its recorded visits paid. The treatment-name matching below is the older scheme.
+    if (programme) {
+      return summaries.map((summary) => ({
+        ...summary,
+        points: toPoints(summary.points),
+        history: summary.history.map((row) => ({ ...row, points: toPoints(row.points) })),
+        ...(programme.get(summary.id) ?? { moneySpent: 0, lastVisitedAt: null })
+      }));
+    }
 
     for (const credit of credits) {
       const current = stats.get(credit.memberId) ?? { moneySpent: 0, lastVisitedAt: null };
@@ -291,5 +312,38 @@ export class MemberDirectoryService {
       ...summary,
       ...(stats.get(summary.id) ?? { moneySpent: 0, lastVisitedAt: null })
     }));
+  }
+
+  /**
+   * Euros paid and the last visit, per member, for a centre running a programme; null when it
+   * has none. Taken from recorded visits, which hold the amount, rather than from ledger reasons.
+   */
+  private async programmeSpending(
+    clinicId: string,
+    memberIds: string[]
+  ): Promise<Map<string, SpendingStats> | null> {
+    const live = await this.prisma.onboardingProgram.findFirst({
+      where: { clinicId, status: OnboardingProgramStatus.ACTIVO },
+      select: { id: true }
+    });
+
+    if (!live) return null;
+
+    const rows = await this.prisma.paidVisit.groupBy({
+      by: ["memberId"],
+      where: { clinicId, memberId: { in: memberIds } },
+      _sum: { amountCents: true },
+      _max: { occurredAt: true }
+    });
+
+    return new Map(
+      rows.map((row) => [
+        row.memberId,
+        {
+          moneySpent: (row._sum.amountCents ?? 0) / 100,
+          lastVisitedAt: row._max.occurredAt?.toISOString() ?? null
+        }
+      ])
+    );
   }
 }

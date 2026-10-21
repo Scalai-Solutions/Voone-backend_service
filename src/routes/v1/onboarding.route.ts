@@ -404,6 +404,28 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
 
   /* ----------------------------------------------------------------- a centre's own staff */
 
+  /**
+   * The centre's own catalogue for the visit form: name, price and category only. The review
+   * view carries a per-item cost override, which a centre's staff must never see.
+   */
+  router.get(
+    "/clinics/:slug/catalog",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const clinic = await deps.findClinic(req.params.slug);
+
+      res.json({
+        items: (await catalogView(clinic.id)).map((item) => ({
+          externalId: item.externalId,
+          name: item.name,
+          priceEuro: item.priceEuro,
+          category: item.category,
+          isProduct: item.isProduct
+        }))
+      });
+    })
+  );
+
   /** The live programme as the centre sees it. No costs, by construction. */
   router.get(
     "/clinics/:slug/program",
