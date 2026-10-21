@@ -185,6 +185,14 @@ describe("provisionClinic", () => {
     expect(templateCreate).toHaveBeenCalledOnce();
   });
 
+  it("creates the centre as an inactive draft until it is activated (founders' E2E 15-17)", async () => {
+    const { handle, clinicCreate } = db();
+
+    await provisionClinic(handle as never, provisionClinicSchema.parse(VALID));
+
+    expect(clinicCreate.mock.calls[0][0].data.isActive).toBe(false);
+  });
+
   it("takes the colour from the preset, not the request", async () => {
     const { handle, templateCreate } = db();
 
