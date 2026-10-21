@@ -69,9 +69,20 @@ const pointsRateFor = (milestoneRewards: unknown): number => {
   return priceAmount > 0 && pointsAwarded >= 0 ? pointsAwarded / priceAmount : 10;
 };
 
+/**
+ * What a new password has to be (founders' E2E item 33). The same three rules are shown on the
+ * password pages and checked live there, so the page never accepts what this refuses.
+ */
+export const newPasswordSchema = z
+  .string()
+  .min(8, "La contraseña debe tener al menos 8 caracteres")
+  .max(128)
+  .regex(/[A-Z]/, "La contraseña debe incluir una letra mayúscula")
+  .regex(/[0-9]/, "La contraseña debe incluir un número");
+
 const passwordSetupSchema = z
   .object({
-    password: z.string().min(8, "Password must be at least 8 characters").max(128),
+    password: newPasswordSchema,
     confirmPassword: z.string().min(1, "Confirm your password")
   })
   .refine((value) => value.password === value.confirmPassword, {
@@ -82,7 +93,7 @@ const passwordSetupSchema = z
 const passwordChangeSchema = z
   .object({
     currentPassword: z.string().min(1, "Current password is required"),
-    newPassword: z.string().min(8, "Password must be at least 8 characters").max(128),
+    newPassword: newPasswordSchema,
     confirmPassword: z.string().min(1, "Confirm your password")
   })
   .refine((value) => value.newPassword === value.confirmPassword, {
