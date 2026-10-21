@@ -7,6 +7,7 @@ import {
   type PrismaClient
 } from "@prisma/client";
 
+import { toPoints } from "./points-unit";
 import type { PointsService } from "../../points/points.service";
 import { toCents } from "../catalog.repository";
 import type { CategoryCode } from "../engine.types";
@@ -79,6 +80,10 @@ export interface VisitOutcome {
   duplicate: boolean;
   /** Progress euros awarded, after the multiplier and any doubling. */
   progress: number;
+  /** The same progress as the client sees it: ten points per euro. */
+  points: number;
+  /** Total progress after this visit, in points. */
+  pointsTotal: number;
   doubled: boolean;
   lifetimeBefore: number;
   lifetimeAfter: number;
@@ -187,6 +192,8 @@ export class VisitService {
       visitId: visit.id,
       duplicate: !opened.created,
       progress,
+      points: toPoints(progress),
+      pointsTotal: toPoints(after),
       doubled: Boolean(opened.doubled),
       lifetimeBefore: before,
       lifetimeAfter: after,

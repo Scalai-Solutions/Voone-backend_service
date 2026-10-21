@@ -160,12 +160,11 @@ describe("PrismaLoyaltyCardAssembler for a clinic on an onboarding programme", (
     clinic: { ...member.clinic, onboardingPrograms: [{ output: programOutput }] }
   });
 
-  it("tells the member how many EUROS to their next reward, never points", async () => {
+  it("tells the member how many POINTS to their next reward (ten per euro)", async () => {
     const card = await assemblerFor(onProgramme(15)).assemble(member.id);
 
-    // The first reward is at 30, so 15 of progress leaves 15 euros.
-    expect(card.reward?.description).toMatch(/te faltan 15 €$/);
-    expect(card.reward?.description).not.toMatch(/punto/i);
+    // The first reward is at 30 euros, so 15 of progress leaves 15 euros: 150 points.
+    expect(card.reward?.description).toMatch(/te faltan 150 puntos$/);
   });
 
   it("names the reward itself", async () => {
@@ -220,7 +219,7 @@ describe("PrismaLoyaltyCardAssembler for a clinic on an onboarding programme", (
 
     expect(card.reward!.description.length).toBeLessThanOrEqual(120);
     // The part the member acts on survives the shortening.
-    expect(card.reward!.description).toMatch(/te faltan 30 €$/);
+    expect(card.reward!.description).toMatch(/te faltan 300 puntos$/);
     expect(card.reward!.description).toContain("…");
   });
 

@@ -8,6 +8,7 @@ import { deriveRedemptionCode } from "./engine/redemption-code";
 import { milestoneProgress } from "../modules/points/milestone-engine";
 import type { Program } from "../modules/onboarding/engine.types";
 import { programView } from "../modules/onboarding/runtime/program-view";
+import { toPoints } from "../modules/onboarding/runtime/points-unit";
 import { nextRewardFor } from "../modules/onboarding/runtime/rules";
 import { tierRewardsSchema } from "../modules/templates/templates.schema";
 
@@ -66,9 +67,9 @@ const rewardFor = (
 /**
  * "PRÓXIMA RECOMPENSA" for a member of a clinic that runs an onboarding programme.
  *
- * The guide is explicit about how this reads: the client is told how many EUROS stand between
- * them and their next reward, "never points". So the line names the reward and the distance in
- * euros, and the bar shows how far through that step they are.
+ * The founders' end-to-end feedback (item 50) overrides the guide here: the distance is stated in
+ * POINTS (one euro is ten), the same unit as the balance shown beside it. The bar shows how far
+ * through that step the client is.
  *
  * The pass caps the description at 120 characters and a reward can be a pack of two long item
  * names, so the name is shortened and the distance — the part the member acts on — never is.
@@ -81,7 +82,7 @@ const programRewardFor = (
 
   if (!next) return undefined;
 
-  const tail = ` · te faltan ${next.remaining} €`;
+  const tail = ` · te faltan ${toPoints(next.remaining).toLocaleString("es-ES")} puntos`;
   const room = 120 - tail.length;
   const title =
     next.title.length > room ? `${next.title.slice(0, room - 1).trimEnd()}…` : next.title;
@@ -152,7 +153,8 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
         code: member.code ?? undefined,
         memberSince: member.memberSince ? String(member.memberSince) : undefined
       },
-      points: member.pointsBalance,
+      // A programme centre shows points (ten per euro); the ledger holds euro progress.
+      points: live ? toPoints(member.pointsBalance) : member.pointsBalance,
       reward,
       template: {
         programName: template.programName,

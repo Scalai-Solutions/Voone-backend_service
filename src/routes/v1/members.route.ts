@@ -1,4 +1,10 @@
-import { PointsTransactionKind, WalletProviderType, WalletSyncStatus } from "@prisma/client";
+import {
+  OnboardingProgramStatus,
+  PointsTransactionKind,
+  WalletProviderType,
+  WalletSyncStatus
+} from "@prisma/client";
+import { toPoints } from "../../modules/onboarding/runtime/points-unit";
 import { timingSafeEqual } from "node:crypto";
 
 import { Router, type RequestHandler } from "express";
@@ -96,7 +102,11 @@ const toMemberSummary = (member: Awaited<ReturnType<typeof findMemberForSummary>
   email: member.email,
   templateId: member.clinic.template?.id ?? "",
   templateName: member.clinic.template?.programName ?? member.clinic.name,
-  points: member.pointsBalance,
+  // A programme centre shows points (ten per euro of progress); the ledger holds the euros.
+  points:
+    member.clinic.onboardingPrograms.length > 0
+      ? toPoints(member.pointsBalance)
+      : member.pointsBalance,
   moneySpent: 0,
   lastVisitedAt: null,
   tier: member.tier ?? "Nuevo",
@@ -231,7 +241,16 @@ const findMemberForSummary = (memberId: string) =>
   prisma.member.findUniqueOrThrow({
     where: { id: memberId },
     include: {
-      clinic: { include: { template: true } },
+      clinic: {
+        include: {
+          template: true,
+          onboardingPrograms: {
+            where: { status: OnboardingProgramStatus.ACTIVO },
+            take: 1,
+            select: { id: true }
+          }
+        }
+      },
       walletObjects: true
     }
   });
