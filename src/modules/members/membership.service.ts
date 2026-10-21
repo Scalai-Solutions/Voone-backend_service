@@ -115,6 +115,7 @@ const insertMember = async (
         // Snapshot, not a reference: the evidence is which notice the member was shown,
         // and a foreign key to an editable row would destroy it.
         privacyPolicyVersion: clinic.privacyPolicyVersion,
+        privacyAcceptedAt: input.acceptedPrivacy ? now : null,
         lastSignupAt: now
       }
     })

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   clinicSlugSchema,
+  privacyAcceptanceMissing,
   membershipSignupSchema,
   newClinicSlugSchema
 } from "../../src/modules/members/membership.schema";
@@ -369,5 +370,31 @@ describe("sex", () => {
   it("rejects anything outside the offered set", () => {
     expect(withSex("Mujer").success).toBe(false);
     expect(withSex("f").success).toBe(false);
+  });
+});
+
+describe("accepting the processing of personal data (founders' E2E item 44)", () => {
+  it("is missing for a QR sign-up that did not tick it, and present when it did", () => {
+    const without = membershipSignupSchema.parse(VALID);
+    const accepted = membershipSignupSchema.parse({ ...VALID, acceptedPrivacy: true });
+
+    expect(privacyAcceptanceMissing(without, "qr_signup")).toBe(true);
+    expect(privacyAcceptanceMissing(accepted, "qr_signup")).toBe(false);
+  });
+
+  it("never reads a string or a falsy value as acceptance", () => {
+    expect(() => membershipSignupSchema.parse({ ...VALID, acceptedPrivacy: "true" })).toThrow();
+    expect(
+      privacyAcceptanceMissing(
+        membershipSignupSchema.parse({ ...VALID, acceptedPrivacy: false }),
+        "qr_signup"
+      )
+    ).toBe(true);
+  });
+
+  it("does not ask staff-entered members", () => {
+    expect(privacyAcceptanceMissing(membershipSignupSchema.parse(VALID), "staff_entry")).toBe(
+      false
+    );
   });
 });

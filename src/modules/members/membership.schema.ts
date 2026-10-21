@@ -143,6 +143,13 @@ export const membershipSignupSchema = z
     consentMarketing: z.boolean("Indica si aceptas recibir comunicaciones comerciales"),
 
     /**
+     * Acceptance of the processing of personal data, ticked by the person on the QR form. Optional
+     * in the schema because staff-entered members are not asked; the public sign-up route refuses
+     * a submission without it (founders' E2E item 44).
+     */
+    acceptedPrivacy: z.boolean().optional(),
+
+    /**
      * Full date of birth, captured going forward so age can be derived accurately.
      * Optional: refusing sign-up over a demographic costs a member to gain a data point.
      * birthYear remains accepted only for older clients and is converted to a fallback.
@@ -221,6 +228,7 @@ export const membershipSignupSchema = z
       birthYear,
       sex,
       consentMarketing,
+      acceptedPrivacy,
       consentSource,
       referredByCode
     }) => ({
@@ -233,6 +241,8 @@ export const membershipSignupSchema = z
       birthYear: birthDate ? birthDate.getUTCFullYear() : birthYear,
       sex,
       consentMarketing,
+      // Only present when ticked, so the parsed shape stays what it was for staff-entered members.
+      ...(acceptedPrivacy === true ? { acceptedPrivacy: true } : {}),
       consentSource,
       // Only present when given, so the parsed shape stays what it was for everyone else.
       ...(referredByCode ? { referredByCode } : {})
@@ -240,3 +250,16 @@ export const membershipSignupSchema = z
   );
 
 export type MembershipSignupInput = z.infer<typeof membershipSignupSchema>;
+
+/**
+ * A person signing themselves up through the QR form has to accept the processing of their data
+ * before a pass exists (founders' E2E item 44). Staff-entered members are not asked: staff cannot
+ * accept on someone's behalf, and that provenance is recorded separately.
+ */
+export const PRIVACY_REQUIRED_MESSAGE =
+  "Debes aceptar el tratamiento de tus datos personales para unirte.";
+
+export const privacyAcceptanceMissing = (
+  input: { acceptedPrivacy?: boolean },
+  source: "qr_signup" | "staff_entry"
+): boolean => source === "qr_signup" && !input.acceptedPrivacy;
