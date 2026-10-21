@@ -563,3 +563,18 @@ system does not do. Up to 6 per tier, 80 characters each.
 - **G 26, blank screen when scrolling.** Needs a reproduction in the browser; not diagnosed.
 - **D 15, 16, 17, 19, 38, restructuring onboarding so the centre is created only at the end.** It
   reverses the round-2 removal of the programme step and needs an approach decision (see below).
+
+### G6. Sergio's answers (round on the founders' E2E questions)
+
+- **Milestone rewards (G 28): any catalogue item.** The centre can now give a milestone any item
+  that may be a reward, not only the engine's two alternatives. The ladder must still climb, so a
+  choice worth less than the previous reward is refused with the reason; a dearer one is allowed
+  and flagged. This supersedes the "Question for Sergio" in G5.
+- **Referral (G 29): keep the engine's rule.** The referred person starts with a welcome amount
+  already earned; no ×1.5. The copy already says this.
+- **Legal text (C): Sergio does not know where to get it.** Needs a Spanish data-protection lawyer
+  or the centres' gestoría; the pages stay marked provisional.
+- **Money spent (B 48): products count.** They already do: retail earns progress like a
+  treatment, so 60 € treatment + 40 € product = 100 € = 1000 points (a test pins it). Only
+  pharmacological medicine and medical acts earn nothing, a legal constraint in Spain, so "money
+  spent" excludes just those. G1's open question is closed and no new column is needed.

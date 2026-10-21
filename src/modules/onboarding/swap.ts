@@ -36,21 +36,62 @@ export const swapReward = (
   milestone: number,
   alternative: number
 ): SwapResult => {
-  const next = structuredClone(program);
-  const at = next.chosen.findIndex((c) => c.m.n === milestone);
+  const at = program.chosen.findIndex((c) => c.m.n === milestone);
 
   if (at < 0) return fail("Ese hito no tiene un premio que se pueda cambiar.");
 
-  const entry = next.chosen[at];
-  const replacement = entry.alts[alternative];
+  const replacement = program.chosen[at].alts[alternative];
 
   if (!replacement) return fail("Esa alternativa no existe.");
 
+  return replaceReward(program, answers, at, replacement, alternative);
+};
+
+/**
+ * Gives a milestone any item from the centre's catalogue that may be given as a reward (founders'
+ * E2E item 28). The same checks as an engine alternative apply, so a ladder that stops climbing is
+ * still refused; what it adds is that the choice is no longer limited to the two the engine
+ * proposed, and a dearer one is flagged, not refused.
+ */
+export const swapRewardToItem = (
+  program: Program,
+  answers: Answers,
+  milestone: number,
+  itemId: string
+): SwapResult => {
+  const at = program.chosen.findIndex((c) => c.m.n === milestone);
+
+  if (at < 0) return fail("Ese hito no tiene un premio que se pueda cambiar.");
+
+  const item = candidates(program.catalog, answers).find((candidate) => candidate.id === itemId);
+
+  if (!item) {
+    return fail("Ese artículo no se puede dar como premio. Elige otro del catálogo.");
+  }
+
+  return replaceReward(
+    program,
+    answers,
+    at,
+    { items: [item], value: item.value, cost: item.cost },
+    -1
+  );
+};
+
+const replaceReward = (
+  program: Program,
+  answers: Answers,
+  at: number,
+  replacement: RewardOption,
+  alternativeIndex: number
+): SwapResult => {
+  const next = structuredClone(program);
+  const entry = next.chosen[at];
   const previous = entry.o;
 
   entry.o = replacement;
   // The reward swapped out becomes an alternative, so the centre can undo the change.
-  entry.alts = [previous, ...entry.alts.filter((_, k) => k !== alternative)].slice(0, 2);
+  entry.alts = [previous, ...entry.alts.filter((_, k) => k !== alternativeIndex)].slice(0, 2);
 
   // An alternative elsewhere that uses an item this reward now holds would, if taken, put
   // the same item in the ladder twice. They were valid only while nobody held the item.

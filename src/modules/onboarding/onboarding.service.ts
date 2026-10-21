@@ -20,7 +20,7 @@ import type { Answers, EngineError, Program, TierCode } from "./engine.types";
 import { isEngineError } from "./engine.types";
 import { placeMembersOnProgram } from "./runtime/placement";
 import { recalibrationAdvice, type RecalibrationAdvice } from "./runtime/rules";
-import { swapReward } from "./swap";
+import { swapReward, swapRewardToItem } from "./swap";
 
 /**
  * Generating, storing and publishing a centre's loyalty programme.
@@ -349,7 +349,7 @@ export class OnboardingService {
     clinicId: string,
     programId: string,
     milestone: number,
-    alternative: number
+    choice: { alternative: number } | { itemId: string }
   ): Promise<OnboardingProgram> {
     const row = await this.getProgram(clinicId, programId);
 
@@ -360,12 +360,12 @@ export class OnboardingService {
       );
     }
 
-    const result = swapReward(
-      row.output as unknown as Program,
-      row.answers as unknown as Answers,
-      milestone,
-      alternative
-    );
+    const program = row.output as unknown as Program;
+    const answers = row.answers as unknown as Answers;
+    const result =
+      "itemId" in choice
+        ? swapRewardToItem(program, answers, milestone, choice.itemId)
+        : swapReward(program, answers, milestone, choice.alternative);
 
     if (!result.ok) throw new OnboardingError(result.reason, 409);
 

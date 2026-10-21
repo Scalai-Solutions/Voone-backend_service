@@ -162,8 +162,10 @@ export const tierBenefitsSchema = z.object({
     .max(6, "Máximo 6 beneficios por nivel")
 });
 
-export const swapSchema = z.object({
-  alternative: z.number().int().min(0).max(1)
-});
+/** Either one of the engine's two alternatives, or any catalogue item by its id. */
+export const swapSchema = z.union([
+  z.object({ alternative: z.number().int().min(0).max(1) }),
+  z.object({ itemId: z.string().trim().min(1).max(64) })
+]);
 
 export type VisitBody = z.infer<typeof visitSchema>;
