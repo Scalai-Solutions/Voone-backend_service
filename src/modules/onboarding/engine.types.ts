@@ -231,6 +231,12 @@ export interface Program {
   chosen: ChosenReward[];
   rec: { every: number; o: RewardOption };
   gifts: Record<TierCode, TierGift>;
+  /**
+   * Benefits the centre wrote itself, per tier (founders' E2E item 27). Shown after the ones the
+   * engine derives from its rules; they are text only and change nothing at runtime, which is
+   * why the rule-backed ones (multiplier, discount, events) are not editable.
+   */
+  customBenefits?: Partial<Record<TierCode, string[]>>;
   perks: { kinds: string[]; pool: Candidate[]; dias: ClassifiedItem[] };
   refLad: ReferralStep[];
   /** Progress granted to a referred client when they join. */
