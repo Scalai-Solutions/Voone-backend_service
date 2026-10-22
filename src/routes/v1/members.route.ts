@@ -485,6 +485,30 @@ membersRouter.post(
   })
 );
 
+/**
+ * The add-to-wallet link for a member who already exists, for reception to show as a QR.
+ *
+ * A member who deleted their card (or changed phone) cannot be sent back through sign-up,
+ * which answers "already a member". Same-clinic only, like every staff route, and the
+ * member has to be standing there to scan it.
+ */
+membersRouter.post(
+  "/clinics/:slug/members/:memberId/pass",
+  requireStaff,
+  asyncHandler(async (req, res) => {
+    const clinic = await findClinicBySlug(prisma, req.params.slug);
+    const member = await findMemberForSummary(req.params.memberId);
+
+    if (member.clinicId !== clinic.id || member.erasedAt) {
+      throw new MemberNotFoundError(req.params.memberId);
+    }
+
+    const wallet = await issueWalletPasses(member.id);
+
+    res.json({ addToWalletUrl: wallet.addToWalletUrl, passes: wallet.passes });
+  })
+);
+
 membersRouter.post(
   "/clinics/:slug/members/:memberId/pass/email",
   requireStaff,
