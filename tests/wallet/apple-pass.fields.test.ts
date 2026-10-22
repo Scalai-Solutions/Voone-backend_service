@@ -98,7 +98,8 @@ describe("buildStoreCardFields", () => {
   it("omits credit and reward when no column backs them", () => {
     const fields = buildStoreCardFields(aureaGoldPass);
 
-    expect(fields.auxiliaryFields).toHaveLength(0);
+    // Only the member number is on the front; no reward or progress is invented.
+    expect(fields.auxiliaryFields.map((f) => f.key)).toEqual(["memberNo"]);
     expect(allKeys(fields)).not.toContain("credit");
     expect(allKeys(fields)).not.toContain("reward");
   });
@@ -111,6 +112,34 @@ describe("buildStoreCardFields", () => {
     // Apple renders currency from a unit amount and multiplies percents by 100.
     expect(credit).toMatchObject({ value: 240, currencyCode: "EUR" });
     expect(progress).toMatchObject({ value: 0.83, numberStyle: "PKNumberStylePercent" });
+  });
+
+  it("shows the member number on the front, never the long serial", () => {
+    expect(buildStoreCardFields(aureaGoldPass).auxiliaryFields[0]).toMatchObject({
+      key: "memberNo",
+      value: "K7M2Q"
+    });
+    expect(buildStoreCardFields(uncodedMemberPass).auxiliaryFields.map((f) => f.key)).not.toContain(
+      "memberNo"
+    );
+  });
+
+  it("adds tappable booking and website links only when the template has them", () => {
+    const withLinks = {
+      ...aureaGoldPass,
+      template: {
+        ...aureaGoldPass.template,
+        appointmentUrl: "https://clinic.example/reservar",
+        websiteUrl: "https://clinic.example"
+      }
+    };
+    const back = Object.fromEntries(
+      buildStoreCardFields(withLinks).backFields.map((f) => [f.key, f])
+    );
+
+    expect(back.book.attributedValue).toContain("href='https://clinic.example/reservar'");
+    expect(back.website.attributedValue).toContain("href='https://clinic.example'");
+    expect(allKeys(buildStoreCardFields(aureaGoldPass))).not.toContain("book");
   });
 
   it("renders a brand new member as a short card rather than a wrong one", () => {

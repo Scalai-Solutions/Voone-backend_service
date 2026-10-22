@@ -10,6 +10,13 @@ export interface StoreCardFields {
   backFields: PassField[];
 }
 
+const linkField = (key: string, label: string, text: string, url: string): PassField => ({
+  key,
+  label,
+  value: url,
+  attributedValue: `<a href='${encodeURI(url)}'>${text}</a>`
+});
+
 /**
  * Maps loyalty data onto a storeCard's five field slots.
  *
@@ -71,6 +78,16 @@ export const buildStoreCardFields = (data: LoyaltyCard): StoreCardFields => {
     );
   }
 
+  // On the front as well as the back: it is what reception asks for, and a member should not
+  // have to flip the card to find it. Only a real code is shown; the long serial never is.
+  if (data.member.code) {
+    auxiliaryFields.unshift({
+      key: "memberNo",
+      label: PASS_LABELS.memberNo,
+      value: data.member.code
+    });
+  }
+
   if (data.template.benefitsText) {
     backFields.push({
       key: "benefits",
@@ -89,6 +106,20 @@ export const buildStoreCardFields = (data: LoyaltyCard): StoreCardFields => {
       label: PASS_LABELS.memberSince,
       value: data.member.memberSince
     });
+  }
+
+  // Tappable links, the same ones the Google card carries. Apple renders <a href> in the
+  // attributed value of a back field as a link.
+  if (data.template.appointmentUrl) {
+    backFields.push(
+      linkField("book", PASS_LABELS.book, "Reservar cita", data.template.appointmentUrl)
+    );
+  }
+
+  if (data.template.websiteUrl) {
+    backFields.push(
+      linkField("website", PASS_LABELS.website, "Visitar la web", data.template.websiteUrl)
+    );
   }
 
   // Readable fallbacks for reception when the barcode will not scan.
