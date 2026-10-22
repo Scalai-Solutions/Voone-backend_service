@@ -220,6 +220,15 @@ v1Router.use(
 
       return new Set(registry.enabled().map((provider) => provider.provider));
     }),
+    revokeMemberCard: async (ref) => {
+      const provider = buildWalletRegistry(prisma).get(ref.provider);
+
+      if (!provider) return false;
+
+      await provider.revokeCard(ref);
+
+      return true;
+    },
     clinicIdForSlug: async (slug) => {
       const clinic = await prisma.clinic.findFirst({
         where: { slug, isActive: true },

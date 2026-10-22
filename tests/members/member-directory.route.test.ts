@@ -38,6 +38,9 @@ const buildApp = () => {
       if (memberId !== "m-1") throw new MemberNotFoundError(memberId);
 
       return summary;
+    },
+    delete: async (options: unknown) => {
+      calls.push({ delete: options });
     }
   } as unknown as MemberDirectoryService;
 
@@ -47,6 +50,7 @@ const buildApp = () => {
     createMemberDirectoryRouter({
       directory,
       clinicIdForSlug: async (slug) => (slug === "aurea" ? CLINIC : null),
+      revokeMemberCard: async () => true,
       treatmentsFor: async (clinicId) => {
         calls.push({ treatmentsFor: clinicId });
 
@@ -59,13 +63,13 @@ const buildApp = () => {
   return { app, calls };
 };
 
-const get = async (app: Express, path: string) => {
+const request = async (app: Express, path: string, init?: RequestInit) => {
   const server = app.listen(0);
 
   try {
     const address = server.address();
     const port = typeof address === "object" && address ? address.port : 0;
-    const response = await fetch(`http://127.0.0.1:${port}${path}`);
+    const response = await fetch(`http://127.0.0.1:${port}${path}`, init);
     const text = await response.text();
 
     return { status: response.status, body: text ? JSON.parse(text) : null };
@@ -73,6 +77,9 @@ const get = async (app: Express, path: string) => {
     server.close();
   }
 };
+
+const get = (app: Express, path: string) => request(app, path);
+const del = (app: Express, path: string) => request(app, path, { method: "DELETE" });
 
 describe("GET /members", () => {
   it("requires clinicId, because the staff key cannot identify a clinic", async () => {
@@ -182,6 +189,27 @@ describe("GET /clinics/:slug/members", () => {
     await get(app, "/api/v1/clinics/aurea/members?q=nav&limit=10&offset=5");
 
     expect(calls[0]).toMatchObject({ query: "nav", limit: 10, offset: 5 });
+  });
+});
+
+describe("DELETE /clinics/:slug/members/:memberId", () => {
+  it("deletes a member scoped to the clinic slug", async () => {
+    const { app, calls } = buildApp();
+
+    const res = await del(app, "/api/v1/clinics/aurea/members/m-1");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ status: "deleted" });
+    expect(calls[0]).toMatchObject({
+      delete: { clinicId: CLINIC, memberId: "m-1" }
+    });
+  });
+
+  it("404s an unknown slug before deleting", async () => {
+    const { app, calls } = buildApp();
+
+    expect((await del(app, "/api/v1/clinics/nope/members/m-1")).status).toBe(404);
+    expect(calls).toHaveLength(0);
   });
 });
 
