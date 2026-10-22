@@ -7,6 +7,7 @@ import {
 
 import { MemberNotFoundError } from "../../common/errors/membership.errors";
 import { toPoints } from "../onboarding/runtime/points-unit";
+import type { CardRef } from "../../wallet/engine/wallet-pass-provider.interface";
 import { tierRewardsSchema } from "../templates/templates.schema";
 import { normaliseScale } from "../points/tier-engine";
 
@@ -48,6 +49,12 @@ export interface ListMembersOptions {
   query?: string;
   limit: number;
   offset: number;
+}
+
+export interface DeleteMemberOptions {
+  clinicId: string;
+  memberId: string;
+  revokeCard: (ref: CardRef) => Promise<boolean>;
 }
 
 /**
@@ -163,6 +170,70 @@ export class MemberDirectoryService {
     const [summary] = await this.withSpendingStats([this.toSummary(member)], member.clinicId);
 
     return summary;
+  }
+
+  async delete(options: DeleteMemberOptions): Promise<void> {
+    const member = await this.prisma.member.findFirst({
+      where: { id: options.memberId, clinicId: options.clinicId, erasedAt: null },
+      select: {
+        id: true,
+        walletObjects: { select: { provider: true, externalObjectId: true } }
+      }
+    });
+
+    if (!member) {
+      throw new MemberNotFoundError(options.memberId);
+    }
+
+    for (const object of member.walletObjects) {
+      const revoked = await options.revokeCard({
+        provider: object.provider,
+        externalId: object.externalObjectId,
+        memberId: member.id
+      });
+
+      if (!revoked) {
+        console.warn("[members] wallet provider unavailable during member deletion", {
+          memberId: member.id,
+          provider: object.provider
+        });
+      }
+    }
+
+    const now = new Date();
+
+    const [, , updated] = await this.prisma.$transaction([
+      this.prisma.passClaim.deleteMany({ where: { memberId: member.id } }),
+      this.prisma.walletObject.deleteMany({ where: { memberId: member.id } }),
+      this.prisma.member.updateMany({
+        where: { id: member.id, clinicId: options.clinicId, erasedAt: null },
+        data: {
+          erasedAt: now,
+          name: "Miembro eliminado",
+          phone: null,
+          email: null,
+          code: null,
+          pointsBalance: 0,
+          lifetimePoints: 0,
+          tier: null,
+          phoneRaw: null,
+          phoneRegionAssumed: false,
+          memberSince: null,
+          birthYear: null,
+          birthDate: null,
+          sex: null,
+          consentMarketing: false,
+          consentMarketingAt: null,
+          privacyPolicyVersion: null,
+          signupCount: 0,
+          lastSignupAt: now
+        }
+      })
+    ]);
+
+    if (updated.count === 0) {
+      throw new MemberNotFoundError(options.memberId);
+    }
   }
 
   private selection(historyTake: number) {
