@@ -65,8 +65,27 @@ export const buildStoreCardFields = (data: LoyaltyCard): StoreCardFields => {
   }
 
   if (data.reward) {
+    // iOS shrinks a long value to fit its cell, so a sentence here is unreadable. Where the reward's
+    // name and the distance are known apart, the cell carries only the distance and the name goes
+    // on the back; otherwise the whole description stays, as before.
+    const short = data.reward.title !== undefined && data.reward.remainingPoints !== undefined;
+
+    if (short) {
+      backFields.push({
+        key: "rewardName",
+        label: PASS_LABELS.reward,
+        value: data.reward.title as string
+      });
+    }
+
     auxiliaryFields.push(
-      { key: "reward", label: PASS_LABELS.reward, value: data.reward.description },
+      {
+        key: "reward",
+        label: PASS_LABELS.reward,
+        value: short
+          ? `${(data.reward.remainingPoints as number).toLocaleString("es-ES")} puntos`
+          : data.reward.description
+      },
       {
         key: "progress",
         label: PASS_LABELS.progress,

@@ -80,7 +80,11 @@ export class ApplePassBuilder implements PassBuilder {
           organizationName: this.options.organizationName,
           // Apple requires a description for VoiceOver; the library does not enforce it.
           description: `${data.clinic.name} · ${data.template.programName}`,
-          logoText: data.template.programName,
+          // With a logo the brand is already on the card, and the text beside it collides with the
+          // level in the header. Without one, the clinic's name is the only identity there is.
+          ...(data.template.logoOnDarkUrl || data.template.logoUrl
+            ? {}
+            : { logoText: data.clinic.name }),
           sharingProhibited: true,
           backgroundColor: theme.backgroundColor,
           foregroundColor: theme.foregroundColor,

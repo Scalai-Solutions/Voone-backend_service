@@ -293,4 +293,38 @@ describe("loyaltyCardSchema", () => {
 
     expect(result.success).toBe(false);
   });
+
+  describe("next reward cell", () => {
+    const withReward = (reward: NonNullable<typeof aureaGoldPass.reward>) => ({
+      ...aureaGoldPass,
+      reward
+    });
+
+    it("carries only the distance when the reward's name is known, and the name goes on the back", () => {
+      const fields = buildStoreCardFields(
+        withReward({
+          description: "Kit de minitallas · te faltan 300 puntos",
+          progressPercent: 0,
+          title: "Kit de minitallas",
+          remainingPoints: 300
+        })
+      );
+
+      expect(fields.auxiliaryFields.find((f) => f.key === "reward")?.value).toBe("300 puntos");
+      expect(fields.backFields.find((f) => f.key === "rewardName")?.value).toBe(
+        "Kit de minitallas"
+      );
+    });
+
+    it("keeps the whole description when the name and distance are not known apart", () => {
+      const fields = buildStoreCardFields(
+        withReward({ description: "Recompensa 2 de 5", progressPercent: 40 })
+      );
+
+      expect(fields.auxiliaryFields.find((f) => f.key === "reward")?.value).toBe(
+        "Recompensa 2 de 5"
+      );
+      expect(allKeys(fields)).not.toContain("rewardName");
+    });
+  });
 });

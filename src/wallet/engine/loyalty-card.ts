@@ -108,7 +108,10 @@ export const loyaltyCardSchema = z
     reward: z
       .object({
         description: z.string().min(1).max(120),
-        progressPercent: z.number().min(0).max(100)
+        progressPercent: z.number().min(0).max(100),
+        /** The reward's own name and the points still to earn, where the source knows them apart. */
+        title: z.string().min(1).max(120).optional(),
+        remainingPoints: z.number().int().nonnegative().optional()
       })
       .optional(),
 
