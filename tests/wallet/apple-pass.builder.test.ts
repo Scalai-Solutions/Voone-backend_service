@@ -129,10 +129,10 @@ describe("ApplePassBuilder", () => {
       value: 1250
     });
     expect(storeCard.headerFields[0]).toMatchObject({ key: "tier", label: "Nivel", value: "Gold" });
-    expect(storeCard.secondaryFields.map((field) => field.key)).toEqual(["member"]);
+    expect(storeCard.secondaryFields.map((field) => field.key)).toEqual(["member", "memberNo"]);
     expect(storeCard.backFields.map((field) => field.key)).toContain("redemptionCode");
     // No column backs credit or reward, so neither is invented; only the member number shows.
-    expect((storeCard.auxiliaryFields ?? []).map((field) => field.key)).toEqual(["memberNo"]);
+    expect(storeCard.auxiliaryFields ?? []).toEqual([]);
   });
 
   it("derives the theme from the clinic template background", () => {

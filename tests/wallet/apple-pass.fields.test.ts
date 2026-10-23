@@ -98,8 +98,8 @@ describe("buildStoreCardFields", () => {
   it("omits credit and reward when no column backs them", () => {
     const fields = buildStoreCardFields(aureaGoldPass);
 
-    // Only the member number is on the front; no reward or progress is invented.
-    expect(fields.auxiliaryFields.map((f) => f.key)).toEqual(["memberNo"]);
+    // The reward row stays empty: no reward or progress is invented.
+    expect(fields.auxiliaryFields).toEqual([]);
     expect(allKeys(fields)).not.toContain("credit");
     expect(allKeys(fields)).not.toContain("reward");
   });
@@ -115,11 +115,11 @@ describe("buildStoreCardFields", () => {
   });
 
   it("shows the member number on the front, never the long serial", () => {
-    expect(buildStoreCardFields(aureaGoldPass).auxiliaryFields[0]).toMatchObject({
+    expect(buildStoreCardFields(aureaGoldPass).secondaryFields[1]).toMatchObject({
       key: "memberNo",
       value: "K7M2Q"
     });
-    expect(buildStoreCardFields(uncodedMemberPass).auxiliaryFields.map((f) => f.key)).not.toContain(
+    expect(buildStoreCardFields(uncodedMemberPass).secondaryFields.map((f) => f.key)).not.toContain(
       "memberNo"
     );
   });
@@ -147,7 +147,7 @@ describe("buildStoreCardFields", () => {
 
     expect(fields.headerFields).toHaveLength(0);
     expect(fields.primaryFields[0]).toMatchObject({ key: "points", value: 0 });
-    expect(fields.secondaryFields.map((f) => f.key)).toEqual(["member"]);
+    expect(fields.secondaryFields.map((f) => f.key)).toEqual(["member", "memberNo"]);
     expect(allKeys(fields)).not.toContain("memberSince");
     expect(allKeys(fields)).not.toContain("benefits");
   });

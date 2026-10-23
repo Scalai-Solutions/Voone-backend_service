@@ -26,6 +26,7 @@ const TEMPLATE = {
   programName: "AURÉA Clinic Club",
   hexBackgroundColor: "#ead0bd",
   logoUrl: null,
+  logoOnDarkUrl: null,
   heroImageUrl: null,
   websiteUrl: null,
   appointmentUrl: null,

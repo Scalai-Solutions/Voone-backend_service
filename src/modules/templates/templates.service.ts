@@ -3,6 +3,7 @@ import { Prisma, TemplateStatus } from "@prisma/client";
 import { ConflictError } from "../../common/errors/conflict-error";
 import { logger } from "../../common/logger/logger";
 import { prisma } from "../../infrastructure/database/prisma-client";
+import { refreshClinicCards } from "../wallet-refresh/clinic-card-refresh";
 import { WalletPassEngine } from "../../wallet/engine/wallet-pass.engine";
 import { buildWalletRegistry } from "../../wallet/wallet.composition";
 import type { CreateTemplateInput, CreateVooneTemplateInput } from "./templates.schema";
@@ -117,6 +118,10 @@ export const templatesService = {
       logger.error("Wallet class update failed", { templateId: template.id, error });
       throw error;
     }
+
+    // Google picks the class change up on its own; Apple passes and Google's per-member text are
+    // rebuilt per member. Not awaited: a clinic with thousands of members must not hold the save.
+    void refreshClinicCards(existing.clinicId);
 
     return templatesRepository.findById(template.id);
   }

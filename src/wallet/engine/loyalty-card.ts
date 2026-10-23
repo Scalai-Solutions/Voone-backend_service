@@ -28,6 +28,7 @@ export const cardTemplateSchema = z.object({
   programName: z.string().min(1).max(48),
   backgroundColor: hexColorSchema,
   logoUrl: z.string().url().max(2048).optional(),
+  logoOnDarkUrl: z.string().url().max(2048).optional(),
   heroImageUrl: z.string().url().max(2048).optional(),
   websiteUrl: z.string().url().max(2048).optional(),
   appointmentUrl: z.string().url().max(2048).optional(),
