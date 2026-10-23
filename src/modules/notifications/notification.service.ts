@@ -3,6 +3,7 @@ import {
   NotificationDeliveryStatus,
   NotificationStatus,
   NotificationType,
+  OnboardingProgramStatus,
   Prisma,
   WalletProviderType,
   WalletSyncStatus,
@@ -17,6 +18,7 @@ import {
 } from "../../common/errors/wallet.errors";
 import type { WalletPassEngine } from "../../wallet/engine/wallet-pass.engine";
 import { hasPermission, PERMISSIONS } from "../auth/rbac";
+import { toPoints } from "../onboarding/runtime/points-unit";
 import {
   NotificationForbiddenError,
   NotificationNotFoundError,
@@ -564,6 +566,15 @@ export class NotificationService {
 
     if (!member) return;
 
+    // The job carries the ledger's balance. A programme centre keeps progress in euros and shows
+    // points (ten per euro), the unit the pass was built with; sending the raw figure here would
+    // overwrite the card with the money spent.
+    const programmeCentre =
+      (await this.prisma.onboardingProgram.count({
+        where: { clinicId: member.clinicId, status: OnboardingProgramStatus.ACTIVO }
+      })) > 0;
+    const shownBalance = programmeCentre ? toPoints(job.newBalance) : job.newBalance;
+
     const object = member.walletObjects.find(
       (walletObject) =>
         walletObject.provider === WalletProviderType.GOOGLE &&
@@ -575,7 +586,7 @@ export class NotificationService {
         clinicId: member.clinicId,
         type: job.tierChanged ? NotificationType.TIER : NotificationType.POINTS,
         header: "Points updated",
-        body: `Your balance is now ${job.newBalance}`,
+        body: `Your balance is now ${shownBalance}`,
         notify: false,
         deliveries: {
           create: {
@@ -603,7 +614,7 @@ export class NotificationService {
 
     try {
       await this.wallet.patchPoints(object.externalObjectId, {
-        points: job.newBalance,
+        points: shownBalance,
         tier: member.tier ?? undefined,
         notify
       });
@@ -621,7 +632,7 @@ export class NotificationService {
     } catch (error) {
       if (error instanceof WalletNotificationQuotaExceededError) {
         await this.wallet.patchPoints(object.externalObjectId, {
-          points: job.newBalance,
+          points: shownBalance,
           tier: member.tier ?? undefined,
           notify: false
         });
