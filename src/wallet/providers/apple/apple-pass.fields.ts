@@ -81,7 +81,7 @@ export const buildStoreCardFields = (data: LoyaltyCard): StoreCardFields => {
     auxiliaryFields.push(
       {
         key: "reward",
-        label: PASS_LABELS.reward,
+        label: short ? PASS_LABELS.remaining : PASS_LABELS.reward,
         value: short
           ? `${(data.reward.remainingPoints as number).toLocaleString("es-ES")} puntos`
           : data.reward.description

@@ -9,6 +9,8 @@ export const PASS_LABELS = {
   member: "SOCIA",
   credit: "SALDO",
   reward: "PRÓXIMA RECOMPENSA",
+  // Short on purpose: it labels a cell on a four-across row, where "NEXT REWARD" is cut to "NEXT REW…".
+  remaining: "FALTAN",
   progress: "PROGRESO",
   program: "PROGRAMA",
   benefits: "BENEFICIOS",
@@ -29,6 +31,7 @@ export const PASS_TRANSLATIONS: Record<string, Record<string, string>> = {
     SOCIA: "MEMBER",
     SALDO: "BALANCE",
     "PRÓXIMA RECOMPENSA": "NEXT REWARD",
+    FALTAN: "TO GO",
     PROGRESO: "PROGRESS",
     PROGRAMA: "PROGRAMME",
     BENEFICIOS: "BENEFITS",

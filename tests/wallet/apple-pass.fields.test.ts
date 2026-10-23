@@ -311,6 +311,7 @@ describe("loyaltyCardSchema", () => {
       );
 
       expect(fields.auxiliaryFields.find((f) => f.key === "reward")?.value).toBe("300 puntos");
+      expect(fields.auxiliaryFields.find((f) => f.key === "reward")?.label).toBe("FALTAN");
       expect(fields.backFields.find((f) => f.key === "rewardName")?.value).toBe(
         "Kit de minitallas"
       );
