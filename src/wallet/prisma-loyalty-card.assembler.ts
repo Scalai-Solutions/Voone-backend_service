@@ -77,7 +77,9 @@ const rewardFor = (
 const programRewardFor = (
   programOutput: unknown,
   lifetimePoints: number
-): { description: string; progressPercent: number } | undefined => {
+):
+  | { description: string; progressPercent: number; title?: string; remainingPoints?: number }
+  | undefined => {
   const next = nextRewardFor(programView(programOutput as Program), lifetimePoints);
 
   if (!next) return undefined;
@@ -87,7 +89,12 @@ const programRewardFor = (
   const title =
     next.title.length > room ? `${next.title.slice(0, room - 1).trimEnd()}…` : next.title;
 
-  return { description: `${title}${tail}`, progressPercent: next.percent };
+  return {
+    description: `${title}${tail}`,
+    progressPercent: next.percent,
+    title: next.title.slice(0, 120),
+    remainingPoints: toPoints(next.remaining)
+  };
 };
 
 export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
