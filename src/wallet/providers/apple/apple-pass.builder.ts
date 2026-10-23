@@ -111,7 +111,9 @@ export class ApplePassBuilder implements PassBuilder {
       message: data.redemptionCode,
       format: "PKBarcodeFormatQR",
       messageEncoding: "iso-8859-1",
-      altText: data.redemptionCode
+      // Only the label under the QR. The long redemption code stays in the QR itself and on the
+      // back; the member number is short enough to read off a phone and is what reception asks for.
+      altText: data.member.code ?? data.redemptionCode
     });
 
     for (const [language, translations] of Object.entries(PASS_TRANSLATIONS)) {

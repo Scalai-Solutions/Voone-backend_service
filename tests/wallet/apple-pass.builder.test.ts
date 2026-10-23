@@ -146,10 +146,13 @@ describe("ApplePassBuilder", () => {
     const barcodes = readPassJson(entries).barcodes as {
       message: string;
       format: string;
+      altText: string;
     }[];
 
     expect(barcodes[0].format).toBe("PKBarcodeFormatQR");
     expect(barcodes[0].message).toBe(aureaGoldPass.redemptionCode);
+    // The text under the QR is the short member number, not the 26-character code.
+    expect(barcodes[0].altText).toBe(aureaGoldPass.member.code);
     expect(JSON.stringify(barcodes)).not.toContain(aureaGoldPass.serialNumber);
   });
 
