@@ -1,3 +1,4 @@
+import { refreshClinicCards } from "../wallet-refresh/clinic-card-refresh";
 import type { Request, Response } from "express";
 import { ZodError } from "zod";
 
@@ -139,6 +140,16 @@ export const templatesController = {
       const template = await templatesService.createClinicTemplate(clinicId, input);
 
       res.status(201).json(template);
+    } catch (error) {
+      handleControllerError(error, res);
+    }
+  },
+
+  async refreshCards(req: Request, res: Response) {
+    try {
+      const queued = await refreshClinicCards(getClinicId(req));
+
+      res.json({ queued });
     } catch (error) {
       handleControllerError(error, res);
     }

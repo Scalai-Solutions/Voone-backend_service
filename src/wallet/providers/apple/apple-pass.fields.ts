@@ -80,8 +80,10 @@ export const buildStoreCardFields = (data: LoyaltyCard): StoreCardFields => {
 
   // On the front as well as the back: it is what reception asks for, and a member should not
   // have to flip the card to find it. Only a real code is shown; the long serial never is.
+  // Beside the name, not in the reward row: the reward text is the longest thing on the card and
+  // a fourth cell on one row shrinks it to unreadable.
   if (data.member.code) {
-    auxiliaryFields.unshift({
+    secondaryFields.splice(1, 0, {
       key: "memberNo",
       label: PASS_LABELS.memberNo,
       value: data.member.code

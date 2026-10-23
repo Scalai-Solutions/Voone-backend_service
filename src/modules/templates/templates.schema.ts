@@ -8,7 +8,15 @@ import {
 } from "./default-voone-template";
 
 const hexColorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Expected a 6-digit hex color");
-const optionalUrlSchema = z.string().url().max(2048).optional().or(z.literal(""));
+// One URL and nothing else. A pasted "image.jpg  logo  https://..." parses as a URL, reaches
+// Google Wallet and comes back as a 500, so whitespace is refused here with a message.
+const singleUrlSchema = z
+  .string()
+  .trim()
+  .url("Introduce una única URL válida")
+  .max(2048)
+  .refine((value) => !/\s/.test(value), "La URL no puede contener espacios ni texto extra");
+const optionalUrlSchema = singleUrlSchema.optional().or(z.literal(""));
 const idSchema = z.string().trim().min(1).max(120);
 const defaultedString = (defaultValue: string, min: number, max: number) =>
   z.preprocess(
@@ -127,6 +135,7 @@ export const createTemplateSchema = z.object({
   programName: z.string().trim().min(2).max(120),
   hexBackgroundColor: hexColorSchema,
   logoUrl: optionalUrlSchema,
+  logoOnDarkUrl: optionalUrlSchema,
   heroImageUrl: optionalUrlSchema,
   websiteUrl: optionalUrlSchema,
   appointmentUrl: optionalUrlSchema,

@@ -106,7 +106,7 @@ const stripShade = (width: number, height: number): string =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
   `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">` +
   `<stop offset="0" stop-color="#000" stop-opacity="0"/>` +
-  `<stop offset="1" stop-color="#000" stop-opacity="0.45"/></linearGradient></defs>` +
+  `<stop offset="1" stop-color="#000" stop-opacity="0.55"/></linearGradient></defs>` +
   `<rect width="100%" height="100%" fill="url(#g)"/></svg>`;
 
 /** Resizes at 1×, 2× and 3×. A logo keeps its shape on a transparent canvas; a strip fills. */
@@ -121,13 +121,16 @@ export const renderSizes = async (
   for (const scale of SCALES) {
     const width = base.width * scale;
     const height = base.height * scale;
-    let image = sharp(source)
-      .rotate()
-      .resize(width, height, {
+    // A logo exported with a wide empty border draws small and off-centre; cut the border first.
+    let image = (name === "logo" ? sharp(source).rotate().trim() : sharp(source).rotate()).resize(
+      width,
+      height,
+      {
         fit,
         position: name === "strip" ? "attention" : "centre",
         background: { r: 0, g: 0, b: 0, alpha: 0 }
-      });
+      }
+    );
 
     // A soft shade up the strip's left and bottom keeps the points number readable over any
     // photo, instead of leaving it to whatever the photo happens to be.

@@ -136,6 +136,7 @@ const createClinicWithTemplate = (
           programName: input.programName,
           hexBackgroundColor: input.hexBackgroundColor ?? preset.hexBackgroundColor,
           logoUrl: input.logoUrl,
+          logoOnDarkUrl: input.logoOnDarkUrl,
           heroImageUrl: input.heroImageUrl,
           websiteUrl: input.websiteUrl,
           appointmentUrl: input.appointmentUrl,

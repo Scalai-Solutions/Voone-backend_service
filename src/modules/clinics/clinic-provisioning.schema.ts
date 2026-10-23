@@ -46,6 +46,7 @@ export const provisionClinicSchema = z.object({
 
   hexBackgroundColor: createTemplateSchema.shape.hexBackgroundColor.optional(),
   logoUrl: createTemplateSchema.shape.logoUrl,
+  logoOnDarkUrl: createTemplateSchema.shape.logoOnDarkUrl,
   heroImageUrl: createTemplateSchema.shape.heroImageUrl,
   websiteUrl: createTemplateSchema.shape.websiteUrl,
   appointmentUrl: createTemplateSchema.shape.appointmentUrl,

@@ -80,7 +80,7 @@ export class ApplePassBuilder implements PassBuilder {
           organizationName: this.options.organizationName,
           // Apple requires a description for VoiceOver; the library does not enforce it.
           description: `${data.clinic.name} · ${data.template.programName}`,
-          logoText: data.clinic.name,
+          logoText: data.template.programName,
           sharingProhibited: true,
           backgroundColor: theme.backgroundColor,
           foregroundColor: theme.foregroundColor,
@@ -138,7 +138,9 @@ export class ApplePassBuilder implements PassBuilder {
     if (!source) return;
 
     const [logo, strip] = await Promise.all([
-      data.template.logoUrl ? source.logo(data.template.logoUrl) : null,
+      (data.template.logoOnDarkUrl ?? data.template.logoUrl)
+        ? source.logo((data.template.logoOnDarkUrl ?? data.template.logoUrl) as string)
+        : null,
       data.template.heroImageUrl ? source.strip(data.template.heroImageUrl) : null
     ]);
 

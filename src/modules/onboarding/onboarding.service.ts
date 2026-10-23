@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 
 import { AppError } from "../../common/errors/app-error";
+import { refreshClinicCards } from "../wallet-refresh/clinic-card-refresh";
 import { toEngineCatalog, type CatalogRepository } from "./catalog.repository";
 import { run } from "./engine";
 import {
@@ -266,6 +267,9 @@ export class OnboardingService {
     // because issuing is judged on crossing. The first programme a centre ever publishes is left
     // alone, as migrating members who were on the old scheme is a separate, deliberate step.
     if (replaced) await placeMembersOnProgram(this.prisma, clinicId);
+
+    // The card shows the programme's next reward, so a new live version changes every card.
+    void refreshClinicCards(clinicId);
 
     return published;
   }

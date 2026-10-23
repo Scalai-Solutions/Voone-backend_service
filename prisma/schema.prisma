@@ -150,6 +150,8 @@ model ClinicTemplate {
   programName        String
   hexBackgroundColor String
   logoUrl            String?
+  /// Optional second logo drawn on the Apple pass, for a logo that does not read on the card colour.
+  logoOnDarkUrl      String?
   heroImageUrl       String?
   websiteUrl         String?
   appointmentUrl     String?
