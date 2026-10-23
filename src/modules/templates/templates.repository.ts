@@ -78,7 +78,7 @@ export const templatesRepository = {
   update(
     db: DatabaseClient,
     templateId: string,
-    input: CreateTemplateInput,
+    input: Omit<CreateTemplateInput, "treatments">,
     status?: TemplateStatus
   ) {
     return db.clinicTemplate.update({

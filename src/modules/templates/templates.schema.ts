@@ -155,7 +155,15 @@ export const createTemplateSchema = z.object({
   treatments: z.array(treatmentInputSchema).min(1).max(50)
 });
 
-export const updateTemplateSchema = createTemplateSchema;
+/**
+ * An update may leave treatments out. The card editor saves a design, not a catalogue, and a
+ * request without treatments must leave the clinic's catalogue exactly as it is.
+ */
+export const updateTemplateSchema = createTemplateSchema.extend({
+  treatments: createTemplateSchema.shape.treatments.optional()
+});
+
+export type UpdateTemplateInput = z.infer<typeof updateTemplateSchema>;
 
 export type CreateTemplateInput = z.infer<typeof createTemplateSchema>;
 

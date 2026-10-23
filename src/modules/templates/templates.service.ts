@@ -6,7 +6,11 @@ import { prisma } from "../../infrastructure/database/prisma-client";
 import { refreshClinicCards } from "../wallet-refresh/clinic-card-refresh";
 import { WalletPassEngine } from "../../wallet/engine/wallet-pass.engine";
 import { buildWalletRegistry } from "../../wallet/wallet.composition";
-import type { CreateTemplateInput, CreateVooneTemplateInput } from "./templates.schema";
+import type {
+  CreateTemplateInput,
+  CreateVooneTemplateInput,
+  UpdateTemplateInput
+} from "./templates.schema";
 import {
   templatesRepository,
   treatmentsRepository,
@@ -93,7 +97,7 @@ export const templatesService = {
     return templatesRepository.findById(template.id);
   },
 
-  async updateClinicTemplate(templateId: string, input: CreateTemplateInput) {
+  async updateClinicTemplate(templateId: string, input: UpdateTemplateInput) {
     const existing = await templatesRepository.findById(templateId);
 
     if (!existing) {
@@ -101,7 +105,10 @@ export const templatesService = {
     }
 
     const template = await prisma.$transaction(async (tx) => {
-      await treatmentsRepository.replaceForClinic(tx, existing.clinicId, input.treatments);
+      if (input.treatments) {
+        await treatmentsRepository.replaceForClinic(tx, existing.clinicId, input.treatments);
+      }
+
       return templatesRepository.update(tx, templateId, input, TemplateStatus.PENDING);
     });
 

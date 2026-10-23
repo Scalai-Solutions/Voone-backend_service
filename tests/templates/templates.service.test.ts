@@ -206,4 +206,34 @@ describe("updateClinicTemplate", () => {
     await expect(templatesService.updateClinicTemplate("t1", INPUT)).rejects.toThrow("google 500");
     expect(templatesRepository.markFailed).toHaveBeenCalledWith("t1");
   });
+
+  it("leaves the clinic's treatments alone when the request carries none", async () => {
+    vi.mocked(templatesRepository.findById).mockResolvedValue(TEMPLATE as never);
+    vi.mocked(templatesRepository.update).mockResolvedValue(TEMPLATE as never);
+    vi.mocked(walletPassEngine.createClassForTemplate).mockResolvedValue([] as never);
+
+    const designOnly: Omit<typeof INPUT, "treatments"> & { treatments?: undefined } = {
+      ...INPUT,
+      treatments: undefined
+    };
+
+    await templatesService.updateClinicTemplate("t1", designOnly);
+
+    expect(asMock(treatmentsRepository.replaceForClinic)).not.toHaveBeenCalled();
+    expect(asMock(templatesRepository.update)).toHaveBeenCalled();
+  });
+
+  it("still replaces the treatments when the request carries them", async () => {
+    vi.mocked(templatesRepository.findById).mockResolvedValue(TEMPLATE as never);
+    vi.mocked(templatesRepository.update).mockResolvedValue(TEMPLATE as never);
+    vi.mocked(walletPassEngine.createClassForTemplate).mockResolvedValue([] as never);
+
+    await templatesService.updateClinicTemplate("t1", INPUT);
+
+    expect(treatmentsRepository.replaceForClinic).toHaveBeenCalledWith(
+      expect.anything(),
+      "c1",
+      INPUT.treatments
+    );
+  });
 });
