@@ -30,6 +30,81 @@ const queuedDelivery = {
 };
 
 describe("NotificationService", () => {
+  describe("points credit", () => {
+    const creditedPoints = async (programmeCentre: boolean) => {
+      const patches: Array<{ points: number }> = [];
+      const bodies: string[] = [];
+      const prisma = {
+        member: {
+          findFirst: async () => ({
+            id: "member-1",
+            clinicId: "clinic-1",
+            tier: null,
+            walletObjects: [
+              {
+                provider: WalletProviderType.GOOGLE,
+                status: WalletSyncStatus.SYNCED,
+                externalObjectId: "issuer.member_1"
+              }
+            ]
+          })
+        },
+        onboardingProgram: { count: async () => (programmeCentre ? 1 : 0) },
+        clinicNotificationSettings: { upsert: async () => ({ notifyOnCredit: "NEVER" }) },
+        notification: {
+          create: async ({ data }: { data: { body: string } }) => {
+            bodies.push(data.body);
+            return {
+              id: "notification-1",
+              clinicId: "clinic-1",
+              type: "POINTS",
+              status: "QUEUED",
+              deliveries: [{ id: "delivery-1" }]
+            };
+          },
+          update: async () => undefined
+        },
+        notificationDelivery: {
+          update: async () => undefined,
+          findMany: async () => [{ status: NotificationDeliveryStatus.SENT }]
+        }
+      };
+      const service = new NotificationService(
+        prisma as never,
+        {
+          patchPoints: async (_objectId: string, patch: { points: number }) => {
+            patches.push(patch);
+          }
+        } as never,
+        { canPush: async () => false, recordPush: async () => undefined } as never,
+        {} as never
+      );
+
+      await service.processPointsCredit({
+        memberId: "member-1",
+        newBalance: 120,
+        milestoneReached: false,
+        tierChanged: false
+      });
+
+      return { points: patches.map((patch) => patch.points), bodies };
+    };
+
+    it("sends a programme centre's balance to Google in points, ten per euro", async () => {
+      expect(await creditedPoints(true)).toEqual({
+        points: [1200],
+        bodies: ["Your balance is now 1200"]
+      });
+    });
+
+    it("leaves every other centre's balance as the ledger holds it", async () => {
+      expect(await creditedPoints(false)).toEqual({
+        points: [120],
+        bodies: ["Your balance is now 120"]
+      });
+    });
+  });
+
   it("downgrades a marketing object message when reserved quota would be consumed", async () => {
     const walletCalls: unknown[] = [];
     let deliveryStatus: NotificationDeliveryStatus = NotificationDeliveryStatus.QUEUED;
