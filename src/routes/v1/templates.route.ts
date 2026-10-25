@@ -23,6 +23,7 @@ templatesRouter.patch(
   templatesController.updateVoone
 );
 templatesRouter.post("/templates/refresh-cards", requireStaff, templatesController.refreshCards);
+templatesRouter.get("/templates/refresh-status", templatesController.refreshStatus);
 templatesRouter.get("/templates/current", templatesController.getCurrent);
 templatesRouter.get("/templates", templatesController.list);
 templatesRouter.get("/templates/:templateId", templatesController.getById);
