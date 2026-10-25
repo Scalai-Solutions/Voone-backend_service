@@ -9,8 +9,12 @@ import {
   createTreatment,
   listTreatments,
   removeTreatment,
-  updateTreatment
+  scanScreenTreatments,
+  treatmentCategories,
+  updateTreatment,
+  usesCatalogue
 } from "../../src/modules/treatments/treatment-catalogue.service";
+import { CATEGORIES } from "../../src/modules/onboarding/engine.config";
 
 /**
  * The owner's treatment editor, against a real database.
@@ -21,10 +25,13 @@ import {
  */
 const db = new PrismaClient();
 
-const SLUGS = ["tr-programme", "tr-plain", "tr-other"];
+const SLUGS = ["tr-programme", "tr-plain", "tr-other", "tr-onboarding", "tr-empty-programme"];
 let programme: { id: string };
 let plain: { id: string };
 let other: { id: string };
+let onboarding: { id: string };
+let emptyProgramme: { id: string };
+let seedItem: { id: string };
 
 const wipe = async (): Promise<void> => {
   const ids = (await db.clinic.findMany({ where: { slug: { in: SLUGS } } })).map((c) => c.id);
@@ -47,13 +54,14 @@ beforeAll(async () => {
   programme = await makeClinic(SLUGS[0]);
   plain = await makeClinic(SLUGS[1]);
   other = await makeClinic(SLUGS[2]);
+  onboarding = await makeClinic(SLUGS[3]);
+  emptyProgramme = await makeClinic(SLUGS[4]);
 });
 
-beforeEach(async () => {
-  await wipe();
-  await db.onboardingProgram.create({
+const activeProgramme = (clinicId: string) =>
+  db.onboardingProgram.create({
     data: {
-      clinicId: programme.id,
+      clinicId,
       version: 1,
       status: OnboardingProgramStatus.ACTIVO,
       engineVersion: "t",
@@ -61,6 +69,21 @@ beforeEach(async () => {
       answers: {},
       output: {},
       catalogSnapshot: []
+    }
+  });
+
+beforeEach(async () => {
+  await wipe();
+  // A programme centre as it is in practice: a live programme and an imported catalogue.
+  await activeProgramme(programme.id);
+  seedItem = await db.catalogItem.create({
+    data: {
+      clinicId: programme.id,
+      externalId: "seed",
+      name: "Existente",
+      priceCents: 1000,
+      categoryId: "FAC",
+      position: 0
     }
   });
 });
@@ -111,7 +134,10 @@ describe("creating at a programme centre", () => {
     expect(stored.externalId).toMatch(/^owner-/);
     expect(await db.clinicTreatment.count({ where: { clinicId: programme.id } })).toBe(0);
 
-    expect((await listTreatments(db, programme.id)).map((t) => t.id)).toEqual([row.id]);
+    expect((await listTreatments(db, programme.id)).map((t) => t.id)).toEqual([
+      seedItem.id,
+      row.id
+    ]);
   });
 
   it("appends after the existing rows", async () => {
@@ -135,7 +161,8 @@ describe("creating at a programme centre", () => {
       ).toBe("Elige una categoría de la lista.");
     }
 
-    expect(await db.catalogItem.count({ where: { clinicId: programme.id } })).toBe(0);
+    // Only the seed row: nothing was written.
+    expect(await db.catalogItem.count({ where: { clinicId: programme.id } })).toBe(1);
   });
 });
 
@@ -243,13 +270,20 @@ describe("updating", () => {
     expect((await updateTreatment(db, plain.id, row.id, { priceEuro: 20 })).points).toBe(200);
   });
 
-  it("finds a row in whichever store holds it for that clinic", async () => {
-    const legacy = await db.clinicTreatment.create({
+  it("does not reach a ClinicTreatment the scan screen is not showing", async () => {
+    const hidden = await db.clinicTreatment.create({
       data: { clinicId: programme.id, name: "Antiguo", priceEuro: 30, pointsAllotted: 300 }
     });
 
-    expect((await updateTreatment(db, programme.id, legacy.id, { name: "Nuevo" })).name).toBe(
-      "Nuevo"
+    // The centre has catalogue rows, so the scan screen shows those and not this one.
+    await expect(
+      updateTreatment(db, programme.id, hidden.id, { name: "Nuevo" })
+    ).rejects.toBeInstanceOf(TreatmentNotFoundError);
+    await expect(removeTreatment(db, programme.id, hidden.id)).rejects.toBeInstanceOf(
+      TreatmentNotFoundError
+    );
+    expect((await db.clinicTreatment.findUniqueOrThrow({ where: { id: hidden.id } })).name).toBe(
+      "Antiguo"
     );
   });
 });
@@ -314,7 +348,7 @@ describe("deleting", () => {
 
     await removeTreatment(db, programme.id, row.id);
 
-    expect(await listTreatments(db, programme.id)).toEqual([]);
+    expect((await listTreatments(db, programme.id)).map((t) => t.id)).toEqual([seedItem.id]);
     expect(await db.paidVisit.findUniqueOrThrow({ where: { id: visit.id } })).toEqual(visit);
   });
 
@@ -329,6 +363,7 @@ describe("deleting", () => {
 
 describe("listing", () => {
   it("keeps the scan screen's order and shape, plus the category", async () => {
+    await db.catalogItem.deleteMany({ where: { clinicId: programme.id } });
     await db.catalogItem.createMany({
       data: [
         {
@@ -373,5 +408,94 @@ describe("listing", () => {
       ["Alfa", null, 5],
       ["Zeta", 10, 3]
     ]);
+  });
+});
+
+describe("one rule for which store a centre uses", () => {
+  it("is the catalogue when the clinic has a non-product row, and nothing else", async () => {
+    expect(await usesCatalogue(db, programme.id)).toBe(true);
+    expect(await usesCatalogue(db, plain.id)).toBe(false);
+
+    // Retail products alone do not make the scan screen read the catalogue.
+    await db.catalogItem.create({
+      data: { clinicId: plain.id, externalId: "p", name: "Crema", priceCents: 900, isProduct: true }
+    });
+    expect(await usesCatalogue(db, plain.id)).toBe(false);
+  });
+
+  it("writes the catalogue mid-onboarding, with rows and no live programme, and the scan screen shows it", async () => {
+    await db.catalogItem.create({
+      data: { clinicId: onboarding.id, externalId: "x", name: "Importado", priceCents: 5000 }
+    });
+
+    const row = await createTreatment(db, onboarding.id, {
+      name: "Nuevo",
+      priceEuro: 25,
+      categoryId: "MAS"
+    });
+
+    expect(await db.catalogItem.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({
+      clinicId: onboarding.id,
+      priceCents: 2500,
+      needsReview: false
+    });
+    expect(await db.clinicTreatment.count({ where: { clinicId: onboarding.id } })).toBe(0);
+    expect((await scanScreenTreatments(db, onboarding.id)).map((t) => t.name)).toEqual([
+      "Importado",
+      "Nuevo"
+    ]);
+
+    await updateTreatment(db, onboarding.id, row.id, { priceEuro: 30 });
+    await removeTreatment(db, onboarding.id, row.id);
+    expect((await scanScreenTreatments(db, onboarding.id)).map((t) => t.name)).toEqual([
+      "Importado"
+    ]);
+  });
+
+  it("writes ClinicTreatment at a plain centre and the scan screen shows it", async () => {
+    const row = await createTreatment(db, plain.id, { name: "Masaje", priceEuro: 60 });
+
+    expect(await db.clinicTreatment.count({ where: { clinicId: plain.id } })).toBe(1);
+    expect(await scanScreenTreatments(db, plain.id)).toEqual([
+      { id: row.id, name: "Masaje", priceEuro: 60, points: 600 }
+    ]);
+  });
+
+  it("decides a live programme with an empty catalogue by the same rule: ClinicTreatment", async () => {
+    await activeProgramme(emptyProgramme.id);
+
+    const row = await createTreatment(db, emptyProgramme.id, { name: "Peeling", priceEuro: 40 });
+
+    expect(await db.clinicTreatment.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({
+      clinicId: emptyProgramme.id
+    });
+    expect(await db.catalogItem.count({ where: { clinicId: emptyProgramme.id } })).toBe(0);
+    expect((await scanScreenTreatments(db, emptyProgramme.id)).map((t) => t.id)).toEqual([row.id]);
+  });
+
+  it("scan screen output keeps whole euros", async () => {
+    await db.catalogItem.deleteMany({ where: { clinicId: programme.id } });
+    await db.catalogItem.create({
+      data: { clinicId: programme.id, externalId: "h", name: "Medio", priceCents: 1250 }
+    });
+
+    expect(await scanScreenTreatments(db, programme.id)).toEqual([
+      expect.objectContaining({ name: "Medio", priceEuro: 13, points: 125 })
+    ]);
+  });
+});
+
+describe("treatment categories", () => {
+  it("labels every category the engine accepts, so a new one cannot ship unlabelled", () => {
+    const categories = treatmentCategories();
+
+    expect(categories.map((c) => c.id).sort()).toEqual(Object.keys(CATEGORIES).sort());
+    for (const category of categories) {
+      expect(category.label.trim().length).toBeGreaterThan(0);
+    }
+    expect(categories.find((c) => c.id === "FAC")).toEqual({
+      id: "FAC",
+      label: "Facial de cabina"
+    });
   });
 });

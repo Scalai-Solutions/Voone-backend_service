@@ -18,7 +18,7 @@ import { createOnboardingRouter } from "./onboarding.route";
 import { createTreatmentsRouter } from "./treatments.route";
 import {
   createTreatmentCatalogue,
-  listTreatments
+  scanScreenTreatments
 } from "../../modules/treatments/treatment-catalogue.service";
 import { findClinicBySlug } from "../../modules/clinics/clinic.service";
 import { PrismaCatalogRepository } from "../../modules/onboarding/catalog.repository";
@@ -249,15 +249,7 @@ v1Router.use(
 
       return clinic?.id ?? null;
     },
-    treatmentsFor: async (clinicId) =>
-      // The scan screen shows whole euros and the dashboard's own field names; the editor
-      // reads the same rows through listTreatments and keeps the exact price.
-      (await listTreatments(prisma, clinicId)).map((t) => ({
-        id: t.id,
-        name: t.name,
-        priceEuro: t.priceEuro === null ? null : Math.round(t.priceEuro),
-        points: t.points
-      }))
+    treatmentsFor: (clinicId) => scanScreenTreatments(prisma, clinicId)
   })
 );
 

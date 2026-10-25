@@ -7,6 +7,7 @@ import {
   TreatmentNotFoundError,
   TreatmentValidationError
 } from "../../src/common/errors/treatment.errors";
+import { CATEGORIES } from "../../src/modules/onboarding/engine.config";
 import type { TreatmentRow } from "../../src/modules/treatments/treatment-catalogue.service";
 import { createTreatmentsRouter } from "../../src/routes/v1/treatments.route";
 
@@ -102,6 +103,16 @@ describe("treatments routes", () => {
     }
   });
 
+  it("lists the categories with Spanish labels for the clinic's owner", async () => {
+    const { app } = buildApp();
+    const res = await send(app, "GET", "/clinics/aurea/treatment-categories");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toContainEqual({ id: "FAC", label: "Facial de cabina" });
+    expect(res.body.length).toBe(Object.keys(CATEGORIES).length);
+    expect((await send(app, "GET", "/clinics/nope/treatment-categories")).status).toBe(404);
+  });
+
   it("creates with a 201 and passes the validated body", async () => {
     const { app, calls } = buildApp();
     const res = await send(app, "POST", "/clinics/aurea/treatments", {
@@ -128,11 +139,11 @@ describe("treatments routes", () => {
     [{ name: "A", priceEuro: 100001 }, "El precio debe estar entre 0,01 € y 100.000 €."],
     [{ name: "A", priceEuro: 1.234 }, "El precio debe estar entre 0,01 € y 100.000 €."],
     [{ name: " ", priceEuro: 5 }, "Escribe el nombre del tratamiento."]
-  ])("rejects %j with a 400 and the bare Spanish message", async (body, message) => {
+  ])("rejects %j with a 422 and the bare Spanish message", async (body, message) => {
     const { app, calls } = buildApp();
     const res = await send(app, "POST", "/clinics/aurea/treatments", body);
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     expect(res.body.message).toBe(message);
     expect(calls).toEqual([]);
   });
@@ -160,7 +171,7 @@ describe("treatments routes", () => {
     const res = await send(failing, "POST", "/clinics/x/treatments", { name: "A", priceEuro: 5 });
 
     expect(app).toBeDefined();
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     expect(res.body.message).toBe("Elige una categoría de la lista.");
   });
 
@@ -176,7 +187,7 @@ describe("treatments routes", () => {
     expect(missing.body.message).toBe("No se ha encontrado ese tratamiento.");
 
     const bad = await send(app, "PATCH", "/clinics/aurea/treatments/t-1", { priceEuro: 0 });
-    expect(bad.status).toBe(400);
+    expect(bad.status).toBe(422);
     expect(bad.body.message).toBe("El precio debe estar entre 0,01 € y 100.000 €.");
   });
 

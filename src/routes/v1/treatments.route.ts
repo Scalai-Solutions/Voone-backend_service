@@ -7,6 +7,7 @@ import { createRequireStaffKey } from "../../common/middleware/staff-key";
 import { config } from "../../config/env";
 import {
   createTreatmentSchema,
+  treatmentCategories,
   updateTreatmentSchema,
   type TreatmentCatalogue
 } from "../../modules/treatments/treatment-catalogue.service";
@@ -47,6 +48,18 @@ export const createTreatmentsRouter = (deps: TreatmentsRouterDeps): Router => {
       const clinic = await deps.findClinic(req.params.slug);
 
       res.json(await deps.catalogue.list(clinic.id));
+    })
+  );
+
+  // What the owner's category dropdown offers: the engine's own list, so it cannot drift
+  // from what create accepts.
+  router.get(
+    "/clinics/:slug/treatment-categories",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      await deps.findClinic(req.params.slug);
+
+      res.json(treatmentCategories());
     })
   );
 

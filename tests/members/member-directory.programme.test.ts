@@ -41,7 +41,7 @@ const serviceFor = (
   const prisma = {
     member: { findMany: async () => [row], findUnique: async () => row },
     // Spending stats read treatments through listTreatments, which asks the catalogue first.
-    catalogItem: { findMany: async () => catalogue },
+    catalogItem: { count: async () => catalogue.length, findMany: async () => catalogue },
     clinicTreatment: { findMany: async () => [] },
     pointsTransaction: { findMany: async () => credits },
     onboardingProgram: { findFirst: async () => (programme ? { id: "p-1" } : null) },

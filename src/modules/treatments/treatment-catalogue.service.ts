@@ -8,16 +8,16 @@ import {
   TreatmentValidationError
 } from "../../common/errors/treatment.errors";
 import { CATEGORIES } from "../onboarding/engine.config";
-import { isProgrammeCentre, POINTS_PER_EURO } from "../onboarding/runtime/points-unit";
+import { POINTS_PER_EURO } from "../onboarding/runtime/points-unit";
 
 /**
  * A centre's treatments as the owner edits them, and as the scan screen and the member
  * directory read them.
  *
- * Two stores exist and a centre uses one of them. A centre with a live programme keeps its
- * price list in CatalogItem, which the engine and the scan screen read; any other centre
- * keeps ClinicTreatment. Reading and writing both go through here so a write cannot land in a
- * table the readers ignore.
+ * Two stores exist and a centre uses one of them, decided by ONE rule, `usesCatalogue`: the
+ * centre has at least one catalogue row that is not a retail product. The scan screen, the
+ * editor's list and every write follow it, so what the scan screen shows is exactly what the
+ * editor edits, whatever state the centre's programme is in.
  */
 
 export const PRICE_MESSAGE = "El precio debe estar entre 0,01 € y 100.000 €.";
@@ -128,6 +128,16 @@ const requireWholeEuro = (priceEuro: number): void => {
 };
 
 /**
+ * Whether this centre's treatments live in the catalogue. The single predicate behind reads
+ * and writes. It is the catalogue rows, not the programme's status, that decide: a centre
+ * mid-onboarding (rows imported, nothing published) is read from the catalogue, so it is
+ * written there too; a live programme with no non-product rows is read from ClinicTreatment,
+ * so it is written there.
+ */
+export const usesCatalogue = async (prisma: PrismaClient, clinicId: string): Promise<boolean> =>
+  (await prisma.catalogItem.count({ where: { clinicId, isProduct: false } })) > 0;
+
+/**
  * What the scan screen shows: catalogue rows that are not retail products, else the centre's
  * ClinicTreatment rows. The one query behind the scan screen, the editor and the member
  * directory's spending figures, so they cannot disagree.
@@ -136,13 +146,15 @@ export const listTreatments = async (
   prisma: PrismaClient,
   clinicId: string
 ): Promise<TreatmentRow[]> => {
-  const catalogItems = await prisma.catalogItem.findMany({
-    where: { clinicId, isProduct: false },
-    orderBy: [{ position: "asc" }, { externalId: "asc" }],
-    select: { id: true, name: true, priceCents: true, categoryId: true }
-  });
+  if (await usesCatalogue(prisma, clinicId)) {
+    const catalogItems = await prisma.catalogItem.findMany({
+      where: { clinicId, isProduct: false },
+      orderBy: [{ position: "asc" }, { externalId: "asc" }],
+      select: { id: true, name: true, priceCents: true, categoryId: true }
+    });
 
-  if (catalogItems.length > 0) return catalogItems.map(catalogRow);
+    return catalogItems.map(catalogRow);
+  }
 
   const treatments = await prisma.clinicTreatment.findMany({
     where: { clinicId },
@@ -153,6 +165,22 @@ export const listTreatments = async (
   return treatments.map(plainRow);
 };
 
+/** The scan screen's rows: whole euros and the field names the dashboard already uses. */
+export const scanScreenTreatments = async (
+  prisma: PrismaClient,
+  clinicId: string
+): Promise<Array<{ id: string; name: string; priceEuro: number | null; points: number }>> =>
+  (await listTreatments(prisma, clinicId)).map((t) => ({
+    id: t.id,
+    name: t.name,
+    priceEuro: t.priceEuro === null ? null : Math.round(t.priceEuro),
+    points: t.points
+  }));
+
+/** The engine's categories with their Spanish names, for the owner's dropdown. */
+export const treatmentCategories = (): Array<{ id: string; label: string }> =>
+  Object.entries(CATEGORIES).map(([id, config]) => ({ id, label: config.name }));
+
 export const createTreatment = async (
   prisma: PrismaClient,
   clinicId: string,
@@ -160,7 +188,7 @@ export const createTreatment = async (
 ): Promise<TreatmentRow> => {
   const data = parseInput(createTreatmentSchema, input);
 
-  if (await isProgrammeCentre(prisma, clinicId)) {
+  if (await usesCatalogue(prisma, clinicId)) {
     if (!validCategory(data.categoryId)) throw new TreatmentValidationError(CATEGORY_MESSAGE);
 
     const last = await prisma.catalogItem.aggregate({
@@ -201,23 +229,25 @@ export const createTreatment = async (
 };
 
 /**
- * Finds the row where the readers would show it. Looked up in both stores, scoped to this
- * clinic, so an id GET returned is always found and another clinic's id never is.
+ * Finds the row in the store the scan screen is reading for this clinic, scoped to the
+ * clinic. A row in the other store is not on screen and is not editable: it is a 404.
  */
 const locate = async (prisma: PrismaClient, clinicId: string, id: string) => {
-  const item = await prisma.catalogItem.findFirst({
-    where: { id, clinicId, isProduct: false },
-    select: { id: true }
-  });
+  if (await usesCatalogue(prisma, clinicId)) {
+    const item = await prisma.catalogItem.findFirst({
+      where: { id, clinicId, isProduct: false },
+      select: { id: true }
+    });
 
-  if (item) return { store: "catalogue" as const };
+    if (item) return { store: "catalogue" as const };
+  } else {
+    const treatment = await prisma.clinicTreatment.findFirst({
+      where: { id, clinicId },
+      select: { id: true }
+    });
 
-  const treatment = await prisma.clinicTreatment.findFirst({
-    where: { id, clinicId },
-    select: { id: true }
-  });
-
-  if (treatment) return { store: "plain" as const };
+    if (treatment) return { store: "plain" as const };
+  }
 
   throw new TreatmentNotFoundError();
 };

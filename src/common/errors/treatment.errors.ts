@@ -6,7 +6,7 @@ import { AppError } from "./app-error";
  */
 export class TreatmentValidationError extends AppError {
   constructor(message: string) {
-    super(message, { statusCode: 400, code: "TREATMENT_INVALID", expose: true });
+    super(message, { statusCode: 422, code: "TREATMENT_INVALID", expose: true });
   }
 }
 
