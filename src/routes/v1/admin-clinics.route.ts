@@ -24,7 +24,7 @@ import {
   provisionClinic,
   toProvisionedSummary
 } from "../../modules/clinics/clinic-provisioning.service";
-import { hasOwnLogo } from "../../modules/templates/own-logo";
+import { hasOwnLogo, usesBorrowedImages } from "../../modules/templates/own-logo";
 
 export const adminClinicsRouter = Router();
 
@@ -172,10 +172,11 @@ const toAdminClinicSummary = (clinic: AdminClinicSummaryInput) => ({
   members: clinic._count.members,
   templates: clinic.template ? 1 : 0,
   // True when the card shows no logo of the centre's own (none, the Voone default or a
-  // borrowed image), so staff can find the clinics that still need one. A centre with no
-  // card has no logo either.
+  // borrowed image) or still carries a borrowed hero or dark-logo image, so staff can find
+  // the clinics that still need one. A centre with no card has no logo either.
   usesDefaultLogo: clinic.template
-    ? !hasOwnLogo(clinic.template, config.VOONE_DEFAULT_LOGO_URL)
+    ? !hasOwnLogo(clinic.template, config.VOONE_DEFAULT_LOGO_URL) ||
+      usesBorrowedImages(clinic.template)
     : true,
   treatments: treatmentSummaryFor(clinic),
   users: clinic.users.map((user) => ({
@@ -657,6 +658,35 @@ adminClinicsRouter.post(
   })
 );
 
+/**
+ * What a draft centre needs before it can go live: the card, a live programme, a logo of its
+ * own, and no image borrowed from another client. Shared by every route that can set
+ * `isActive` to true, so none of them is a way around it.
+ *
+ * A card without the centre's own logo goes out under Voone's or, worse, another client's
+ * branding, and members add it to their phones the day the centre goes live.
+ */
+const assertCanActivate = (clinic: AdminClinicSummaryInput): void => {
+  const missing = [
+    !clinic.template ? "la tarjeta" : null,
+    !hasLiveProgram(clinic) ? "un programa activo" : null
+  ].filter((item): item is string => item !== null);
+
+  if (missing.length > 0) {
+    throw new MembershipValidationError(`Falta ${missing.join(" y ")} para activar el centro.`);
+  }
+
+  if (clinic.template && !hasOwnLogo(clinic.template, config.VOONE_DEFAULT_LOGO_URL)) {
+    throw new MembershipValidationError("Añade el logo propio del centro antes de activarlo.");
+  }
+
+  if (clinic.template && usesBorrowedImages(clinic.template)) {
+    throw new MembershipValidationError(
+      "Quita la imagen de ejemplo de la tarjeta o sustitúyela por la del centro antes de activarlo."
+    );
+  }
+};
+
 adminClinicsRouter.patch(
   "/admin/clinics/:clinicId",
   createRequireStaffKey(config.STAFF_API_KEY),
@@ -670,6 +700,15 @@ adminClinicsRouter.patch(
 
     const voonePlan = typeof req.body?.voonePlan === "string" ? req.body.voonePlan : undefined;
     const isActive = typeof req.body?.isActive === "boolean" ? req.body.isActive : undefined;
+
+    // Turning a draft on is an activation like POST .../activate, so it meets the same checks.
+    // Turning a centre off, or setting a flag it already has, stays unrestricted.
+    if (isActive === true && !clinic.isActive) {
+      const detailed = await getAdminClinicSafe(clinic.id);
+
+      if (detailed) assertCanActivate(detailed);
+    }
+
     const notificationsMonthlyQuota = voonePlan ? planQuota(voonePlan) : undefined;
 
     await prisma.clinic.update({
@@ -702,22 +741,9 @@ adminClinicsRouter.post(
       return;
     }
 
-    const missing = [
-      !clinic.template ? "la tarjeta" : null,
-      !hasLiveProgram(clinic) ? "un programa activo" : null
-    ].filter((item): item is string => item !== null);
-
-    if (missing.length > 0) {
-      throw new MembershipValidationError(`Falta ${missing.join(" y ")} para activar el centro.`);
-    }
-
-    // A card without the centre's own logo goes out under Voone's or, worse, another
-    // client's branding, and members add it to their phones the day the centre goes live.
-    if (clinic.template && !hasOwnLogo(clinic.template, config.VOONE_DEFAULT_LOGO_URL)) {
-      throw new MembershipValidationError("Añade el logo propio del centro antes de activarlo.");
-    }
-
+    // Activating a centre that is already live is a no-op, whatever its card holds now.
     if (!clinic.isActive) {
+      assertCanActivate(clinic);
       await prisma.clinic.update({ where: { id: clinic.id }, data: { isActive: true } });
     }
 

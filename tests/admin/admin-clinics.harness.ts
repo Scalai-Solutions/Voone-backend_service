@@ -23,7 +23,7 @@ export interface Reply {
   body: any; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
-export const call = async (method: string, path: string): Promise<Reply> => {
+export const call = async (method: string, path: string, body?: unknown): Promise<Reply> => {
   const server = app.listen(0);
 
   try {
@@ -31,7 +31,11 @@ export const call = async (method: string, path: string): Promise<Reply> => {
     const port = typeof address === "object" && address ? address.port : 0;
     const response = await fetch(`http://127.0.0.1:${port}/api/v1${path}`, {
       method,
-      headers: config.STAFF_API_KEY ? { "x-voone-staff-key": config.STAFF_API_KEY } : {}
+      headers: {
+        ...(config.STAFF_API_KEY ? { "x-voone-staff-key": config.STAFF_API_KEY } : {}),
+        ...(body === undefined ? {} : { "content-type": "application/json" })
+      },
+      body: body === undefined ? undefined : JSON.stringify(body)
     });
     const text = await response.text();
 
@@ -46,7 +50,12 @@ let sequence = 0;
 /** A draft clinic with a card and a live programme: everything but a logo decision. */
 export const createClinicWithLogo = async (
   logoUrl: string | null,
-  options: { withTemplate?: boolean } = {}
+  options: {
+    withTemplate?: boolean;
+    heroImageUrl?: string | null;
+    logoOnDarkUrl?: string | null;
+    isActive?: boolean;
+  } = {}
 ): Promise<{ id: string; slug: string }> => {
   const slug = `logo-${process.pid}-${Date.now()}-${(sequence += 1)}`;
   const preset = await db.templatePreset.findFirstOrThrow();
@@ -56,7 +65,7 @@ export const createClinicWithLogo = async (
       name: `Centro ${slug}`,
       addressLine: "Calle Prueba 1",
       pincode: "08001",
-      isActive: false
+      isActive: options.isActive ?? false
     }
   });
 
@@ -68,6 +77,8 @@ export const createClinicWithLogo = async (
         programName: "Club Prueba",
         hexBackgroundColor: "#30221f",
         logoUrl,
+        heroImageUrl: options.heroImageUrl ?? null,
+        logoOnDarkUrl: options.logoOnDarkUrl ?? null,
         pointsLabel: "Puntos",
         tierLabel: "Nivel",
         benefitsText: "Ventajas exclusivas para socias.",

@@ -16,7 +16,7 @@ const created: string[] = [];
 /** The flag the admin list reports for a clinic created with this logo (or no template). */
 const flagFor = async (
   logoUrl: string | null,
-  options: { withTemplate?: boolean } = {}
+  options: Parameters<typeof createClinicWithLogo>[1] = {}
 ): Promise<boolean> => {
   const clinic = await createClinicWithLogo(logoUrl, options);
 
@@ -63,5 +63,29 @@ describe("GET /admin/clinics flags clinics on a default logo", () => {
 
   it("is true for a clinic that has no template at all", async () => {
     expect(await flagFor(null, { withTemplate: false })).toBe(true);
+  });
+
+  it("is true when the logo is its own but the hero image is a borrowed one", async () => {
+    expect(
+      await flagFor("https://clinica.example/logo.png", {
+        heroImageUrl: BORROWED_DEFAULT_IMAGE_URLS[1]
+      })
+    ).toBe(true);
+  });
+
+  it("is true when the logo is its own but the dark logo is a borrowed one", async () => {
+    expect(
+      await flagFor("https://clinica.example/logo.png", {
+        logoOnDarkUrl: BORROWED_DEFAULT_IMAGE_URLS[0]
+      })
+    ).toBe(true);
+  });
+
+  it("is false when the logo and the hero image are both its own", async () => {
+    expect(
+      await flagFor("https://clinica.example/logo.png", {
+        heroImageUrl: "https://clinica.example/hero.png"
+      })
+    ).toBe(false);
   });
 });
