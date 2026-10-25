@@ -177,17 +177,44 @@ export const assertIssuerScopedId = (id: string, fieldName: string): void => {
   }
 };
 
+/**
+ * Obtains a bearer token for the Wallet API.
+ *
+ * Building the OAuth client (reading and validating the service-account key) is left to
+ * throw as itself: that is a configuration fault, and wrapping it would present a broken
+ * key as a Google outage. Only the token request is wrapped, as a `GoogleWalletApiError`
+ * with status 0 like any other Google call that could not be completed, so callers treat a
+ * token-endpoint outage the same way as a failed API request.
+ */
 const getAccessToken = async (): Promise<string> => {
   if (!oauthClientPromise) {
     oauthClientPromise = createOAuthClient();
   }
 
   const oauthClient = await oauthClientPromise;
-  const accessTokenResponse = await oauthClient.getAccessToken();
-  const accessToken = accessTokenResponse.token;
+  let accessToken: string | null | undefined;
+
+  try {
+    accessToken = (await oauthClient.getAccessToken()).token;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    console.error("Google Wallet access token could not be obtained", { message });
+
+    throw new GoogleWalletApiError(
+      "Google Wallet access token could not be obtained",
+      0,
+      "TOKEN_ERROR",
+      { message }
+    );
+  }
 
   if (!accessToken) {
-    throw new Error("Google Wallet OAuth client did not return an access token");
+    throw new GoogleWalletApiError(
+      "Google Wallet OAuth client did not return an access token",
+      0,
+      "TOKEN_ERROR"
+    );
   }
 
   return accessToken;
