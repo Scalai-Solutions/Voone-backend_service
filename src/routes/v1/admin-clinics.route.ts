@@ -171,6 +171,12 @@ const toAdminClinicSummary = (clinic: AdminClinicSummaryInput) => ({
   status: clinic.isActive && clinic.template && hasLiveProgram(clinic) ? "active" : "setup",
   members: clinic._count.members,
   templates: clinic.template ? 1 : 0,
+  // True when the card shows no logo of the centre's own (none, the Voone default or a
+  // borrowed image), so staff can find the clinics that still need one. A centre with no
+  // card has no logo either.
+  usesDefaultLogo: clinic.template
+    ? !hasOwnLogo(clinic.template, config.VOONE_DEFAULT_LOGO_URL)
+    : true,
   treatments: treatmentSummaryFor(clinic),
   users: clinic.users.map((user) => ({
     id: user.id,
