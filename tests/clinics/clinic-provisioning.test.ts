@@ -457,7 +457,12 @@ describe("provisionClinic", () => {
         )
       ).rejects.toThrow(ClinicCardCreationError);
 
-      expect(rollback.userDeleteMany).toHaveBeenCalledWith({ where: { email: "owner@nova.es" } });
+      // Scoped to THIS call's clinic: Google can take seconds, and a second onboarding with
+      // the same owner email may meanwhile have moved the user onto its own clinic. That
+      // row no longer matches the filter, so it is not deleted.
+      expect(rollback.userDeleteMany).toHaveBeenCalledWith({
+        where: { email: "owner@nova.es", clinicId: "c1" }
+      });
       expect(rollback.userUpdate).not.toHaveBeenCalled();
     });
 

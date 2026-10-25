@@ -238,30 +238,41 @@ const createWithAvailableSlug = async (
  * Nothing in the schema cascades from Clinic to its template, treatments or wallet class
  * rows, so each is deleted explicitly, children first. An owner account this call created
  * goes too; one that already existed is put back on whatever clinic it belonged to.
+ *
+ * A Google class that was already created cannot be deleted from here and is left behind.
+ * That is harmless: its id derives from this call's new template id, so a retry for another
+ * clinic is unaffected and nothing ever points at it.
  */
 const rollbackProvisionedClinic = (db: PrismaClient, created: CreatedClinic) =>
-  db.$transaction(async (tx) => {
-    await tx.walletClass.deleteMany({ where: { clinicTemplateId: created.template.id } });
-    await tx.clinicTemplate.deleteMany({ where: { id: created.template.id } });
-    await tx.clinicTreatment.deleteMany({ where: { clinicId: created.clinic.id } });
+  db.$transaction(
+    async (tx) => {
+      await tx.walletClass.deleteMany({ where: { clinicTemplateId: created.template.id } });
+      await tx.clinicTemplate.deleteMany({ where: { id: created.template.id } });
+      await tx.clinicTreatment.deleteMany({ where: { clinicId: created.clinic.id } });
 
-    if (created.ownerEmail) {
-      if (created.ownerBefore) {
-        await tx.user.update({
-          where: { id: created.ownerBefore.id },
-          data: {
-            clinicId: created.ownerBefore.clinicId,
-            name: created.ownerBefore.name,
-            role: created.ownerBefore.role
-          }
-        });
-      } else {
-        await tx.user.deleteMany({ where: { email: created.ownerEmail } });
+      if (created.ownerEmail) {
+        if (created.ownerBefore) {
+          await tx.user.update({
+            where: { id: created.ownerBefore.id },
+            data: {
+              clinicId: created.ownerBefore.clinicId,
+              name: created.ownerBefore.name,
+              role: created.ownerBefore.role
+            }
+          });
+        } else {
+          // Only a user still attached to the clinic created in THIS call: a concurrent
+          // onboarding with the same owner email may have moved it to its own clinic since.
+          await tx.user.deleteMany({
+            where: { email: created.ownerEmail, clinicId: created.clinic.id }
+          });
+        }
       }
-    }
 
-    await tx.clinic.delete({ where: { id: created.clinic.id } });
-  });
+      await tx.clinic.delete({ where: { id: created.clinic.id } });
+    },
+    { timeout: 15_000 }
+  );
 
 /**
  * Onboards a clinic: the row, its template, and the Wallet class for it.
