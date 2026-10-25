@@ -48,11 +48,12 @@ PR 2 deploys only after PR 1 is live. PR 6 deploys after PRs 3 and 5.
 
 ## PR 1 (frontend)
 
-### Task 1: Template reads carry the clinic id
+### Task 1: Template reads carry the clinic id, and writes carry who made them
 
 **Files:**
 - Modify: `src/lib/api-client.ts` (`getTemplate`, `getCurrentClinicTemplate`, `getTemplates`)
 - Modify: `src/app/(dashboard)/dashboard/templates/[templateId]/page.tsx`, `src/app/(admin)/admin/clinics/[clinicId]/card/page.tsx`
+- Modify: `src/lib/staff-api.ts` (`staffFetch` also sends `x-actor: <session user email>`, which the backend records in Task 2)
 
 **Interfaces:**
 - Produces: `getTemplate(templateId: string, clinicId: string): Promise<Template>` sending header `x-clinic-id: clinicId`; `getTemplates(clinicId: string)`.
@@ -60,7 +61,7 @@ PR 2 deploys only after PR 1 is live. PR 6 deploys after PRs 3 and 5.
 - [ ] **Step 1:** Add the `clinicId` parameter and header to the three functions; update both pages (clinic id from `session.clinicId` and from `clinic.id`).
 - [ ] **Step 2:** Run `npm run typecheck && npm run lint`. Expected: no new errors.
 - [ ] **Step 3:** Manual check: open the card editor as owner and as admin; the form loads with data.
-- [ ] **Step 4:** Commit `fix(templates): send the clinic id with template reads`.
+- [ ] **Step 4:** Commit `fix(templates): send the clinic id with template reads and the actor with writes`.
 
 ---
 
@@ -72,7 +73,6 @@ PR 2 deploys only after PR 1 is live. PR 6 deploys after PRs 3 and 5.
 - Modify: `src/modules/templates/templates.controller.ts` (`getById`, `list`, `update`), `src/modules/templates/templates.service.ts`
 - Create: `src/modules/templates/template-change.service.ts`, migration `prisma/migrations/20261026090000_template_change/migration.sql`
 - Modify: `prisma/schema.prisma` (model `TemplateChange`: `id`, `clinicId`, `templateId`, `changedBy String?`, `changedFields String[]`, `cardsAtSave Int`, `createdAt`)
-- Modify (frontend, same task, separate commit in PR 1's repo after PR 1): `src/lib/staff-api.ts` `staffFetch` adds `x-actor: <session email>`
 - Test: `tests/templates/templates.ownership.test.ts`, `tests/templates/template-change.test.ts`
 
 **Interfaces:**
@@ -158,7 +158,7 @@ PR 2 deploys only after PR 1 is live. PR 6 deploys after PRs 3 and 5.
 
 ### Task 10: Wording, labels, and navigation
 
-**Files:** Modify `src/components/admin/onboarding-wizard.tsx` (`TOTAL_ONBOARDING_STEPS = steps.length`), `src/components/dashboard/template-form.tsx` (tab labels `Diseño`, `Vista previa`, `Tratamientos` stays until PR 6; heading "Diseño de la tarjeta"; default `tierLabel` `Nivel`), `src/components/dashboard/member-detail.tsx:207` (`Registro bloqueado` becomes `Movimiento permanente`), every `\bsocias?\b` match under `src/` (`signup-form.tsx`, `field.tsx`, `why-voone.tsx`, `settings/page.tsx`, `current-clinic.ts`, `role-permissions-manager.tsx`, `default-wallet-template.ts`), currency text in `center-view.tsx` (`Precio: 60 €`), the admin "Templates" nav label to `Design library`, and "plantilla" to "diseño de la tarjeta" in clinic-facing strings.
+**Files:** Modify `src/components/admin/onboarding-wizard.tsx` (`TOTAL_ONBOARDING_STEPS = steps.length`), `src/components/dashboard/template-form.tsx` (tab labels `Diseño`, `Vista previa`, `Tratamientos` stays until PR 6; heading "Diseño de la tarjeta"; default `tierLabel` `Nivel`), `src/components/dashboard/member-detail.tsx:207` (`Registro bloqueado` becomes `Movimiento permanente`), every `\bsocias?\b` match under `src/` (`signup-form.tsx`, `field.tsx`, `why-voone.tsx`, `settings/page.tsx`, `current-clinic.ts`, `role-permissions-manager.tsx`, `default-wallet-template.ts`), currency text in `center-view.tsx` (`Precio: 60 €`), the admin "Templates" nav label to `Design library`, and "plantilla" to "diseño de la tarjeta" in clinic-facing strings. Also remove the borrowed images: `src/lib/default-wallet-template.ts` `DEFAULT_WALLET_LOGO_URL` and `DEFAULT_WALLET_HERO_IMAGE_URL` (a client's `i.ibb.co` photos, pre-filled by `onboarding-wizard.tsx` and `template-studio.tsx`) are replaced by the plain Voone default logo served from `public/` and no hero; the wizard blocks "Save and continue" until a logo of the clinic's own is entered.
 
 - [ ] **Step 1-2:** Make the edits; run `npm run typecheck && npm run lint`.
 - [ ] **Step 3:** Manual check: wizard shows `Step 1 of 3`; member page, signup form and card editor show no "socia" or English; admin nav shows "Design library".
