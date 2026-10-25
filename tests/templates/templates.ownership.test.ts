@@ -6,7 +6,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../../src/modules/templates/templates.repository", () => ({
   templatesRepository: {
     findPresets: vi.fn(),
-    findMany: vi.fn(),
     findByClinicId: vi.fn(),
     findById: vi.fn(),
     create: vi.fn(),
@@ -141,7 +140,6 @@ beforeEach(() => {
   vi.mocked(templatesRepository.markActive).mockReset();
   vi.mocked(templatesRepository.markFailed).mockReset();
   vi.mocked(treatmentsRepository.replaceForClinic).mockReset();
-  vi.mocked(templatesRepository.findMany).mockReset();
   walletPassEngine.createClassForTemplate.mockClear();
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
@@ -228,6 +226,16 @@ describe("PATCH /templates/:templateId", () => {
   });
 });
 
+describe("a request without a clinic", () => {
+  it("is told the clinic identifier is missing, not that the payload is invalid", async () => {
+    const result = await call(templatesController.list, {});
+
+    expect(result.statusCode).toBe(400);
+    expect(result.payload).toEqual({ message: "Falta el identificador del centro (x-clinic-id)." });
+    expect(templatesRepository.findByClinicId).not.toHaveBeenCalled();
+  });
+});
+
 describe("GET /templates", () => {
   it("lists only the template of the clinic in x-clinic-id", async () => {
     vi.mocked(templatesRepository.findByClinicId).mockResolvedValue(MINE as never);
@@ -235,7 +243,6 @@ describe("GET /templates", () => {
     const result = await call(templatesController.list, { clinicId: "clinic-mine" });
 
     expect(templatesRepository.findByClinicId).toHaveBeenCalledWith("clinic-mine");
-    expect(templatesRepository.findMany).not.toHaveBeenCalled();
     expect(result.payload).toEqual([MINE]);
   });
 

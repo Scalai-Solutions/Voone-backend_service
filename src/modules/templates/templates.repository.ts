@@ -28,13 +28,6 @@ export const templatesRepository = {
     return prisma.templatePreset.findMany({ orderBy: { createdAt: "asc" } });
   },
 
-  findMany() {
-    return prisma.clinicTemplate.findMany({
-      include: templateInclude,
-      orderBy: { updatedAt: "desc" }
-    });
-  },
-
   findByClinicId(clinicId: string) {
     return prisma.clinicTemplate.findUnique({
       where: { clinicId },

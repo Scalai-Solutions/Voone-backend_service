@@ -14,13 +14,20 @@ import {
 } from "./templates.schema";
 import { templatesService } from "./templates.service";
 
+/** Neither x-clinic-id nor ?clinicId= was sent: a caller mistake worth naming precisely. */
+class MissingClinicIdError extends Error {}
+
 const getClinicId = (request: Request): string => {
   const headerClinicId = request.header("x-clinic-id");
   const queryClinicId = request.query.clinicId;
+  const clinicId =
+    headerClinicId ?? (typeof queryClinicId === "string" ? queryClinicId : undefined);
 
-  return clinicContextSchema.parse({
-    clinicId: headerClinicId ?? (typeof queryClinicId === "string" ? queryClinicId : undefined)
-  }).clinicId;
+  if (clinicId === undefined || clinicId.trim() === "") {
+    throw new MissingClinicIdError();
+  }
+
+  return clinicContextSchema.parse({ clinicId }).clinicId;
 };
 
 /**
@@ -34,6 +41,11 @@ const getActor = (request: Request): string | undefined => {
 };
 
 const handleControllerError = (error: unknown, res: Response) => {
+  if (error instanceof MissingClinicIdError) {
+    res.status(400).json({ message: "Falta el identificador del centro (x-clinic-id)." });
+    return;
+  }
+
   if (error instanceof ZodError) {
     res.status(400).json({ message: "Invalid template payload", issues: error.issues });
     return;
