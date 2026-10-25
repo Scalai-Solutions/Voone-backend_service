@@ -3,8 +3,8 @@ export interface LoyaltyClassInput {
   classId: string;
   programName: string;
   hexBackgroundColor: string;
-  logoUrl: string;
-  heroImageUrl: string;
+  logoUrl?: string;
+  heroImageUrl?: string;
   homepageUrl: string;
   accountNameLabel?: string;
   accountIdLabel?: string;

@@ -1,4 +1,7 @@
-import { DEFAULT_WALLET_HERO_IMAGE_URL, DEFAULT_WALLET_LOGO_URL } from "./default-voone-template";
+import {
+  BORROWED_DEFAULT_HERO_IMAGE_URL,
+  BORROWED_DEFAULT_LOGO_URL
+} from "./default-voone-template";
 
 /**
  * Images that once shipped as the card's fallbacks. They belong to a single client (the
@@ -7,8 +10,8 @@ import { DEFAULT_WALLET_HERO_IMAGE_URL, DEFAULT_WALLET_LOGO_URL } from "./defaul
  * image host is genuine and must not be flagged.
  */
 export const BORROWED_DEFAULT_IMAGE_URLS: readonly string[] = [
-  DEFAULT_WALLET_LOGO_URL,
-  DEFAULT_WALLET_HERO_IMAGE_URL
+  BORROWED_DEFAULT_LOGO_URL,
+  BORROWED_DEFAULT_HERO_IMAGE_URL
 ];
 
 /**

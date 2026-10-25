@@ -3,6 +3,7 @@
 
 import { Router } from "express";
 
+import { config } from "../../config/env";
 import { getGoogleWalletIssuerId } from "../../wallet/providers/google/client";
 import { buildSaveLink, createObject, createOrUpdateClass } from "../../wallet/providers/google";
 import type { LoyaltyClassInput, LoyaltyObjectInput } from "../../wallet/providers/google/types";
@@ -12,12 +13,11 @@ export const walletTestRouter = Router();
 const sapphiraWebsiteUrl = "https://voone.app";
 const sapphiraScheduleAppointmentUrl = "https://voone.app/alta/sapphira-prive";
 const sapphiraCardBackgroundColor = "#30221f";
+// No hardcoded client images: the fixture uses what the environment provides, the plain
+// Voone logo as the logo fallback, and no hero when none is set.
 const sapphiraLogoUrl =
-  process.env.GOOGLE_WALLET_SAPPHIRA_LOGO_URL ??
-  "https://i.ibb.co/C5qhWHMk/Whats-App-Image-2026-08-31-at-12-18-49-PM-1.jpg";
-const sapphiraHeroImageUrl =
-  process.env.GOOGLE_WALLET_SAPPHIRA_HERO_IMAGE_URL ??
-  "https://i.ibb.co/Hfy7XNtb/Gemini-Generated-Image-viollgviollgviol.png";
+  process.env.GOOGLE_WALLET_SAPPHIRA_LOGO_URL ?? config.VOONE_DEFAULT_LOGO_URL;
+const sapphiraHeroImageUrl = process.env.GOOGLE_WALLET_SAPPHIRA_HERO_IMAGE_URL;
 
 function renderAddToWalletPage(saveUrl: string): string {
   return `<!doctype html>

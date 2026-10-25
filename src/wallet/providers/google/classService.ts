@@ -256,8 +256,10 @@ const toGoogleLoyaltyClassBody = (input: LoyaltyClassInput): GoogleLoyaltyClassR
   accountNameLabel: input.accountNameLabel ?? "Nombre del miembro",
   accountIdLabel: input.accountIdLabel ?? "ID de miembro",
   hexBackgroundColor: input.hexBackgroundColor,
-  programLogo: toGoogleImage(input.logoUrl),
-  heroImage: toGoogleImage(input.heroImageUrl, input.heroImageDescription),
+  ...(input.logoUrl ? { programLogo: toGoogleImage(input.logoUrl) } : {}),
+  ...(input.heroImageUrl
+    ? { heroImage: toGoogleImage(input.heroImageUrl, input.heroImageDescription) }
+    : {}),
   homepageUri: {
     uri: input.homepageUrl
   },

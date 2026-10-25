@@ -1,11 +1,7 @@
 import { WalletProviderType } from "@prisma/client";
 
 import { config } from "../../../config/env";
-import {
-  DEFAULT_WALLET_BENEFIT_CTA,
-  DEFAULT_WALLET_HERO_IMAGE_URL,
-  DEFAULT_WALLET_LOGO_URL
-} from "../../../modules/templates/default-voone-template";
+import { DEFAULT_WALLET_BENEFIT_CTA } from "../../../modules/templates/default-voone-template";
 import { BaseWalletProvider } from "../../engine/base-wallet-provider";
 import type { LoyaltyCard } from "../../engine/loyalty-card";
 import type {
@@ -178,8 +174,10 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       classId,
       programName: template.programName,
       hexBackgroundColor: template.backgroundColor,
-      logoUrl: template.logoUrl ?? DEFAULT_WALLET_LOGO_URL,
-      heroImageUrl: template.heroImageUrl ?? DEFAULT_WALLET_HERO_IMAGE_URL,
+      // The plain Voone logo when the clinic has none (absent if that is not configured),
+      // and no hero at all: another client's images are never a fallback.
+      logoUrl: template.logoUrl ?? config.VOONE_DEFAULT_LOGO_URL,
+      heroImageUrl: template.heroImageUrl,
       heroImageDescription: `${template.programName} hero image`,
       homepageUrl: websiteUrl,
       accountNameLabel: "Nombre de socia",
