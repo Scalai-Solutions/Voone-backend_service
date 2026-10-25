@@ -178,7 +178,7 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       // and no hero at all: another client's images are never a fallback.
       logoUrl: template.logoUrl ?? config.VOONE_DEFAULT_LOGO_URL,
       heroImageUrl: template.heroImageUrl,
-      heroImageDescription: `${template.programName} hero image`,
+      heroImageDescription: `Imagen de ${template.programName}`,
       homepageUrl: websiteUrl,
       accountNameLabel: "Nombre de miembro",
       accountIdLabel: "N.º de miembro",

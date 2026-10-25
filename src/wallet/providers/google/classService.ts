@@ -253,8 +253,8 @@ const toGoogleLoyaltyClassBody = (input: LoyaltyClassInput): GoogleLoyaltyClassR
   issuerName: input.issuerName,
   reviewStatus: "UNDER_REVIEW",
   programName: input.programName,
-  accountNameLabel: input.accountNameLabel ?? "Nombre del miembro",
-  accountIdLabel: input.accountIdLabel ?? "ID de miembro",
+  accountNameLabel: input.accountNameLabel ?? "Nombre de miembro",
+  accountIdLabel: input.accountIdLabel ?? "N.º de miembro",
   hexBackgroundColor: input.hexBackgroundColor,
   ...(input.logoUrl ? { programLogo: toGoogleImage(input.logoUrl) } : {}),
   ...(input.heroImageUrl

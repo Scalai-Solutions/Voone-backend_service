@@ -181,6 +181,30 @@ describe("the Spanish, neutral words on a Google card", () => {
     ).toEqual(["Beneficios", "Información"]);
   });
 
+  it("describes the hero image in Spanish for a screen reader", async () => {
+    const body = (await provision(
+      programWith({ heroImageUrl: "https://clinica.example/hero.png" })
+    )) as unknown as { heroImage: { contentDescription: { defaultValue: { value: string } } } };
+
+    expect(body.heroImage.contentDescription.defaultValue.value).toBe("Imagen de Club Prueba");
+  });
+
+  it("falls back to the same miembro labels when a class names none", async () => {
+    state.googleBodies.length = 0;
+
+    await createOrUpdateClass({
+      issuerName: "Centro Prueba",
+      classId: "issuer-1.class",
+      programName: "Club Prueba",
+      hexBackgroundColor: "#30221f",
+      homepageUrl: "https://voone.app"
+    });
+    const [body] = state.googleBodies as unknown as ClassBody[];
+
+    expect(body.accountNameLabel).toBe("Nombre de miembro");
+    expect(body.accountIdLabel).toBe("N.º de miembro");
+  });
+
   it("never says socia anywhere in the class", async () => {
     expect(JSON.stringify(await classWithLinks())).not.toMatch(/\bsocias?\b/i);
   });
