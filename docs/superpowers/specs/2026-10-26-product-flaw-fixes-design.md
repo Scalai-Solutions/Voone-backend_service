@@ -24,6 +24,14 @@ that each end in a pull request. The owner of the decisions is Hritik (CTO).
 6. **Neutral wording.** "Miembro" and "N.º de miembro" replace "socia" and "N.º de socia"
    everywhere in Spanish, on the card and in the dashboard, so one term is used for one thing.
 
+7. **Programme versions stay with Voone.** Owners see the live programme and are told to contact
+   Voone to change rewards or levels. Voone creates the new version in the admin panel.
+8. **Clinics already live with a borrowed or missing logo are flagged, not changed.** The admin
+   panel marks them "uses the default logo". Nothing is replaced automatically, because that would
+   change cards already on clients' phones.
+9. **A Google failure does not block creating a clinic.** The clinic is created, the Google card is
+   marked pending with a clear message, and it is retried the next time the template is saved.
+
 ## Goals
 
 - No clinic can ship another client's logo or photo.
@@ -52,14 +60,26 @@ that each end in a pull request. The owner of the decisions is Hritik (CTO).
 ## Batches and what each contains
 
 **Batch 1, backend: safety and data.**
-- Template read and update verify the template belongs to the clinic named in the request. The
-  admin route is the only exception and is checked by role.
+- Template read and update verify the template belongs to the clinic named in the `x-clinic-id`
+  header. The list endpoint returns only that clinic's template. The admin screens pass the real
+  clinic id of the template they open, so one rule covers owners and admins. The public branding
+  path through `/clinics/:slug` is unchanged. The backend trusts the shared staff key and the
+  header (it has no user or role), so this stops wrong-clinic access by id, not a caller who holds
+  the key and lies about the header.
 - A change record for card design saves: clinic, template, who, when, which fields changed, how
   many cards were queued. Written on every successful save.
 - Activation (`POST /admin/clinics/:id/activate`) refuses a clinic whose template has no logo of
   its own, with a clear Spanish message. A new clinic's template is created with the plain Voone
   default, not with any client's images.
 - Image URLs stay single-URL (already done).
+- Clinic creation: a Google failure leaves the clinic created and the Google class pending, with a
+  clear Spanish message to the admin; the next template save retries it. Other failures return a
+  specific message, not "Internal server error", and leave no half-created clinic.
+- The admin clinic list marks clinics whose template has no logo of its own or still uses a
+  borrowed default image. Flag only; no data is changed.
+- The plain Voone default logo is a public file hosted on the frontend domain; the backend takes
+  its URL from configuration. The old borrowed default images are removed from the frontend
+  (wizard, template studio) and from the Google provider's fallback.
 
 **Batch 2, backend: unit consistency and refresh visibility.**
 - Sweep every place a balance or distance reaches a client or staff and use `toPoints` for
@@ -67,12 +87,24 @@ that each end in a pull request. The owner of the decisions is Hritik (CTO).
   One helper decides "is this a programme centre", used by all of them.
 - A refresh status read: for a clinic, how many cards were queued by the last design change, how
   many have updated since, how many failed. Derived from existing wallet object rows.
+- Client-visible English in the backend becomes Spanish: notification bodies ("Points updated",
+  "Your balance is now ...") and the Google card's default button and module labels ("Website",
+  "Schedule Appointment", "Benefits", "Information").
+- "Refresh reached the cards" means: rebuilt and synced on the server after the change time. The
+  owner sees it as "actualizadas en el servidor", not as "received on the phone". The change record
+  stores the count of members with a wallet pass at save time. The status read counts how many are
+  synced since then and how many failed.
 - The refresh stays in the API process for now. Moving it to a queue is a deployment decision, not
   part of this work.
 
 **Batch 3, frontend: consistency.**
-- Spanish for everything a clinic user sees; the admin panel stays English. The card editor and the
-  clinic wizard parts shown to clinics are translated.
+- Spanish for everything a clinic user sees; the admin panel stays English. The card editor that
+  owners use (`template-form`) is Spanish for admins too, since it is the same screen. The clinic
+  wizard is admin-only and stays English.
+- The default level label becomes "Nivel", so it never contradicts the member's actual level
+  (it was "Miembro Gold" on a Bronze member).
+- The stored default benefits text says "socias"; it is rewritten to "miembros" only where it
+  still equals the default. Text an owner has edited is left alone.
 - "Miembro" and "N.º de miembro" on the card (backend strings) and in every dashboard screen.
 - Wallet badges on the member page show the real state: added or not added, per wallet. No
   "Próximamente" for a wallet that works.
@@ -87,8 +119,14 @@ that each end in a pull request. The owner of the decisions is Hritik (CTO).
 - "Price: 60 euros" and similar read as Spanish ("Precio: 60 €").
 
 **Batch 4, frontend and backend: owner-managed treatments and card changes.**
+- Owners and managers (the existing `clinicEdit` permission) can edit treatments.
 - My center, Treatments tab, becomes editable for owners and managers: add, rename, change price,
-  remove. It is the only place treatments are edited. The Treatments tab leaves the card editor.
+  remove. It is the only place treatments are edited. For a programme centre the editor writes the
+  programme catalogue (`CatalogItem`), which is what the scan-to-credit screen reads, and keeps
+  `ClinicTreatment` in step as today; for other centres it writes `ClinicTreatment`. A new
+  treatment needs a category chosen from the existing ones, so it never sets `needsReview` and
+  never blocks a programme version. A price change does not alter the live programme's stored
+  catalogue snapshot. Member spending stats read the same source as the scan screen. The Treatments tab leaves the card editor.
 - Saving the card design shows the confirmation (what changes, how many cards) and writes the
   change record from Batch 1.
 - Admin can open the same editor for a clinic (done in an earlier PR).
@@ -96,7 +134,10 @@ that each end in a pull request. The owner of the decisions is Hritik (CTO).
 **Batch 5, frontend and backend: rewards and levels have one source.**
 - The clinic sign-up wizard stops asking for tiers and milestones. The programme builder is the
   only source, and My center's Rewards and Levels tabs read from the live programme.
-- Those tabs say how to change them: creating a new programme version.
+- Those tabs say how to change them: contact Voone, who creates a new programme version.
+- The wizard no longer writes tiers and milestones; the template columns keep their schema
+  defaults, which the legacy readers (tier scale, base tier at join, card reward text before a
+  programme is live) still use, so a member who signs up before the programme is live still works.
 
 ## Constraints
 
@@ -112,3 +153,15 @@ that each end in a pull request. The owner of the decisions is Hritik (CTO).
 - How "who" is passed to the backend for the change record, following the existing notification
   audit pattern.
 - Test layout.
+
+## Calls made by the builder-check (the user may override)
+
+- Owners and managers share the treatment-editing gate (`clinicEdit`).
+- Ownership rule: one header match for owner and admin screens; reads included.
+- The editor writes the catalogue for programme centres and `ClinicTreatment` otherwise.
+- New treatments need an existing category, so they never block a programme version.
+- Stored default texts are rewritten to "miembro" only when still equal to the default.
+- The wizard stops asking for tiers and milestones; schema defaults feed the legacy readers.
+- "Refresh reached the cards" means rebuilt and synced on the server, shown honestly as such.
+- The Voone default logo is hosted on the frontend domain.
+- Client-visible English in the backend (notifications, Google default labels) is Spanish, in Batch 2.
