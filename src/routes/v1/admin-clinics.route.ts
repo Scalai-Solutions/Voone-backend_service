@@ -24,6 +24,7 @@ import {
   provisionClinic,
   toProvisionedSummary
 } from "../../modules/clinics/clinic-provisioning.service";
+import { programmeCentreIds, toPoints } from "../../modules/onboarding/runtime/points-unit";
 import { hasOwnLogo, usesBorrowedImages } from "../../modules/templates/own-logo";
 
 export const adminClinicsRouter = Router();
@@ -226,13 +227,19 @@ const toAdminClinicSummary = (clinic: AdminClinicSummaryInput) => ({
     : null
 });
 
-const toAdminMemberSummary = (member: Awaited<ReturnType<typeof listAdminMembers>>[number]) => ({
+const toAdminMemberSummary = (
+  member: Awaited<ReturnType<typeof listAdminMembers>>[number],
+  programmeCentres: ReadonlySet<string>
+) => ({
   id: member.id,
   name: member.name,
   identity: member.phone ?? member.email ?? member.id,
   templateId: member.clinic.template?.id ?? "",
   templateName: member.clinic.template?.programName ?? member.clinic.name,
-  points: member.pointsBalance,
+  // Points as the member and the dashboard see them: a programme centre keeps euros.
+  points: programmeCentres.has(member.clinicId)
+    ? toPoints(member.pointsBalance)
+    : member.pointsBalance,
   moneySpent: 0,
   lastVisitedAt: null,
   tier: member.tier ?? "Nuevo",
@@ -799,7 +806,12 @@ adminClinicsRouter.get(
   asyncHandler(async (_req, res) => {
     const members = await listAdminMembers();
 
-    res.json(members.map(toAdminMemberSummary));
+    const programmeCentres = await programmeCentreIds(
+      prisma,
+      members.map((member) => member.clinicId)
+    );
+
+    res.json(members.map((member) => toAdminMemberSummary(member, programmeCentres)));
   })
 );
 
