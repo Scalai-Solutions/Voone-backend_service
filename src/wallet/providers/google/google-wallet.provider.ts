@@ -180,8 +180,8 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       heroImageUrl: template.heroImageUrl,
       heroImageDescription: `${template.programName} hero image`,
       homepageUrl: websiteUrl,
-      accountNameLabel: "Nombre de socia",
-      accountIdLabel: "N.º de socia",
+      accountNameLabel: "Nombre de miembro",
+      accountIdLabel: "N.º de miembro",
       rewardsTierLabel: template.tierLabel,
       textModules: [
         {
@@ -215,15 +215,15 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       ],
       linkModules: [
         {
-          tag: "Website",
-          description: "Website",
+          tag: "Web",
+          description: "Web",
           url: websiteUrl
         },
         ...(appointmentUrl
           ? [
               {
-                tag: "Schedule Appointment",
-                description: "Schedule Appointment",
+                tag: "Reservar cita",
+                description: "Reservar cita",
                 url: appointmentUrl
               }
             ]
@@ -231,8 +231,8 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       ],
       appLink: appointmentUrl
         ? {
-            displayText: template.appLinkText ?? "Schedule Appointment",
-            description: template.appLinkDescription ?? "Schedule an appointment",
+            displayText: template.appLinkText ?? "Reservar cita",
+            description: template.appLinkDescription ?? "Reservar cita",
             url: appointmentUrl
           }
         : undefined

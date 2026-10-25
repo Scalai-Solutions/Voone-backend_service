@@ -6,7 +6,7 @@
  * the key, which is already the correct Spanish text, so no default `.lproj` is needed.
  */
 export const PASS_LABELS = {
-  member: "SOCIA",
+  member: "MIEMBRO",
   credit: "SALDO",
   reward: "PRÓXIMA RECOMPENSA",
   // Short on purpose: it labels a cell on a four-across row, where "NEXT REWARD" is cut to "NEXT REW…".
@@ -15,11 +15,11 @@ export const PASS_LABELS = {
   program: "PROGRAMA",
   benefits: "BENEFICIOS",
   info: "INFORMACIÓN",
-  memberSince: "SOCIA DESDE",
+  memberSince: "MIEMBRO DESDE",
   redemptionCode: "CÓDIGO DE CANJE",
-  memberCode: "NÚMERO DE SOCIA",
+  memberCode: "NÚMERO DE MIEMBRO",
   serialNumber: "NÚMERO DE PASE",
-  memberNo: "N.º DE SOCIA",
+  memberNo: "N.º DE MIEMBRO",
   book: "RESERVAR CITA",
   website: "WEB",
   pointsChangeMessage: "Tu saldo ahora es %@",
@@ -28,7 +28,7 @@ export const PASS_LABELS = {
 
 export const PASS_TRANSLATIONS: Record<string, Record<string, string>> = {
   en: {
-    SOCIA: "MEMBER",
+    MIEMBRO: "MEMBER",
     SALDO: "BALANCE",
     "PRÓXIMA RECOMPENSA": "NEXT REWARD",
     FALTAN: "TO GO",
@@ -36,11 +36,11 @@ export const PASS_TRANSLATIONS: Record<string, Record<string, string>> = {
     PROGRAMA: "PROGRAMME",
     BENEFICIOS: "BENEFITS",
     INFORMACIÓN: "INFORMATION",
-    "SOCIA DESDE": "MEMBER SINCE",
+    "MIEMBRO DESDE": "MEMBER SINCE",
     "CÓDIGO DE CANJE": "REDEMPTION CODE",
-    "NÚMERO DE SOCIA": "MEMBER NUMBER",
+    "NÚMERO DE MIEMBRO": "MEMBER NUMBER",
     "NÚMERO DE PASE": "PASS NUMBER",
-    "N.º DE SOCIA": "MEMBER NO.",
+    "N.º DE MIEMBRO": "MEMBER NO.",
     "RESERVAR CITA": "BOOK AN APPOINTMENT",
     WEB: "WEBSITE",
     "Tu saldo ahora es %@": "Your balance is now %@",

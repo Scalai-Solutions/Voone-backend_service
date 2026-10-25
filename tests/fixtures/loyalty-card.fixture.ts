@@ -20,7 +20,7 @@ export const aureaGoldPass: LoyaltyCard = {
     backgroundColor: "#f1dccd",
     pointsLabel: "Saldo Beauty",
     tierLabel: "Nivel",
-    benefitsText: "Acceso exclusivo a tratamientos, eventos y ofertas de socia.",
+    benefitsText: "Acceso exclusivo a tratamientos, eventos y ofertas para miembros.",
     infoText: "Presenta este pase en recepción para acumular puntos."
   }
 };
@@ -38,7 +38,7 @@ export const brandNewMemberPass: LoyaltyCard = {
   serialNumber: "voone-member-000999",
   redemptionCode: "GEZDGNBVGY3TQOJQGEZDGNA",
   clinic: { name: "AURÉA" },
-  member: { fullName: "Nueva Socia", code: "T4XBN" },
+  member: { fullName: "Nuevo Miembro", code: "T4XBN" },
   points: 0,
   template: {
     programName: "Clinic Club",
@@ -56,5 +56,5 @@ export const brandNewMemberPass: LoyaltyCard = {
  */
 export const uncodedMemberPass: LoyaltyCard = {
   ...aureaGoldPass,
-  member: { fullName: "Socia Antigua", memberSince: "2024" }
+  member: { fullName: "Miembro Antiguo", memberSince: "2024" }
 };

@@ -580,8 +580,8 @@ export class NotificationService {
       data: {
         clinicId: member.clinicId,
         type: job.tierChanged ? NotificationType.TIER : NotificationType.POINTS,
-        header: "Points updated",
-        body: `Your balance is now ${shownBalance}`,
+        header: "Puntos actualizados",
+        body: `Tu saldo ahora es ${shownBalance}`,
         notify: false,
         deliveries: {
           create: {

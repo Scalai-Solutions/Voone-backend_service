@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProgramTemplate } from "../../src/wallet/engine/wallet-pass-provider.interface";
 import type { WalletSyncRepository } from "../../src/wallet/engine/wallet-sync.repository";
 import { createOrUpdateClass } from "../../src/wallet/providers/google/classService";
+import { createObject } from "../../src/wallet/providers/google/objectService";
 import { GoogleWalletProvider } from "../../src/wallet/providers/google/google-wallet.provider";
 
 const DEFAULT_LOGO = "https://cdn.voone.example/voone-logo.png";
@@ -130,5 +131,77 @@ describe("createOrUpdateClass without images", () => {
 
     expect("programLogo" in body).toBe(false);
     expect("heroImage" in body).toBe(false);
+  });
+});
+
+interface ClassBody {
+  accountNameLabel: string;
+  accountIdLabel: string;
+  linksModuleData: { uris: Array<{ id: string }> };
+  appLinkData: { displayText: { defaultValue: { value: string } } };
+  textModulesData: Array<{ header: string }>;
+}
+
+describe("the Spanish, neutral words on a Google card", () => {
+  const classWithLinks = async (): Promise<ClassBody> =>
+    (await provision({
+      templateId: "tpl-1",
+      clinicName: "Centro Prueba",
+      template: {
+        programName: "Club Prueba",
+        backgroundColor: "#30221f",
+        pointsLabel: "Puntos",
+        tierLabel: "Nivel",
+        websiteUrl: "https://clinica.example",
+        appointmentUrl: "https://clinica.example/reservar",
+        benefitsText: "Ventajas.",
+        infoText: "Informacion."
+      }
+    })) as unknown as ClassBody;
+
+  it("labels the member name and number with miembro", async () => {
+    const body = await classWithLinks();
+
+    expect(body.accountNameLabel).toBe("Nombre de miembro");
+    expect(body.accountIdLabel).toBe("N.º de miembro");
+  });
+
+  it("labels the default links, button and modules in Spanish", async () => {
+    const body = await classWithLinks();
+
+    expect(body.linksModuleData.uris.map((link: { id: string }) => link.id)).toEqual([
+      "Web",
+      "Reservar cita"
+    ]);
+    expect(body.appLinkData.displayText.defaultValue.value).toBe("Reservar cita");
+    expect(
+      body.textModulesData
+        .map((module: { header: string }) => module.header)
+        .filter((header: string) => ["Beneficios", "Información"].includes(header))
+    ).toEqual(["Beneficios", "Información"]);
+  });
+
+  it("never says socia anywhere in the class", async () => {
+    expect(JSON.stringify(await classWithLinks())).not.toMatch(/\bsocias?\b/i);
+  });
+
+  it("labels the member number on the object with miembro", async () => {
+    state.googleBodies.length = 0;
+
+    await createObject({
+      objectId: "issuer-1.member_1",
+      classId: "issuer-1.class",
+      accountName: "Ana",
+      accountId: "ABC12",
+      loyaltyPointsLabel: "Puntos",
+      loyaltyPointsBalance: 10
+    });
+    const [body] = state.googleBodies as Array<{
+      textModulesData: Array<{ id: string; header: string }>;
+    }>;
+
+    expect(body.textModulesData.find((module) => module.id === "member_id")?.header).toBe(
+      "N.º de miembro"
+    );
   });
 });

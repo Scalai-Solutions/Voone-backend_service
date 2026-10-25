@@ -34,6 +34,7 @@ describe("NotificationService", () => {
     const creditedPoints = async (programmeCentre: boolean) => {
       const patches: Array<{ points: number }> = [];
       const bodies: string[] = [];
+      const headers: string[] = [];
       const prisma = {
         member: {
           findFirst: async () => ({
@@ -52,7 +53,8 @@ describe("NotificationService", () => {
         onboardingProgram: { count: async () => (programmeCentre ? 1 : 0) },
         clinicNotificationSettings: { upsert: async () => ({ notifyOnCredit: "NEVER" }) },
         notification: {
-          create: async ({ data }: { data: { body: string } }) => {
+          create: async ({ data }: { data: { header: string; body: string } }) => {
+            headers.push(data.header);
             bodies.push(data.body);
             return {
               id: "notification-1",
@@ -87,20 +89,22 @@ describe("NotificationService", () => {
         tierChanged: false
       });
 
-      return { points: patches.map((patch) => patch.points), bodies };
+      return { points: patches.map((patch) => patch.points), bodies, headers };
     };
 
     it("sends a programme centre's balance to Google in points, ten per euro", async () => {
       expect(await creditedPoints(true)).toEqual({
         points: [1200],
-        bodies: ["Your balance is now 1200"]
+        bodies: ["Tu saldo ahora es 1200"],
+        headers: ["Puntos actualizados"]
       });
     });
 
     it("leaves every other centre's balance as the ledger holds it", async () => {
       expect(await creditedPoints(false)).toEqual({
         points: [120],
-        bodies: ["Your balance is now 120"]
+        bodies: ["Tu saldo ahora es 120"],
+        headers: ["Puntos actualizados"]
       });
     });
   });

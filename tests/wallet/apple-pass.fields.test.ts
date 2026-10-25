@@ -258,7 +258,7 @@ describe("loyaltyCardSchema", () => {
   });
 
   it("accepts any tier string, because Member.tier is free text", () => {
-    for (const tier of ["Bronze", "Platinum", "Socia Fundadora", "★"]) {
+    for (const tier of ["Bronze", "Platinum", "Miembro Fundador", "★"]) {
       expect(loyaltyCardSchema.safeParse({ ...aureaGoldPass, tier }).success).toBe(true);
     }
   });

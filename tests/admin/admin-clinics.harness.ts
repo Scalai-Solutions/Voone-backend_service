@@ -81,7 +81,7 @@ export const createClinicWithLogo = async (
         logoOnDarkUrl: options.logoOnDarkUrl ?? null,
         pointsLabel: "Puntos",
         tierLabel: "Nivel",
-        benefitsText: "Ventajas exclusivas para socias.",
+        benefitsText: "Ventajas exclusivas para miembros.",
         infoText: "Presenta tu pase en recepción."
       }
     });

@@ -109,8 +109,8 @@ walletTestRouter.get("/wallet/test/sapphira-prive/sergio-gil", async (req, res, 
       heroImageUrl: sapphiraHeroImageUrl,
       heroImageDescription: "Imagen de Sapphira Privé Clinic",
       homepageUrl: sapphiraWebsiteUrl,
-      accountNameLabel: "Nombre de socia",
-      accountIdLabel: "N.º de socia",
+      accountNameLabel: "Nombre de miembro",
+      accountIdLabel: "N.º de miembro",
       textModules: [
         {
           id: "clinic",
@@ -135,19 +135,19 @@ walletTestRouter.get("/wallet/test/sapphira-prive/sergio-gil", async (req, res, 
       ],
       linkModules: [
         {
-          tag: "Website",
-          description: "Website",
+          tag: "Web",
+          description: "Web",
           url: sapphiraWebsiteUrl
         },
         {
-          tag: "Schedule Appointment",
-          description: "Schedule Appointment",
+          tag: "Reservar cita",
+          description: "Reservar cita",
           url: sapphiraScheduleAppointmentUrl
         }
       ],
       appLink: {
-        displayText: "Schedule Appointment",
-        description: "Schedule an appointment",
+        displayText: "Reservar cita",
+        description: "Reservar cita",
         url: sapphiraScheduleAppointmentUrl
       }
     };

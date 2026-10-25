@@ -22,7 +22,7 @@ describe("WalletPassEngine", () => {
   });
 
   it("accepts any tier string, since Member.tier is free text", async () => {
-    const built = await engine.createPass("apple", { ...aureaGoldPass, tier: "Socia Fundadora" });
+    const built = await engine.createPass("apple", { ...aureaGoldPass, tier: "Miembro Fundador" });
 
     expect(built.buffer.length).toBeGreaterThan(0);
   });
