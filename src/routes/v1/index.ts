@@ -15,6 +15,11 @@ import { buildNotificationService } from "../../modules/notifications/notificati
 import { buildWalletSyncQueue } from "../../wallet/wallet.composition";
 import { createPointsRouter } from "./points.route";
 import { createOnboardingRouter } from "./onboarding.route";
+import { createTreatmentsRouter } from "./treatments.route";
+import {
+  createTreatmentCatalogue,
+  listTreatments
+} from "../../modules/treatments/treatment-catalogue.service";
 import { findClinicBySlug } from "../../modules/clinics/clinic.service";
 import { PrismaCatalogRepository } from "../../modules/onboarding/catalog.repository";
 import { OnboardingService } from "../../modules/onboarding/onboarding.service";
@@ -148,6 +153,13 @@ v1Router.use(
   })
 );
 
+v1Router.use(
+  createTreatmentsRouter({
+    catalogue: createTreatmentCatalogue(prisma),
+    findClinic: (slug) => findClinicBySlug(prisma, slug)
+  })
+);
+
 /**
  * Staff card download. Needs the same two variables as the Apple routes, because without
  * a redemption secret no card can be assembled and without signing material none can be
@@ -237,37 +249,15 @@ v1Router.use(
 
       return clinic?.id ?? null;
     },
-    treatmentsFor: async (clinicId) => {
-      const catalogItems = await prisma.catalogItem.findMany({
-        where: { clinicId, isProduct: false },
-        orderBy: [{ position: "asc" }, { externalId: "asc" }],
-        select: { id: true, name: true, priceCents: true }
-      });
-
-      if (catalogItems.length > 0) {
-        return catalogItems.map((item) => ({
-          id: item.id,
-          name: item.name,
-          priceEuro: Math.round(item.priceCents / 100),
-          points: Math.max(1, Math.round(item.priceCents / 10))
-        }));
-      }
-
-      const treatments = await prisma.clinicTreatment.findMany({
-        where: { clinicId },
-        orderBy: { name: "asc" },
-        select: { id: true, name: true, priceEuro: true, pointsAllotted: true }
-      });
-
-      return treatments.map((t) => ({
+    treatmentsFor: async (clinicId) =>
+      // The scan screen shows whole euros and the dashboard's own field names; the editor
+      // reads the same rows through listTreatments and keeps the exact price.
+      (await listTreatments(prisma, clinicId)).map((t) => ({
         id: t.id,
         name: t.name,
-        priceEuro: t.priceEuro,
-        // Renamed at the boundary: the dashboard calls it `points`, the schema calls it
-        // pointsAllotted. Neither has to move for the other.
-        points: t.pointsAllotted
-      }));
-    }
+        priceEuro: t.priceEuro === null ? null : Math.round(t.priceEuro),
+        points: t.points
+      }))
   })
 );
 

@@ -33,11 +33,17 @@ const row = {
   ]
 };
 
-const serviceFor = (programme: boolean) => {
+const serviceFor = (
+  programme: boolean,
+  catalogue: Array<{ id: string; name: string; priceCents: number; categoryId: null }> = [],
+  credits: Array<{ memberId: string; reason: string; createdAt: Date }> = []
+) => {
   const prisma = {
     member: { findMany: async () => [row], findUnique: async () => row },
+    // Spending stats read treatments through listTreatments, which asks the catalogue first.
+    catalogItem: { findMany: async () => catalogue },
     clinicTreatment: { findMany: async () => [] },
-    pointsTransaction: { findMany: async () => [] },
+    pointsTransaction: { findMany: async () => credits },
     onboardingProgram: { findFirst: async () => (programme ? { id: "p-1" } : null) },
     paidVisit: {
       groupBy: async () => [
@@ -68,5 +74,15 @@ describe("member directory at a programme centre", () => {
 
     expect(member.points).toBe(60);
     expect(member.moneySpent).toBe(0);
+  });
+
+  it("prices a visit from the catalogue the scan screen reads", async () => {
+    const [member] = await serviceFor(
+      false,
+      [{ id: "i-1", name: "Hydrafacial", priceCents: 12000, categoryId: null }],
+      [{ memberId: "m-1", reason: "Hydrafacial", createdAt: new Date("2026-10-19") }]
+    ).list({ clinicId: "c-1", limit: 10, offset: 0 });
+
+    expect(member.moneySpent).toBe(120);
   });
 });
