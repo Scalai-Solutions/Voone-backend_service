@@ -91,7 +91,7 @@ describe("getRefreshStatus", () => {
     });
   });
 
-  it("follows object status and time after a recorded change", async () => {
+  it("counts members, all of whose passes must be current to count as synced", async () => {
     await inRolledBackTransaction(async (tx, clinicId) => {
       await tx.templateChange.create({
         data: {
@@ -128,7 +128,7 @@ describe("getRefreshStatus", () => {
         }
       });
 
-      // Synced after the change: counts, one per object.
+      // Both objects synced after the change: one member, counted once.
       await addMember(tx, clinicId, "synced-after", [
         {
           provider: WalletProviderType.GOOGLE,
@@ -141,6 +141,29 @@ describe("getRefreshStatus", () => {
       await addMember(tx, clinicId, "synced-before", [
         {
           provider: WalletProviderType.GOOGLE,
+          status: WalletSyncStatus.SYNCED,
+          lastSyncedAt: BEFORE
+        }
+      ]);
+      // Apple synced after the change but Google failed: the card has not all been updated,
+      // so this member is failed, never synced, and never both.
+      await addMember(tx, clinicId, "half-failed", [
+        {
+          provider: WalletProviderType.GOOGLE,
+          status: WalletSyncStatus.FAILED,
+          lastSyncedAt: BEFORE
+        },
+        { provider: WalletProviderType.APPLE, status: WalletSyncStatus.SYNCED, lastSyncedAt: AFTER }
+      ]);
+      // One object synced after the change and one synced before it: not fully updated.
+      await addMember(tx, clinicId, "half-synced", [
+        {
+          provider: WalletProviderType.GOOGLE,
+          status: WalletSyncStatus.SYNCED,
+          lastSyncedAt: AFTER
+        },
+        {
+          provider: WalletProviderType.APPLE,
           status: WalletSyncStatus.SYNCED,
           lastSyncedAt: BEFORE
         }
@@ -180,12 +203,16 @@ describe("getRefreshStatus", () => {
         AFTER
       );
 
-      expect(await getRefreshStatus(clinicId, tx)).toEqual({
-        eligible: 5,
+      const status = await getRefreshStatus(clinicId, tx);
+
+      // Members, not objects: synced-after (two objects) counts once; half-failed is failed.
+      expect(status).toEqual({
+        eligible: 7,
         lastChange: { at: T0.toISOString(), by: "staff@clinic.test", cardsAtSave: 4 },
-        syncedSince: 2,
-        failedSince: 2
+        syncedSince: 1,
+        failedSince: 3
       });
+      expect(status.syncedSince + status.failedSince).toBeLessThanOrEqual(status.eligible);
     });
   });
 

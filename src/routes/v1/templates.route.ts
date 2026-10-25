@@ -7,7 +7,7 @@ import { templatesController } from "../../modules/templates/templates.controlle
 export const templatesRouter = Router();
 
 /**
- * Writes only. A template decides what a clinic's public sign-up page is called and what
+ * Writes, and the refresh status (it names a staff member). A template decides what a clinic's public sign-up page is called and what
  * colour it is, so an unauthenticated write is a defacement of that page. Reads stay open:
  * the same branding is already public through GET /clinics/:slug, which is the point of it.
  */
@@ -23,7 +23,8 @@ templatesRouter.patch(
   templatesController.updateVoone
 );
 templatesRouter.post("/templates/refresh-cards", requireStaff, templatesController.refreshCards);
-templatesRouter.get("/templates/refresh-status", templatesController.refreshStatus);
+// Staff only: the answer names the staff member who made the last change (personal data).
+templatesRouter.get("/templates/refresh-status", requireStaff, templatesController.refreshStatus);
 templatesRouter.get("/templates/current", templatesController.getCurrent);
 templatesRouter.get("/templates", templatesController.list);
 templatesRouter.get("/templates/:templateId", templatesController.getById);
