@@ -11,6 +11,7 @@ import type {
   CreateVooneTemplateInput,
   UpdateTemplateInput
 } from "./templates.schema";
+import { assertOwnsTemplate, diffTemplate, recordTemplateChange } from "./template-change.service";
 import {
   templatesRepository,
   treatmentsRepository,
@@ -46,16 +47,24 @@ export const templatesService = {
     return templatesRepository.findPresets();
   },
 
-  listTemplates() {
-    return templatesRepository.findMany();
+  /** The clinic's own template, as a list so the endpoint keeps its shape. */
+  async listTemplates(clinicId: string) {
+    const template = await templatesRepository.findByClinicId(clinicId);
+
+    return template ? [template] : [];
   },
 
   findByClinicId(clinicId: string) {
     return templatesRepository.findByClinicId(clinicId);
   },
 
-  findById(templateId: string) {
-    return templatesRepository.findById(templateId);
+  /** Throws TemplateNotFoundError for a missing template and for another clinic's alike. */
+  async findOwnedById(templateId: string, clinicId: string) {
+    const template = await templatesRepository.findById(templateId);
+
+    assertOwnsTemplate(template, clinicId, templateId);
+
+    return template;
   },
 
   async createClinicTemplate(clinicId: string, input: CreateTemplateInput) {
@@ -97,19 +106,48 @@ export const templatesService = {
     return templatesRepository.findById(template.id);
   },
 
-  async updateClinicTemplate(templateId: string, input: UpdateTemplateInput) {
+  async updateClinicTemplate(
+    templateId: string,
+    clinicId: string,
+    input: UpdateTemplateInput,
+    actor?: string
+  ) {
     const existing = await templatesRepository.findById(templateId);
 
-    if (!existing) {
-      return null;
-    }
+    assertOwnsTemplate(existing, clinicId, templateId);
+
+    const changedFields = diffTemplate(existing, input);
+    // Read before the transaction opens: it is a count for the record, not part of the write.
+    const cardsAtSave =
+      changedFields.length > 0
+        ? await prisma.member.count({
+            where: { clinicId, erasedAt: null, walletObjects: { some: {} } }
+          })
+        : 0;
 
     const template = await prisma.$transaction(async (tx) => {
       if (input.treatments) {
         await treatmentsRepository.replaceForClinic(tx, existing.clinicId, input.treatments);
       }
 
-      return templatesRepository.update(tx, templateId, input, TemplateStatus.PENDING);
+      const updated = await templatesRepository.update(
+        tx,
+        templateId,
+        input,
+        TemplateStatus.PENDING
+      );
+
+      if (changedFields.length > 0) {
+        await recordTemplateChange(tx, {
+          clinicId: existing.clinicId,
+          templateId,
+          actor,
+          changedFields,
+          cardsAtSave
+        });
+      }
+
+      return updated;
     });
 
     try {

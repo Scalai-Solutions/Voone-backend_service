@@ -17,9 +17,14 @@ vi.mock("../../src/modules/templates/templates.repository", () => ({
   treatmentsRepository: { replaceForClinic: vi.fn() }
 }));
 
+const tx = vi.hoisted(() => ({ templateChange: { create: vi.fn() } }));
+
 vi.mock("../../src/infrastructure/database/prisma-client", () => ({
-  // Runs the callback inline: the transaction's job here is atomicity, not control flow.
-  prisma: { $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({})) }
+  prisma: {
+    member: { count: vi.fn(async () => 0) },
+    // Runs the callback inline: the transaction's job here is atomicity, not control flow.
+    $transaction: vi.fn(async (fn: (client: unknown) => unknown) => fn(tx))
+  }
 }));
 
 const walletPassEngine = { createClassForTemplate: vi.fn() };
@@ -38,6 +43,7 @@ const { templatesRepository, treatmentsRepository } =
   await import("../../src/modules/templates/templates.repository");
 const { templatesService } = await import("../../src/modules/templates/templates.service");
 const { ConflictError } = await import("../../src/common/errors/conflict-error");
+const { TemplateNotFoundError } = await import("../../src/common/errors/template.errors");
 
 const TEMPLATE = { id: "t1", clinicId: "c1" };
 
@@ -186,15 +192,17 @@ describe("createClinicTemplate", () => {
 
     await templatesService.createClinicTemplate("c1", INPUT);
 
-    expect(treatmentsRepository.replaceForClinic).toHaveBeenCalledWith({}, "c1", INPUT.treatments);
+    expect(treatmentsRepository.replaceForClinic).toHaveBeenCalledWith(tx, "c1", INPUT.treatments);
   });
 });
 
 describe("updateClinicTemplate", () => {
-  it("returns null for a template that does not exist", async () => {
+  it("refuses a template that does not exist", async () => {
     vi.mocked(templatesRepository.findById).mockResolvedValue(null as never);
 
-    await expect(templatesService.updateClinicTemplate("missing", INPUT)).resolves.toBeNull();
+    await expect(templatesService.updateClinicTemplate("missing", "c1", INPUT)).rejects.toThrow(
+      TemplateNotFoundError
+    );
     expect(asMock(templatesRepository.update)).not.toHaveBeenCalled();
   });
 
@@ -203,7 +211,9 @@ describe("updateClinicTemplate", () => {
     vi.mocked(templatesRepository.update).mockResolvedValue(TEMPLATE as never);
     vi.mocked(walletPassEngine.createClassForTemplate).mockRejectedValue(new Error("google 500"));
 
-    await expect(templatesService.updateClinicTemplate("t1", INPUT)).rejects.toThrow("google 500");
+    await expect(templatesService.updateClinicTemplate("t1", "c1", INPUT)).rejects.toThrow(
+      "google 500"
+    );
     expect(templatesRepository.markFailed).toHaveBeenCalledWith("t1");
   });
 
@@ -217,7 +227,7 @@ describe("updateClinicTemplate", () => {
       treatments: undefined
     };
 
-    await templatesService.updateClinicTemplate("t1", designOnly);
+    await templatesService.updateClinicTemplate("t1", "c1", designOnly);
 
     expect(asMock(treatmentsRepository.replaceForClinic)).not.toHaveBeenCalled();
     expect(asMock(templatesRepository.update)).toHaveBeenCalled();
@@ -228,7 +238,7 @@ describe("updateClinicTemplate", () => {
     vi.mocked(templatesRepository.update).mockResolvedValue(TEMPLATE as never);
     vi.mocked(walletPassEngine.createClassForTemplate).mockResolvedValue([] as never);
 
-    await templatesService.updateClinicTemplate("t1", INPUT);
+    await templatesService.updateClinicTemplate("t1", "c1", INPUT);
 
     expect(treatmentsRepository.replaceForClinic).toHaveBeenCalledWith(
       expect.anything(),

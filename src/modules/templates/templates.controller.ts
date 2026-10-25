@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import { ZodError } from "zod";
 
 import { ConflictError } from "../../common/errors/conflict-error";
+import { TemplateNotFoundError } from "../../common/errors/template.errors";
 import {
   clinicContextSchema,
   createVooneTemplateSchema,
@@ -22,9 +23,24 @@ const getClinicId = (request: Request): string => {
   }).clinicId;
 };
 
+/**
+ * The signed-in user's email, sent by the dashboard on staff writes so a card-design change
+ * can be traced to a person. Optional: absent or blank is recorded as nobody.
+ */
+const getActor = (request: Request): string | undefined => {
+  const actor = request.header("x-actor")?.trim();
+
+  return actor ? actor.slice(0, 254) : undefined;
+};
+
 const handleControllerError = (error: unknown, res: Response) => {
   if (error instanceof ZodError) {
     res.status(400).json({ message: "Invalid template payload", issues: error.issues });
+    return;
+  }
+
+  if (error instanceof TemplateNotFoundError) {
+    res.status(404).json({ message: "Template not found" });
     return;
   }
 
@@ -91,9 +107,9 @@ export const templatesController = {
     }
   },
 
-  async list(_req: Request, res: Response) {
+  async list(req: Request, res: Response) {
     try {
-      res.json(await templatesService.listTemplates());
+      res.json(await templatesService.listTemplates(getClinicId(req)));
     } catch (error) {
       handleControllerError(error, res);
     }
@@ -119,15 +135,10 @@ export const templatesController = {
 
   async getById(req: Request, res: Response) {
     try {
+      const clinicId = getClinicId(req);
       const { templateId } = templateParamsSchema.parse(req.params);
-      const template = await templatesService.findById(templateId);
 
-      if (!template) {
-        res.status(404).json({ message: "Template not found" });
-        return;
-      }
-
-      res.json(template);
+      res.json(await templatesService.findOwnedById(templateId, clinicId));
     } catch (error) {
       handleControllerError(error, res);
     }
@@ -157,16 +168,13 @@ export const templatesController = {
 
   async update(req: Request, res: Response) {
     try {
+      const clinicId = getClinicId(req);
       const { templateId } = templateParamsSchema.parse(req.params);
       const input = updateTemplateSchema.parse(req.body);
-      const template = await templatesService.updateClinicTemplate(templateId, input);
 
-      if (!template) {
-        res.status(404).json({ message: "Template not found" });
-        return;
-      }
-
-      res.json(template);
+      res.json(
+        await templatesService.updateClinicTemplate(templateId, clinicId, input, getActor(req))
+      );
     } catch (error) {
       handleControllerError(error, res);
     }

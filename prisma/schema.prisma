@@ -172,6 +172,24 @@ model ClinicTemplate {
   @@index([presetId])
 }
 
+/// One row per card-design save that changed something, so a support question about "who
+/// changed our card" has an answer. Plain columns rather than relations: this is an audit
+/// trail and must outlive the template row it describes.
+model TemplateChange {
+  id            String   @id @default(uuid())
+  clinicId      String
+  templateId    String
+  /// The signed-in user's email from the x-actor header; null when the caller sent none.
+  changedBy     String?
+  changedFields String[]
+  /// Members holding a live wallet pass at the moment of the save: how many cards the change reached.
+  cardsAtSave   Int
+  createdAt     DateTime @default(now())
+
+  @@index([clinicId, createdAt])
+  @@index([templateId])
+}
+
 enum TemplateStatus {
   PENDING
   ACTIVE
