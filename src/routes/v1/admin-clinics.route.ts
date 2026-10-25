@@ -24,6 +24,7 @@ import {
   provisionClinic,
   toProvisionedSummary
 } from "../../modules/clinics/clinic-provisioning.service";
+import { hasOwnLogo } from "../../modules/templates/own-logo";
 
 export const adminClinicsRouter = Router();
 
@@ -702,6 +703,12 @@ adminClinicsRouter.post(
 
     if (missing.length > 0) {
       throw new MembershipValidationError(`Falta ${missing.join(" y ")} para activar el centro.`);
+    }
+
+    // A card without the centre's own logo goes out under Voone's or, worse, another
+    // client's branding, and members add it to their phones the day the centre goes live.
+    if (clinic.template && !hasOwnLogo(clinic.template, config.VOONE_DEFAULT_LOGO_URL)) {
+      throw new MembershipValidationError("Añade el logo propio del centro antes de activarlo.");
     }
 
     if (!clinic.isActive) {

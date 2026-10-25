@@ -108,6 +108,11 @@ const envSchema = z.object({
   BIRTHDAY_NOTIFICATION_MINUTE: z.coerce.number().int().min(0).max(59).default(0),
   BIRTHDAY_NOTIFICATION_FREQUENCY_MINUTES: z.coerce.number().int().min(1).max(1440).default(1440),
 
+  // Optional. Public HTTPS URL of the plain Voone logo, used on a wallet card when a clinic
+  // has not set its own. Unset, such a card has no logo rather than someone else's. It is
+  // also what activation and the admin list treat as "no logo of its own".
+  VOONE_DEFAULT_LOGO_URL: z.string().url("VOONE_DEFAULT_LOGO_URL must be a valid URL").optional(),
+
   SENDGRID_API_KEY: z.string().min(1).optional(),
   SENDGRID_FROM_EMAIL: z.string().email("SENDGRID_FROM_EMAIL must be a valid email").optional()
 });
