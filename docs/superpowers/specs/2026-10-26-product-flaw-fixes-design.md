@@ -53,7 +53,10 @@ that each end in a pull request. The owner of the decisions is Hritik (CTO).
 
 ## Anti-goals (a failure even if it technically works)
 
-- A second place to edit the same thing. Each field has exactly one editor.
+- A second place to edit the same thing. Each field has exactly one editor. Duplications found so
+  far, and where each is removed: treatments (Batch 4), rewards and levels (Batch 5), centre
+  details in the card editor (Batch 4), default images (Batch 1), the points conversion (Batch 2),
+  naming (Batch 3).
 - A change that silently rewrites data an owner did not touch (the treatment-prices bug).
 - A clinic activated with a default or borrowed logo.
 
@@ -111,6 +114,9 @@ that each end in a pull request. The owner of the decisions is Hritik (CTO).
 - Visit history: replace "Registro bloqueado" with wording that says the entry is permanent and
   cannot be edited.
 - Wizard progress shows the real number of screens.
+- The admin "Templates" area is renamed "Biblioteca de diseños" (English in the admin panel:
+  "Design library") so it is clearly the shared starting designs; a clinic's own editor is always
+  "Diseño de la tarjeta".
 - One vocabulary: "tarjeta" for what the client holds, "diseño de la tarjeta" for the editor,
   "programa" for rewards and levels. "Plantilla", "builder" and "studio" disappear from clinic UI.
 - The contrast check reads the hero image URL that is typed, not a separate file.
@@ -121,7 +127,8 @@ that each end in a pull request. The owner of the decisions is Hritik (CTO).
 **Batch 4, frontend and backend: owner-managed treatments and card changes.**
 - Owners and managers (the existing `clinicEdit` permission) can edit treatments.
 - My center, Treatments tab, becomes editable for owners and managers: add, rename, change price,
-  remove. It is the only place treatments are edited. For a programme centre the editor writes the
+  remove. It is the only place treatments are edited. The "Información del centro" tab also leaves the
+  card editor: centre details live in My center only, which links to Settings to edit them. For a programme centre the editor writes the
   programme catalogue (`CatalogItem`), which is what the scan-to-credit screen reads, and keeps
   `ClinicTreatment` in step as today; for other centres it writes `ClinicTreatment`. A new
   treatment needs a category chosen from the existing ones, so it never sets `needsReview` and
