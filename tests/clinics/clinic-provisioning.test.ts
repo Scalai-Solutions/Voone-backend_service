@@ -2,6 +2,7 @@ import { Prisma, TemplateStatus } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  ClinicCardCreationError,
   ClinicSlugTakenError,
   TemplatePresetNotFoundError
 } from "../../src/common/errors/membership.errors";
@@ -10,6 +11,22 @@ import {
   provisionClinic,
   toProvisionedSummary
 } from "../../src/modules/clinics/clinic-provisioning.service";
+
+// The engine is replaced so each test chooses what Google does. The default is "no provider
+// produced a class", which is what the real engine returns with no Google env configured.
+const walletEngine = vi.hoisted(() => ({ createClassForTemplate: vi.fn() }));
+
+vi.mock("../../src/wallet/engine/wallet-pass.engine", () => ({
+  WalletPassEngine: vi.fn(function WalletPassEngine() {
+    return walletEngine;
+  })
+}));
+
+vi.mock("../../src/common/logger/logger", () => ({
+  logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn() }
+}));
+
+const { GoogleWalletApiError } = await import("../../src/wallet/providers/google/client");
 
 const PRESET = { id: "p1", name: "Classic Gold", hexBackgroundColor: "#ead0bd" };
 
@@ -32,6 +49,9 @@ const GOOGLE_WALLET_ENV_KEYS = [
 const originalGoogleWalletEnv = new Map<string, string | undefined>();
 
 beforeEach(() => {
+  walletEngine.createClassForTemplate.mockReset();
+  walletEngine.createClassForTemplate.mockResolvedValue([]);
+
   for (const key of GOOGLE_WALLET_ENV_KEYS) {
     originalGoogleWalletEnv.set(key, process.env[key]);
     delete process.env[key];
@@ -86,6 +106,16 @@ const db = (over: Record<string, unknown> = {}) => {
   const treatmentDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
   const treatmentCreateMany = vi.fn().mockResolvedValue({ count: 1 });
   const clinicFindUnique = vi.fn().mockResolvedValue(null);
+  const rollback = {
+    walletClassDeleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    templateDeleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+    treatmentDeleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    clinicDelete: vi.fn().mockResolvedValue({ id: "c1" }),
+    userFindUnique: vi.fn().mockResolvedValue(null),
+    userUpsert: vi.fn().mockResolvedValue({ id: "u1" }),
+    userUpdate: vi.fn().mockResolvedValue({ id: "u1" }),
+    userDeleteMany: vi.fn().mockResolvedValue({ count: 1 })
+  };
 
   return {
     handle: {
@@ -95,9 +125,22 @@ const db = (over: Record<string, unknown> = {}) => {
       $transaction: vi.fn(async (fn: (tx: unknown) => unknown) =>
         typeof fn === "function"
           ? fn({
-              clinic: { create: clinicCreate },
-              clinicTemplate: { create: templateCreate },
-              clinicTreatment: { deleteMany: treatmentDeleteMany, createMany: treatmentCreateMany }
+              clinic: { create: clinicCreate, delete: rollback.clinicDelete },
+              clinicTemplate: { create: templateCreate, deleteMany: rollback.templateDeleteMany },
+              clinicTreatment: {
+                deleteMany: (...args: unknown[]) => {
+                  treatmentDeleteMany(...args);
+                  return rollback.treatmentDeleteMany(...args);
+                },
+                createMany: treatmentCreateMany
+              },
+              walletClass: { deleteMany: rollback.walletClassDeleteMany },
+              user: {
+                findUnique: rollback.userFindUnique,
+                upsert: rollback.userUpsert,
+                update: rollback.userUpdate,
+                deleteMany: rollback.userDeleteMany
+              }
             })
           : fn
       ),
@@ -112,7 +155,8 @@ const db = (over: Record<string, unknown> = {}) => {
     templateCreate,
     treatmentDeleteMany,
     treatmentCreateMany,
-    clinicFindUnique
+    clinicFindUnique,
+    rollback
   };
 };
 
@@ -342,6 +386,128 @@ describe("provisionClinic", () => {
       outage
     );
   });
+
+  describe("when the wallet step fails", () => {
+    const googleRejected = () =>
+      new GoogleWalletApiError("Invalid class", 400, "Bad Request", { error: "bad logo" });
+
+    it("keeps the clinic and its PENDING template when Google rejects the card", async () => {
+      const { handle, rollback } = db();
+
+      walletEngine.createClassForTemplate.mockRejectedValue(googleRejected());
+      // What the row holds after creation: nothing in this path writes another status.
+      handle.clinicTemplate.findUnique.mockResolvedValue({
+        id: "t1",
+        status: TemplateStatus.PENDING
+      });
+
+      const result = await provisionClinic(handle as never, provisionClinicSchema.parse(VALID));
+
+      expect(result.clinic.id).toBe("c1");
+      expect(result.template.status).toBe(TemplateStatus.PENDING);
+      expect(result.walletWarning).toBe("google_pending");
+      expect(handle.clinicTemplate.update).not.toHaveBeenCalled();
+      expect(rollback.clinicDelete).not.toHaveBeenCalled();
+      expect(rollback.templateDeleteMany).not.toHaveBeenCalled();
+    });
+
+    it("does not warn when nothing failed", async () => {
+      const { handle } = db();
+
+      const result = await provisionClinic(handle as never, provisionClinicSchema.parse(VALID));
+
+      expect(result.walletWarning).toBeUndefined();
+    });
+
+    it("deletes what this call created and says so, for any OTHER wallet error", async () => {
+      const { handle, rollback } = db();
+
+      walletEngine.createClassForTemplate.mockRejectedValue(new Error("signing key unreadable"));
+
+      const attempt = provisionClinic(handle as never, provisionClinicSchema.parse(VALID));
+
+      await expect(attempt).rejects.toThrow(ClinicCardCreationError);
+      await expect(attempt).rejects.toMatchObject({
+        statusCode: 502,
+        expose: true,
+        message:
+          "No se ha podido crear la tarjeta del centro. No se ha guardado nada; inténtalo de nuevo."
+      });
+      // The schema has no cascade from Clinic, so each dependent row goes explicitly,
+      // children first.
+      expect(rollback.walletClassDeleteMany).toHaveBeenCalledWith({
+        where: { clinicTemplateId: "t1" }
+      });
+      expect(rollback.templateDeleteMany).toHaveBeenCalledWith({ where: { id: "t1" } });
+      expect(rollback.treatmentDeleteMany).toHaveBeenCalledWith({ where: { clinicId: "c1" } });
+      expect(rollback.clinicDelete).toHaveBeenCalledWith({ where: { id: "c1" } });
+      expect(handle.clinicTemplate.update).not.toHaveBeenCalled();
+    });
+
+    it("removes an owner account this call created", async () => {
+      const { handle, rollback } = db();
+
+      rollback.userFindUnique.mockResolvedValue(null);
+      walletEngine.createClassForTemplate.mockRejectedValue(new Error("boom"));
+
+      await expect(
+        provisionClinic(
+          handle as never,
+          provisionClinicSchema.parse({ ...VALID, ownerEmail: "owner@nova.es" })
+        )
+      ).rejects.toThrow(ClinicCardCreationError);
+
+      expect(rollback.userDeleteMany).toHaveBeenCalledWith({ where: { email: "owner@nova.es" } });
+      expect(rollback.userUpdate).not.toHaveBeenCalled();
+    });
+
+    it("puts an existing owner back where it was instead of deleting the account", async () => {
+      const { handle, rollback } = db();
+
+      rollback.userFindUnique.mockResolvedValue({
+        id: "u1",
+        clinicId: "old-clinic",
+        name: "Ana",
+        role: "OWNER"
+      });
+      walletEngine.createClassForTemplate.mockRejectedValue(new Error("boom"));
+
+      await expect(
+        provisionClinic(
+          handle as never,
+          provisionClinicSchema.parse({ ...VALID, ownerEmail: "owner@nova.es" })
+        )
+      ).rejects.toThrow(ClinicCardCreationError);
+
+      expect(rollback.userUpdate).toHaveBeenCalledWith({
+        where: { id: "u1" },
+        data: { clinicId: "old-clinic", name: "Ana", role: "OWNER" }
+      });
+      expect(rollback.userDeleteMany).not.toHaveBeenCalled();
+    });
+
+    it("does not claim 'nothing was saved' when the clean-up itself fails", async () => {
+      const { handle } = db();
+      let transactions = 0;
+      const inner = handle.$transaction;
+
+      handle.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => {
+        transactions += 1;
+        // First call creates the clinic; the second is the clean-up.
+        if (transactions === 2) throw new Error("database went away");
+        return inner(fn);
+      }) as never;
+      walletEngine.createClassForTemplate.mockRejectedValue(new Error("boom"));
+
+      const attempt = provisionClinic(handle as never, provisionClinicSchema.parse(VALID));
+
+      await expect(attempt).rejects.toThrow(ClinicCardCreationError);
+      await expect(attempt).rejects.toMatchObject({
+        statusCode: 502,
+        message: expect.not.stringContaining("No se ha guardado nada")
+      });
+    });
+  });
 });
 
 describe("toProvisionedSummary", () => {
@@ -411,5 +577,22 @@ describe("toProvisionedSummary", () => {
     expect(summary.clinic).not.toHaveProperty("addressLine");
     expect(summary.clinic).not.toHaveProperty("pincode");
     expect(summary.template.status).toBe("PENDING");
+  });
+
+  it("carries the Google warning, with the message the operator reads", () => {
+    const base = {
+      clinic: { id: "c1", slug: "nova7", name: "N", isActive: false, privacyPolicyVersion: null },
+      template: { id: "t1", programName: "P", hexBackgroundColor: "#fff", status: "PENDING" }
+    };
+
+    const warned = toProvisionedSummary({ ...base, walletWarning: "google_pending" } as never);
+    const clean = toProvisionedSummary(base as never);
+
+    expect(warned.walletWarning).toBe("google_pending");
+    expect(warned.walletWarningMessage).toBe(
+      "La tarjeta de Google no se ha podido crear todavía. Se reintentará al guardar el diseño de la tarjeta."
+    );
+    expect(clean).not.toHaveProperty("walletWarning");
+    expect(clean).not.toHaveProperty("walletWarningMessage");
   });
 });
