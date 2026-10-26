@@ -134,16 +134,30 @@ export const startBirthdayNotificationCron = (
   };
 
   const run = async () => {
+    // One daily tick, two automations: the birthday send (every day) and the bono reminder
+    // (which acts only on the 1st, gated inside the service). Each is logged and fails
+    // independently, so a broken reminder cannot take the birthday send down with it.
     try {
-      const result = await notifications.runBirthdayAutomations();
-      console.info("[notifications] birthday cron completed", result);
+      const birthday = await notifications.runBirthdayAutomations();
+      console.info("[notifications] birthday cron completed", birthday);
     } catch (error) {
       console.error("[notifications] birthday cron failed", {
         error: error instanceof Error ? error.message : String(error)
       });
-    } finally {
-      scheduleNext();
     }
+
+    if (config.BONO_REMINDER_CRON_ENABLED) {
+      try {
+        const bono = await notifications.runBonoReminderAutomations();
+        console.info("[notifications] bono reminder cron completed", bono);
+      } catch (error) {
+        console.error("[notifications] bono reminder cron failed", {
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+
+    scheduleNext();
   };
 
   scheduleNext();

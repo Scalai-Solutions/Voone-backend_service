@@ -57,6 +57,8 @@ model Clinic {
   paidVisits            PaidVisit[]
   memberRewards         MemberReward[]
   referrals             Referral[]
+  bonoPlans             BonoPlan[]
+  memberBonos           MemberBono[]
 }
 
 model User {
@@ -291,6 +293,7 @@ model Member {
   passClaims             PassClaim[]
   paidVisits             PaidVisit[]
   rewards                MemberReward[]
+  bonos                  MemberBono[]
   referralsMade          Referral[]             @relation("Referrer")
   referredBy             Referral?              @relation("Referred")
   notificationDeliveries NotificationDelivery[]
@@ -400,6 +403,8 @@ enum NotificationType {
   POINTS
   TIER
   BIRTHDAY
+  /// Monthly reminder to members with an active bono that they have sessions left.
+  BONO_REMINDER
 }
 
 enum NotificationStatus {
@@ -476,8 +481,18 @@ model ClinicNotificationSettings {
   birthdayBody        String               @default("¡Feliz cumpleaños! Disfruta de un 10% de descuento en nuestros servicios. Esperamos verte pronto.")
   birthdayNotify      Boolean              @default(true)
   birthdayLastRunDate String?
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
+
+  /// The monthly "you have sessions left" automation. Sent on the 1st to members with an
+  /// ACTIVE bono and a synced pass, regardless of marketing consent: the sessions are
+  /// already paid for, so this is about the member's own purchase. The clinic's toggle is
+  /// bonoReminderEnabled.
+  bonoReminderEnabled      Boolean  @default(true)
+  bonoReminderHeader       String   @default("Tienes sesiones pendientes")
+  bonoReminderBody         String   @default("Te quedan sesiones de tu bono. Reserva tu próxima cita cuando quieras.")
+  bonoReminderNotify       Boolean  @default(true)
+  bonoReminderLastRunMonth String?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
 }
 
 model ClinicLocation {
@@ -801,11 +816,102 @@ model PaidVisit {
   createdAt  DateTime @default(now())
   createdBy  String?
 
+  /// The bono this session was consumed from. Null for a PAYMENT visit, and set to null if
+  /// the bono row is ever removed: the financial record keeps its amounts either way.
+  memberBonoId String?
+  memberBono   MemberBono? @relation(fields: [memberBonoId], references: [id], onDelete: SetNull)
+
+  /// 1-based position within the bono — "session 3 of 5". Unique per bono, which is what
+  /// stops a double tap at reception from burning two sessions.
+  bonoSessionNumber Int?
+
+  /// Whole euros of progress awarded by hand with this visit ("bonus points", optional).
+  /// Included in progressAwarded, held separately so an audit can tell purchase from gift.
+  bonusProgress Int?
+
   redemptions MemberReward[] @relation("RedeemedAt")
 
   @@unique([clinicId, idempotencyKey])
+  @@unique([memberBonoId, bonoSessionNumber])
   @@index([memberId, occurredAt])
   @@index([clinicId, occurredAt])
+}
+
+/// A session-pack treatment the centre sells: a fixed price per session, paid up front and
+/// consumed over a fixed number of visits ("bono de sesiones").
+///
+/// Its own table rather than a CatalogItem row, because the catalogue is REPLACED wholesale
+/// by the onboarding editor (PUT /catalog), so a bono would not survive a re-import — and
+/// the programme engine never sees it, so it cannot shift the ladder's economics.
+model BonoPlan {
+  id       String @id @default(uuid())
+  clinicId String
+  clinic   Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  name String
+
+  /// Cents, not euros: a session's progress is exactly this, never a rounded division of a
+  /// package price, so five sessions at 39,90 € earn 39,90 € each and not 39,88.
+  pricePerSessionCents Int
+
+  /// The whole pack. 1 to 100; the service enforces the bounds.
+  totalSessions Int
+
+  /// Soft delete: a plan a member may still be mid-way through must not vanish from the
+  /// picker list without the owner meaning it to.
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  issued MemberBono[]
+
+  @@index([clinicId])
+}
+
+enum MemberBonoStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+/// A bono a member holds: the centre's plan SNAPSHOTTED, plus how far through it they are.
+///
+/// The snapshot is deliberate: a plan's price or session count must not change underneath a
+/// member who is part-way through consuming what they paid for — the same rule the
+/// programme versions follow. planId remains as a soft reference for the editor, null once
+/// the plan is deleted.
+///
+/// It holds the treatment NAME, so it is erasable data in its own table: member erasure
+/// removes these rows, while the financial record (PaidVisit, amounts only) survives.
+model MemberBono {
+  id       String    @id @default(uuid())
+  clinicId String
+  clinic   Clinic    @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  memberId String
+  member   Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  planId   String?
+  plan     BonoPlan? @relation(fields: [planId], references: [id], onDelete: SetNull)
+
+  /// Snapshot taken when the bono starts, so later plan edits don't rewrite history.
+  name                 String
+  pricePerSessionCents Int
+  totalSessions        Int
+
+  /// Sessions consumed so far.
+  sessionsUsed Int @default(0)
+
+  status      MemberBonoStatus @default(ACTIVE)
+  startedAt   DateTime         @default(now())
+  cancelledAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  /// The visits that consumed this bono. PaidVisit keeps its own bonoSessionNumber, so the
+  /// financial record needs nothing from this table.
+  visits PaidVisit[]
+
+  @@index([clinicId, status])
+  @@index([memberId, status])
 }
 
 enum MemberRewardKind {

@@ -1,4 +1,5 @@
 import {
+  MemberBonoStatus,
   MemberRewardKind,
   PointsTransactionKind,
   VisitKind,
@@ -29,6 +30,18 @@ import {
   tierKeyOf,
   type PurchaseLine
 } from "./rules";
+import {
+  bonoOutcome,
+  nextBonoSession,
+  sessionFits,
+  statusAfterSession,
+  type BonoOutcomeView
+} from "../../bonos/bono-rules";
+import {
+  BONO_START_AT_MESSAGE,
+  BONUS_POINTS_MESSAGE,
+  BONUS_STEP
+} from "../../bonos/bono.schema";
 
 /**
  * Recording a visit: the moment a payment becomes progress.
@@ -56,8 +69,20 @@ export interface RecordVisitInput {
   kind: "PAYMENT" | "BONO_SESSION";
   /** PAYMENT: what was paid, by category, so retail and medicine can be told apart. */
   lines?: VisitLine[];
-  /** BONO_SESSION: the package this session came out of. */
+  /** BONO_SESSION: the plan to start, or the member's active bono from it. */
+  planId?: string;
+  /** BONO_SESSION: the member's bono directly, e.g. one started at another till. */
+  memberBonoId?: string;
+  /** BONO_SESSION: legacy free-text package, recorded with no bono to track. */
   package?: { name?: string; priceEuro: number; sessions: number };
+  /** BONO_SESSION: the session a member who already did sessions elsewhere starts at. */
+  startAtSession?: number;
+  /**
+   * Bonus points awarded by hand with the visit, multiples of ten (the ledger holds whole
+   * euros of progress). Added to the visit's progress before the single ledger credit, so
+   * milestones and the pass see one number — never multiplied, never doubled by a perk.
+   */
+  bonusPoints?: number;
   /** Cosmetics bought at the tier discount in this visit. */
   discountedProducts?: number;
   /** Minted by the caller, so a double tap cannot pay a client twice. */
@@ -92,9 +117,24 @@ export interface VisitOutcome {
   issued: IssuedReward[];
   /** Discounted products still available this calendar year. */
   discountRemaining: number;
+  /** The bono the session came out of; null for a payment visit or a legacy package. */
+  bono: BonoOutcomeView | null;
+  /** Whole points the progress gained from the bonus field, 0 when there was none. */
+  bonusPoints: number;
 }
 
 const DOUBLE_PERK = "doble";
+
+/** The bono a BONO_SESSION visit consumes, resolved behind the member lock. */
+interface ResolvedBono {
+  id: string;
+  name: string;
+  /** 1-based session this visit records. */
+  session: number;
+  /** What the session earns, exactly: the plan's per-session price, in cents. */
+  cents: number;
+  totalSessions: number;
+}
 
 export class VisitService {
   constructor(
@@ -187,6 +227,9 @@ export class VisitService {
       _sum: { discountedProducts: true }
     });
     const tierView = active.view.tiers.find((t) => t.key === tierKeyOf(tier)) ?? null;
+    const bono = visit.memberBonoId
+      ? await this.bonoView(visit.memberBonoId, visit.bonoSessionNumber)
+      : null;
 
     return {
       visitId: visit.id,
@@ -202,8 +245,32 @@ export class VisitService {
       discountRemaining: discountAllowance({
         tier: tierView,
         usedThisWindow: used._sum.discountedProducts ?? 0
-      })
+      }),
+      bono,
+      bonusPoints: toPoints(visit.bonusProgress ?? 0)
     };
+  }
+
+  /** The outcome's bono block, the same for a first record and for a retry. */
+  private async bonoView(
+    memberBonoId: string,
+    session: number | null
+  ): Promise<BonoOutcomeView | null> {
+    if (!session) return null;
+
+    const bono = await this.prisma.memberBono.findUnique({ where: { id: memberBonoId } });
+
+    return bono
+      ? bonoOutcome(
+          {
+            id: bono.id,
+            name: bono.name,
+            totalSessions: bono.totalSessions,
+            sessionsUsed: bono.sessionsUsed
+          },
+          session
+        )
+      : null;
   }
 
   /**
@@ -215,10 +282,22 @@ export class VisitService {
    */
   private async open(input: RecordVisitInput, view: ProgramView) {
     const occurredAt = input.occurredAt ?? this.now();
-    const { cents, hasTreatment } = this.price(input);
     const discounted = input.discountedProducts ?? 0;
 
-    return this.prisma.$transaction(async (tx) => {
+    if (
+      input.bonusPoints !== undefined &&
+      (input.bonusPoints < BONUS_STEP || input.bonusPoints % BONUS_STEP !== 0)
+    ) {
+      throw new OnboardingError(BONUS_POINTS_MESSAGE, 400);
+    }
+
+    const bonusEuros = (input.bonusPoints ?? 0) / BONUS_STEP;
+
+    // Generous timeouts: the bono path runs several queries inside this transaction and
+    // the database can be a hosted pooler far away — Prisma's 5-second default expires it
+    // mid-flow and the next query answers P2028 against a closed handle.
+    return this.prisma.$transaction(
+      async (tx) => {
       // The lock is the point. Everything below reads what a concurrent visit would change.
       await tx.$queryRaw`SELECT id FROM "Member" WHERE id = ${input.memberId} FOR UPDATE`;
 
@@ -239,6 +318,10 @@ export class VisitService {
         select: { tier: true }
       });
       const tier = view.tiers.find((t) => t.key === tierKeyOf(member.tier)) ?? null;
+
+      // Behind the same lock, so two sessions recorded at once cannot take the same number.
+      const bono = input.kind === "BONO_SESSION" ? await this.resolveBono(tx, input) : null;
+      const { cents, hasTreatment } = this.price(input, bono);
 
       if (discounted > 0) {
         const used = await tx.paidVisit.aggregate({
@@ -288,7 +371,9 @@ export class VisitService {
             })
           : null;
 
-      const progress = purchaseProgress({ cents, tier, doubled: Boolean(perk) });
+      // The bonus is flat: no multiplier, no double-points perk, added before the single
+      // credit so the milestones this visit crosses are judged on the whole number.
+      const progress = purchaseProgress({ cents, tier, doubled: Boolean(perk) }) + bonusEuros;
 
       const visit = await tx.paidVisit.create({
         data: {
@@ -301,6 +386,9 @@ export class VisitService {
           hasTreatment,
           discountedProducts: discounted,
           idempotencyKey: input.idempotencyKey,
+          memberBonoId: bono?.id ?? null,
+          bonoSessionNumber: bono?.session ?? null,
+          bonusProgress: bonusEuros > 0 ? bonusEuros : null,
           progressAwarded: progress,
           lifetimeBefore: before,
           lifetimeAfter: before + progress,
@@ -308,6 +396,24 @@ export class VisitService {
           createdBy: input.createdBy
         }
       });
+
+      // Consume the session in the same commit as the visit that used it: a crash between
+      // the two cannot leave a session both recorded and still available.
+      if (bono) {
+        await tx.memberBono.update({
+          where: { id: bono.id },
+          data: {
+            sessionsUsed: bono.session,
+            status:
+              statusAfterSession(
+                { totalSessions: bono.totalSessions, sessionsUsed: 0 },
+                bono.session
+              ) === "COMPLETED"
+                ? MemberBonoStatus.COMPLETED
+                : MemberBonoStatus.ACTIVE
+          }
+        });
+      }
 
       if (perk) {
         await tx.memberReward.update({
@@ -317,12 +423,119 @@ export class VisitService {
       }
 
       return { visit, created: true, doubled: Boolean(perk) };
-    });
+      },
+      { timeout: 30_000, maxWait: 15_000 }
+    );
+  }
+
+  /**
+   * Which bono, which session. Directly by id, or by plan — which continues the member's
+   * active bono from that plan, or starts one, optionally mid-way for a client who already
+   * did sessions elsewhere. Null when the call carries only the legacy free-text package.
+   */
+  private async resolveBono(
+    tx: Prisma.TransactionClient,
+    input: RecordVisitInput
+  ): Promise<ResolvedBono | null> {
+    if (input.memberBonoId) {
+      const bono = await tx.memberBono.findFirst({
+        where: {
+          id: input.memberBonoId,
+          clinicId: input.clinicId,
+          memberId: input.memberId,
+          status: MemberBonoStatus.ACTIVE
+        }
+      });
+
+      if (!bono) throw new OnboardingError("Ese bono no existe o ya no está activo.", 404);
+
+      return this.sessionOf(bono);
+    }
+
+    if (input.planId) {
+      const plan = await tx.bonoPlan.findFirst({
+        where: { id: input.planId, clinicId: input.clinicId, active: true }
+      });
+
+      if (!plan) {
+        throw new OnboardingError("No se ha encontrado ese bono o no está disponible.", 404);
+      }
+
+      // A member never holds two active bonos from one plan: choosing the plan again
+      // continues the one they are on rather than silently starting a second.
+      const existing = await tx.memberBono.findFirst({
+        where: {
+          memberId: input.memberId,
+          clinicId: input.clinicId,
+          planId: plan.id,
+          status: MemberBonoStatus.ACTIVE
+        }
+      });
+
+      if (existing) return this.sessionOf(existing);
+
+      const start = input.startAtSession ?? 1;
+
+      if (!sessionFits({ totalSessions: plan.totalSessions, sessionsUsed: 0 }, start)) {
+        throw new OnboardingError(BONO_START_AT_MESSAGE, 400);
+      }
+
+      const created = await tx.memberBono.create({
+        data: {
+          clinicId: input.clinicId,
+          memberId: input.memberId,
+          planId: plan.id,
+          name: plan.name,
+          pricePerSessionCents: plan.pricePerSessionCents,
+          totalSessions: plan.totalSessions,
+          sessionsUsed: start - 1
+        }
+      });
+
+      return {
+        id: created.id,
+        name: created.name,
+        session: start,
+        cents: plan.pricePerSessionCents,
+        totalSessions: plan.totalSessions
+      };
+    }
+
+    return null;
+  }
+
+  /** The next session of a bono already held, or a clear refusal when it is exhausted. */
+  private sessionOf(bono: {
+    id: string;
+    name: string;
+    pricePerSessionCents: number;
+    totalSessions: number;
+    sessionsUsed: number;
+  }): ResolvedBono {
+    const session = nextBonoSession(bono);
+
+    if (!sessionFits(bono, session)) {
+      throw new OnboardingError("Ese bono ya no tiene sesiones disponibles.", 409);
+    }
+
+    return {
+      id: bono.id,
+      name: bono.name,
+      session,
+      cents: bono.pricePerSessionCents,
+      totalSessions: bono.totalSessions
+    };
   }
 
   /** What the visit earns, and whether it counts as treatment — or a clear refusal. */
-  private price(input: RecordVisitInput): { cents: number; hasTreatment: boolean } {
+  private price(
+    input: RecordVisitInput,
+    bono: ResolvedBono | null
+  ): { cents: number; hasTreatment: boolean } {
     if (input.kind === "BONO_SESSION") {
+      // A tracked bono's session is worth exactly what the plan says per session.
+      if (bono) return { cents: bono.cents, hasTreatment: true };
+
       const pack = input.package;
 
       if (!pack || !(pack.priceEuro > 0) || !Number.isInteger(pack.sessions) || pack.sessions < 1) {

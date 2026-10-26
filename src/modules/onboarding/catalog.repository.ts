@@ -116,7 +116,12 @@ export class PrismaCatalogRepository implements CatalogRepository {
 
     const keep = prepared.map((p) => p.externalId);
 
-    await this.prisma.$transaction(async (tx) => {
+    // A generous timeout: this transaction is one upsert per catalogue row, and the database
+    // may be a hosted pooler a continent away. At Prisma's 5-second default a large CSV
+    // loses the transaction mid-loop and every later upsert answers P2028 ("Transaction
+    // not found") against a handle that is already closed.
+    await this.prisma.$transaction(
+      async (tx) => {
       // An empty list means "the centre sells nothing", which is a legitimate thing to save —
       // deleting the last row in the editor sends exactly that. `notIn: []` is valid and matches
       // every row, so no special case is needed for it.
@@ -147,7 +152,9 @@ export class PrismaCatalogRepository implements CatalogRepository {
           create: { clinicId, ...row }
         });
       }
-    });
+      },
+      { timeout: 120_000, maxWait: 15_000 }
+    );
 
     return this.listForClinic(clinicId);
   }

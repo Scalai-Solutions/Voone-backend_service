@@ -75,8 +75,60 @@ export type MemberSex = z.infer<typeof memberSexSchema>;
  */
 const CURRENT_YEAR = new Date().getUTCFullYear();
 
+/**
+ * The youngest member the programme accepts. Enforced wherever a full date of birth
+ * arrives, so the public form's gate and the API's cannot drift apart. birthYear (a bare
+ * year from the old form) cannot prove an exact age and is left alone.
+ */
+const MIN_MEMBER_AGE = 16;
+
 const NAME_INVALID = "Introduce tu nombre y apellidos";
 const NAME_TOO_LONG = "El nombre es demasiado largo";
+const BIRTH_DATE_REQUIRED_MESSAGE = "Introduce tu fecha de nacimiento.";
+const SEX_REQUIRED_MESSAGE = "Selecciona una opción.";
+const MARKETING_CONSENT_REQUIRED_MESSAGE =
+  "Debes aceptar recibir novedades y ofertas para unirte.";
+const UNDERAGE_MESSAGE = "Debes tener al menos 16 años para unirte.";
+
+/**
+ * A YYYY-MM-DD string to a UTC Date, refusing impossible, future and under-16 dates.
+ *
+ * Shared by the sign-up schema and the member editor so the age gate cannot drift between
+ * the two surfaces that collect a date of birth.
+ */
+export const birthDateFromInput = (
+  value: string,
+  ctx: { addIssue: (issue: { code: "custom"; message: string }) => void }
+): Date => {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  const year = date.getUTCFullYear();
+  const normalized = date.toISOString().slice(0, 10);
+
+  if (
+    normalized !== value ||
+    year < CURRENT_YEAR - 120 ||
+    year > CURRENT_YEAR ||
+    date.getTime() > Date.now()
+  ) {
+    ctx.addIssue({ code: "custom", message: "Introduce una fecha de nacimiento válida" });
+
+    return z.NEVER;
+  }
+
+  // Read per request rather than once at module load: 16 years is a moving boundary the
+  // CURRENT_YEAR sanity bound deliberately freezes, but one day of error at the age gate
+  // would wrongly refuse a member on their birthday.
+  const sixteenYearsAgo = new Date();
+  sixteenYearsAgo.setUTCFullYear(sixteenYearsAgo.getUTCFullYear() - MIN_MEMBER_AGE);
+
+  if (date > sixteenYearsAgo) {
+    ctx.addIssue({ code: "custom", message: UNDERAGE_MESSAGE });
+
+    return z.NEVER;
+  }
+
+  return date;
+};
 
 /**
  * The sign-up form contract. Messages are Spanish because the form renders them verbatim;
@@ -119,10 +171,11 @@ export const membershipSignupSchema = z
         return normalized;
       }),
 
-    // Mandatory field, free value. Membership itself rests on performance of a contract,
-    // so requiring `true` here would condition sign-up on marketing consent — which is the
-    // bundling GDPR Art 7(4) forbids. Requiring the field is what proves the member made
-    // an affirmative choice rather than that we assumed one on their behalf.
+    // Mandatory field. The value stays free in the schema because staff cannot give
+    // consent on a client's behalf; the public sign-up route requires `true` (2026-10
+    // product decision, see qrSignupRequirementMissing). That does condition sign-up on
+    // marketing consent — the GDPR Art 7(4) bundling the original design avoided — and is
+    // the clinic's call to make, recorded here so the tension is not lost.
     //
     // Never z.coerce.boolean(): it turns the string "false" into true and fabricates
     // consent for every member whose form serializes booleans as strings.
@@ -151,31 +204,15 @@ export const membershipSignupSchema = z
 
     /**
      * Full date of birth, captured going forward so age can be derived accurately.
-     * Optional: refusing sign-up over a demographic costs a member to gain a data point.
+     * Optional in the schema because staff entry does not ask for it; the public sign-up
+     * route requires it (see qrSignupRequirementMissing) and refuses anyone under 16.
      * birthYear remains accepted only for older clients and is converted to a fallback.
      */
     birthDate: z
       .string()
       .trim()
       .regex(/^\d{4}-\d{2}-\d{2}$/, "Introduce una fecha de nacimiento válida")
-      .transform((value, ctx) => {
-        const date = new Date(`${value}T00:00:00.000Z`);
-        const year = date.getUTCFullYear();
-        const normalized = date.toISOString().slice(0, 10);
-
-        if (
-          normalized !== value ||
-          year < CURRENT_YEAR - 120 ||
-          year > CURRENT_YEAR ||
-          date.getTime() > Date.now()
-        ) {
-          ctx.addIssue({ code: "custom", message: "Introduce una fecha de nacimiento válida" });
-
-          return z.NEVER;
-        }
-
-        return date;
-      })
+      .transform(birthDateFromInput)
       .optional(),
 
     birthYear: z.coerce
@@ -263,3 +300,90 @@ export const privacyAcceptanceMissing = (
   input: { acceptedPrivacy?: boolean },
   source: "qr_signup" | "staff_entry"
 ): boolean => source === "qr_signup" && !input.acceptedPrivacy;
+
+/**
+ * What the QR form asks that the staff form does not (2026-10 product decision): the
+ * member fills in everything up front, so a self sign-up is refused over the first
+ * missing requirement. Staff entry is exempt — staff cannot tick a consent box or answer
+ * a demographic on the client's behalf.
+ */
+export const qrSignupRequirementMissing = (
+  input: { birthDate?: Date; sex?: MemberSex; consentMarketing?: boolean },
+  source: "qr_signup" | "staff_entry"
+): string | null => {
+  if (source !== "qr_signup") return null;
+  if (!input.birthDate) return BIRTH_DATE_REQUIRED_MESSAGE;
+  if (!input.sex) return SEX_REQUIRED_MESSAGE;
+  if (input.consentMarketing !== true) return MARKETING_CONSENT_REQUIRED_MESSAGE;
+
+  return null;
+};
+
+/**
+ * Editing a member. Every field is optional — absent means unchanged — and `null` clears
+ * where the column allows it. It shares the sign-up pipelines (name cleaning, the phone
+ * normalizer, the 16-and-over gate) so the two surfaces cannot drift.
+ *
+ * Consent fields and provenance are deliberately absent: staff cannot consent on a
+ * client's behalf, and how a member was collected is a fact about their sign-up, not an
+ * editable preference.
+ */
+export const memberUpdateSchema = z
+  .object({
+    name: z
+      .string(NAME_INVALID)
+      .max(200, NAME_TOO_LONG)
+      .transform(cleanMemberName)
+      .superRefine((name, ctx) => {
+        if (name.length > MEMBER_NAME_MAX) {
+          ctx.addIssue({ code: "custom", message: NAME_TOO_LONG });
+
+          return;
+        }
+
+        if (name.length < MEMBER_NAME_MIN || !isPlausibleName(name)) {
+          ctx.addIssue({ code: "custom", message: NAME_INVALID });
+        }
+      })
+      .optional(),
+    phone: z
+      .string("Introduce tu número de móvil")
+      .max(32, "El número de teléfono es demasiado largo")
+      .transform((value, ctx) => {
+        const normalized = normalizeSpanishMobile(value);
+
+        if (normalized === null) {
+          ctx.addIssue({ code: "custom", message: "Introduce un móvil español válido" });
+
+          return z.NEVER;
+        }
+
+        return normalized;
+      })
+      .nullish(),
+    email: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .max(254, "El email es demasiado largo")
+      .pipe(z.string().email("Introduce un email válido"))
+      .nullish(),
+    birthDate: z
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Introduce una fecha de nacimiento válida")
+      .transform(birthDateFromInput)
+      .nullish(),
+    sex: memberSexSchema.nullish()
+  })
+  .refine(
+    (patch) =>
+      patch.name !== undefined ||
+      patch.phone !== undefined ||
+      patch.email !== undefined ||
+      patch.birthDate !== undefined ||
+      patch.sex !== undefined,
+    { message: "No hay nada que cambiar" }
+  );
+
+export type MemberUpdateInput = z.infer<typeof memberUpdateSchema>;

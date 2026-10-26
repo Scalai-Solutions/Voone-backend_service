@@ -49,7 +49,8 @@ import {
 import {
   membershipSignupSchema,
   PRIVACY_REQUIRED_MESSAGE,
-  privacyAcceptanceMissing
+  privacyAcceptanceMissing,
+  qrSignupRequirementMissing
 } from "../../modules/members/membership.schema";
 import { signUpMember } from "../../modules/members/membership.service";
 import { normalizeSpanishMobile } from "../../modules/members/phone-es";
@@ -722,6 +723,20 @@ membersRouter.post(
     // The person has to accept the processing of their data themselves, before a pass exists.
     if (privacyAcceptanceMissing(parsed.data, parsed.data.consentSource ?? "qr_signup")) {
       throw new MembershipValidationError(PRIVACY_REQUIRED_MESSAGE);
+    }
+
+    // The QR form asks for everything up front (2026-10 product decision): a self sign-up
+    // is refused over a blank profile field, an unticked box, or — in the schema itself —
+    // a date of birth under 16. Enforced here rather than only in the form, so a direct
+    // API caller cannot skip what the form requires; staff entry stays exempt, per
+    // qrSignupRequirementMissing.
+    const missingRequirement = qrSignupRequirementMissing(
+      parsed.data,
+      parsed.data.consentSource ?? "qr_signup"
+    );
+
+    if (missingRequirement) {
+      throw new MembershipValidationError(missingRequirement);
     }
 
     // The default lives here rather than in the schema or the service: it is an API

@@ -458,7 +458,13 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
               })),
               discountedProducts: body.discountedProducts
             }
-          : { package: body.package }),
+          : {
+              ...(body.planId ? { planId: body.planId } : {}),
+              ...(body.memberBonoId ? { memberBonoId: body.memberBonoId } : {}),
+              ...(body.package ? { package: body.package } : {}),
+              ...(body.startAtSession !== undefined ? { startAtSession: body.startAtSession } : {})
+            }),
+        ...(body.bonusPoints !== undefined ? { bonusPoints: body.bonusPoints } : {}),
         idempotencyKey: body.idempotencyKey
       });
 

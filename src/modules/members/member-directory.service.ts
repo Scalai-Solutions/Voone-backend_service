@@ -5,7 +5,11 @@ import {
   type PrismaClient
 } from "@prisma/client";
 
-import { MemberNotFoundError } from "../../common/errors/membership.errors";
+import {
+  MemberNotFoundError,
+  MemberPhoneTakenError
+} from "../../common/errors/membership.errors";
+import type { MemberUpdateInput } from "./membership.schema";
 import { toPoints } from "../onboarding/runtime/points-unit";
 import { listTreatments } from "../treatments/treatment-catalogue.service";
 import type { CardRef } from "../../wallet/engine/wallet-pass-provider.interface";
@@ -29,6 +33,8 @@ export interface MemberSummary {
   identity: string;
   /** Carried separately from identity, which collapses to one of the two. */
   email: string | null;
+  /** Canonical E.164, so the edit form prefills what is stored rather than a guess. */
+  phone: string | null;
   /** ISO date (YYYY-MM-DD) when captured by the current sign-up form. */
   birthDate: string | null;
   /** Fallback for older sign-ups that only captured a year. */
@@ -173,6 +179,73 @@ export class MemberDirectoryService {
     return summary;
   }
 
+  /**
+   * Edit a member's own details: name, phone, email, date of birth, sex. Each field is
+   * absent-means-unchanged; the pipelines (name cleaning, phone normalisation, the 16-plus
+   * gate) are the sign-up ones, so the two surfaces cannot drift.
+   *
+   * A phone that another member of the clinic already holds is a 409, not a silent second
+   * row: the phone is the identity. When the name or phone changes, the wallet pass is
+   * re-synced — the card carries both.
+   */
+  async update(options: {
+    clinicId: string;
+    memberId: string;
+    patch: MemberUpdateInput;
+    syncMemberCard: (memberId: string) => void;
+  }): Promise<MemberSummary> {
+    const member = await this.prisma.member.findFirst({
+      where: { id: options.memberId, clinicId: options.clinicId, erasedAt: null },
+      select: { id: true }
+    });
+
+    if (!member) throw new MemberNotFoundError(options.memberId);
+
+    const patch = options.patch;
+
+    if (patch.phone) {
+      const clash = await this.prisma.member.findFirst({
+        where: {
+          clinicId: options.clinicId,
+          phone: patch.phone.e164,
+          id: { not: member.id },
+          erasedAt: null
+        },
+        select: { id: true }
+      });
+
+      if (clash) throw new MemberPhoneTakenError();
+    }
+
+    await this.prisma.member.update({
+      where: { id: member.id },
+      data: {
+        ...(patch.name !== undefined && { name: patch.name }),
+        ...(patch.phone !== undefined && {
+          phone: patch.phone?.e164 ?? null,
+          phoneRaw: patch.phone?.raw ?? null,
+          phoneRegionAssumed: patch.phone?.regionAssumed ?? false
+        }),
+        ...(patch.email !== undefined && { email: patch.email ?? null }),
+        ...(patch.birthDate !== undefined && {
+          birthDate: patch.birthDate ?? null,
+          // The same fallback the sign-up writes, so the dashboard's age column keeps
+          // working for a member whose date was cleared or replaced.
+          birthYear: patch.birthDate ? patch.birthDate.getUTCFullYear() : null
+        }),
+        ...(patch.sex !== undefined && { sex: patch.sex ?? null })
+      }
+    });
+
+    // The pass carries the name, and the phone is what reception reads out. A change to
+    // either must reach the wallet or the card stops matching what the desk sees.
+    if (patch.name !== undefined || patch.phone !== undefined) {
+      options.syncMemberCard(member.id);
+    }
+
+    return this.get(member.id);
+  }
+
   async delete(options: DeleteMemberOptions): Promise<void> {
     const member = await this.prisma.member.findFirst({
       where: { id: options.memberId, clinicId: options.clinicId, erasedAt: null },
@@ -203,7 +276,10 @@ export class MemberDirectoryService {
 
     const now = new Date();
 
-    const [, , updated] = await this.prisma.$transaction([
+    // The member's bonos go too: they hold treatment names, which is exactly the data
+    // erasure must remove. The visits that consumed them survive with amounts only.
+    const [, , , updated] = await this.prisma.$transaction([
+      this.prisma.memberBono.deleteMany({ where: { memberId: member.id } }),
       this.prisma.passClaim.deleteMany({ where: { memberId: member.id } }),
       this.prisma.walletObject.deleteMany({ where: { memberId: member.id } }),
       this.prisma.member.updateMany({
@@ -292,6 +368,7 @@ export class MemberDirectoryService {
     return {
       id: member.id,
       name: member.name,
+      phone: member.phone,
       // The number on the member's card, which is what reception asks for out loud.
       // Null for anyone the backfill has not reached — rendered as absent rather than
       // substituted, because an identifier that is sometimes a different kind of thing

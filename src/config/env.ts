@@ -125,6 +125,10 @@ const envSchema = z.object({
   BIRTHDAY_NOTIFICATION_MINUTE: z.coerce.number().int().min(0).max(59).default(0),
   BIRTHDAY_NOTIFICATION_FREQUENCY_MINUTES: z.coerce.number().int().min(1).max(1440).default(1440),
 
+  // The monthly bono reminder rides the same daily scheduler. Per-clinic on/off lives in
+  // each clinic's notification settings; this stops the feature at the process level.
+  BONO_REMINDER_CRON_ENABLED: booleanEnv,
+
   // Optional in code, but set it to a public HTTPS URL in production. It is the plain Voone
   // logo used on a wallet card when a clinic has not set its own, and what activation and the
   // admin list treat as "no logo of its own". Unset, such a card is sent to Google without a
