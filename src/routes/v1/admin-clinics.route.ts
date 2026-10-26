@@ -771,15 +771,43 @@ adminClinicsRouter.delete(
       return;
     }
 
-    await prisma.$transaction(async (tx) => {
-      await tx.walletObject.deleteMany({ where: { member: { clinicId: clinic.id } } });
-      await tx.member.deleteMany({ where: { clinicId: clinic.id } });
-      await tx.walletClass.deleteMany({ where: { clinicTemplate: { clinicId: clinic.id } } });
-      await tx.clinicTemplate.deleteMany({ where: { clinicId: clinic.id } });
-      await tx.clinicTreatment.deleteMany({ where: { clinicId: clinic.id } });
-      await tx.user.deleteMany({ where: { clinicId: clinic.id } });
-      await tx.clinic.delete({ where: { id: clinic.id } });
-    });
+    /**
+     * Every table holding a non-cascading foreign key to Member or Clinic must be cleared
+     * here, newest dependants first, or Postgres rejects the member/clinic delete with a
+     * foreign key violation (P2003) and the admin panel sees a 500. The loyalty engine
+     * tables (points ledger, visits, rewards, referrals) and notification deliveries were
+     * added after this handler was written and are the reason deletes of any clinic with
+     * real activity failed.
+     *
+     * The timeout is raised above Prisma's 5s default because these are thirteen
+     * sequential round trips over tables a real clinic has filled — members, ledgers,
+     * visits, rewards — and at ~600ms each the default is reached around the eighth
+     * query, whereupon Prisma abandons the transaction mid-list (P2028) and the clinic
+     * is left undeleted. Half a minute is minutes, not seconds, of deletes away from
+     * being a problem worth a different design (bulk deletes); an admin removing a
+     * centre is rare and is waiting on this one request either way.
+     */
+    await prisma.$transaction(
+      async (tx) => {
+        // Restrict on Member, so it must go before the members themselves.
+        await tx.notificationDelivery.deleteMany({ where: { member: { clinicId: clinic.id } } });
+        // Rewards reference PaidVisit (redeemedVisitId) and OnboardingProgram, so they go first.
+        await tx.memberReward.deleteMany({ where: { clinicId: clinic.id } });
+        await tx.paidVisit.deleteMany({ where: { clinicId: clinic.id } });
+        await tx.referral.deleteMany({ where: { clinicId: clinic.id } });
+        await tx.pointsTransaction.deleteMany({ where: { clinicId: clinic.id } });
+        // Cascades on Member, but deleted explicitly so this list is the whole story.
+        await tx.passClaim.deleteMany({ where: { member: { clinicId: clinic.id } } });
+        await tx.walletObject.deleteMany({ where: { member: { clinicId: clinic.id } } });
+        await tx.member.deleteMany({ where: { clinicId: clinic.id } });
+        await tx.walletClass.deleteMany({ where: { clinicTemplate: { clinicId: clinic.id } } });
+        await tx.clinicTemplate.deleteMany({ where: { clinicId: clinic.id } });
+        await tx.clinicTreatment.deleteMany({ where: { clinicId: clinic.id } });
+        await tx.user.deleteMany({ where: { clinicId: clinic.id } });
+        await tx.clinic.delete({ where: { id: clinic.id } });
+      },
+      { timeout: 30_000 }
+    );
 
     res.status(204).send();
   })
