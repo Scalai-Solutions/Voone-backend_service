@@ -63,6 +63,7 @@ that each end in a pull request. The owner of the decisions is Hritik (CTO).
 ## Batches and what each contains
 
 **Batch 1, backend: safety and data.**
+
 - Template read and update verify the template belongs to the clinic named in the `x-clinic-id`
   header. The list endpoint returns only that clinic's template. The admin screens pass the real
   clinic id of the template they open, so one rule covers owners and admins. The public branding
@@ -85,6 +86,7 @@ that each end in a pull request. The owner of the decisions is Hritik (CTO).
   (wizard, template studio) and from the Google provider's fallback.
 
 **Batch 2, backend: unit consistency and refresh visibility.**
+
 - Sweep every place a balance or distance reaches a client or staff and use `toPoints` for
   programme centres: notification bodies, emails, SMS, scan lookup, receipts, visit outcome.
   One helper decides "is this a programme centre", used by all of them.
@@ -101,6 +103,7 @@ that each end in a pull request. The owner of the decisions is Hritik (CTO).
   part of this work.
 
 **Batch 3, frontend: consistency.**
+
 - Spanish for everything a clinic user sees; the admin panel stays English. The card editor that
   owners use (`template-form`) is Spanish for admins too, since it is the same screen. The clinic
   wizard is admin-only and stays English.
@@ -125,6 +128,7 @@ that each end in a pull request. The owner of the decisions is Hritik (CTO).
 - "Price: 60 euros" and similar read as Spanish ("Precio: 60 €").
 
 **Batch 4, frontend and backend: owner-managed treatments and card changes.**
+
 - Owners and managers (the existing `clinicEdit` permission) can edit treatments.
 - My center, Treatments tab, becomes editable for owners and managers: add, rename, change price,
   remove. It is the only place treatments are edited. The "Información del centro" tab also leaves the
@@ -139,6 +143,7 @@ that each end in a pull request. The owner of the decisions is Hritik (CTO).
 - Admin can open the same editor for a clinic (done in an earlier PR).
 
 **Batch 5, frontend and backend: rewards and levels have one source.**
+
 - The clinic sign-up wizard stops asking for tiers and milestones. The programme builder is the
   only source, and My center's Rewards and Levels tabs read from the live programme.
 - Those tabs say how to change them: contact Voone, who creates a new programme version.

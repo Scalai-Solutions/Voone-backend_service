@@ -33,14 +33,14 @@
 
 ## Pull requests, in order
 
-| PR | Repo | Branch | Tasks |
-|---|---|---|---|
-| 1 | frontend | `fix/send-clinic-header-on-template-reads` | 1 |
-| 2 | backend | `fix/template-safety` | 2-6 |
-| 3 | backend | `fix/points-unit-and-spanish` | 7-9 |
-| 4 | frontend | `fix/ui-consistency` | 10-12 |
-| 5 | backend | `feat/owner-treatments-api` | 13 |
-| 6 | frontend | `feat/owner-treatments-and-card-confirmation` | 14-15 |
+| PR  | Repo     | Branch                                        | Tasks |
+| --- | -------- | --------------------------------------------- | ----- |
+| 1   | frontend | `fix/send-clinic-header-on-template-reads`    | 1     |
+| 2   | backend  | `fix/template-safety`                         | 2-6   |
+| 3   | backend  | `fix/points-unit-and-spanish`                 | 7-9   |
+| 4   | frontend | `fix/ui-consistency`                          | 10-12 |
+| 5   | backend  | `feat/owner-treatments-api`                   | 13    |
+| 6   | frontend | `feat/owner-treatments-and-card-confirmation` | 14-15 |
 
 PR 2 deploys only after PR 1 is live. PR 6 deploys after PRs 3 and 5.
 
@@ -51,11 +51,13 @@ PR 2 deploys only after PR 1 is live. PR 6 deploys after PRs 3 and 5.
 ### Task 1: Template reads carry the clinic id, and writes carry who made them
 
 **Files:**
+
 - Modify: `src/lib/api-client.ts` (`getTemplate`, `getCurrentClinicTemplate`, `getTemplates`)
 - Modify: `src/app/(dashboard)/dashboard/templates/[templateId]/page.tsx`, `src/app/(admin)/admin/clinics/[clinicId]/card/page.tsx`
 - Modify: `src/lib/staff-api.ts` (`staffFetch` also sends `x-actor: <session user email>`, which the backend records in Task 2)
 
 **Interfaces:**
+
 - Produces: `getTemplate(templateId: string, clinicId: string): Promise<Template>` sending header `x-clinic-id: clinicId`; `getTemplates(clinicId: string)`.
 
 - [ ] **Step 1:** Add the `clinicId` parameter and header to the three functions; update both pages (clinic id from `session.clinicId` and from `clinic.id`).
@@ -70,12 +72,14 @@ PR 2 deploys only after PR 1 is live. PR 6 deploys after PRs 3 and 5.
 ### Task 2: Ownership check and change record
 
 **Files:**
+
 - Modify: `src/modules/templates/templates.controller.ts` (`getById`, `list`, `update`), `src/modules/templates/templates.service.ts`
 - Create: `src/modules/templates/template-change.service.ts`, migration `prisma/migrations/20261026090000_template_change/migration.sql`
 - Modify: `prisma/schema.prisma` (model `TemplateChange`: `id`, `clinicId`, `templateId`, `changedBy String?`, `changedFields String[]`, `cardsAtSave Int`, `createdAt`)
 - Test: `tests/templates/templates.ownership.test.ts`, `tests/templates/template-change.test.ts`
 
 **Interfaces:**
+
 - Produces: `assertOwnsTemplate(template: { clinicId: string } | null, clinicId: string): asserts template` (throws the existing not-found error, so a wrong clinic sees 404, never 403); `diffTemplate(before: TemplateFields, after: TemplateFields): string[]` over `programName, hexBackgroundColor, logoUrl, logoOnDarkUrl, heroImageUrl, websiteUrl, appointmentUrl, appLinkText, appLinkDescription, pointsLabel, tierLabel, benefitsText, infoText`; `recordTemplateChange(db, input: { clinicId; templateId; actor?: string; changedFields: string[]; cardsAtSave: number }): Promise<void>`.
 
 - [ ] **Step 1: Write failing tests.** `ownership`: `getById` with another clinic's `x-clinic-id` returns 404; `update` with another clinic's id returns 404 and calls nothing; `list` returns only that clinic's template; matching clinic succeeds. `change`: saving a new `heroImageUrl` writes one record with `changedFields: ["heroImageUrl"]`, the `x-actor` value, and `cardsAtSave` equal to the count of members with a wallet pass; saving identical values writes none.
