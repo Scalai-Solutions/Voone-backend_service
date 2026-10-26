@@ -116,38 +116,45 @@ export class PrismaCatalogRepository implements CatalogRepository {
 
     const keep = prepared.map((p) => p.externalId);
 
-    await this.prisma.$transaction(async (tx) => {
-      // An empty list means "the centre sells nothing", which is a legitimate thing to save —
-      // deleting the last row in the editor sends exactly that. `notIn: []` is valid and matches
-      // every row, so no special case is needed for it.
-      await tx.catalogItem.deleteMany({
-        where: {
-          clinicId,
-          externalId: { notIn: keep },
-          NOT: { externalId: { startsWith: OWNER_EXTERNAL_ID_PREFIX } }
-        }
-      });
-
-      for (const row of prepared) {
-        await tx.catalogItem.upsert({
-          where: { clinicId_externalId: { clinicId, externalId: row.externalId } },
-          // Classification is left alone on update: it is recomputed by the engine on
-          // every run, and a stored value the centre corrected must not be overwritten
-          // by a re-upload that merely changed a price.
-          update: {
-            name: row.name,
-            priceCents: row.priceCents,
-            durationMin: row.durationMin,
-            isProduct: row.isProduct,
-            categoryId: row.categoryId,
-            costPctOverride: row.costPctOverride,
-            estimated: row.estimated,
-            position: row.position
-          },
-          create: { clinicId, ...row }
+    // A generous timeout: this transaction is one upsert per catalogue row, and the database
+    // may be a hosted pooler a continent away. At Prisma's 5-second default a large CSV
+    // loses the transaction mid-loop and every later upsert answers P2028 ("Transaction
+    // not found") against a handle that is already closed.
+    await this.prisma.$transaction(
+      async (tx) => {
+        // An empty list means "the centre sells nothing", which is a legitimate thing to save —
+        // deleting the last row in the editor sends exactly that. `notIn: []` is valid and matches
+        // every row, so no special case is needed for it.
+        await tx.catalogItem.deleteMany({
+          where: {
+            clinicId,
+            externalId: { notIn: keep },
+            NOT: { externalId: { startsWith: OWNER_EXTERNAL_ID_PREFIX } }
+          }
         });
-      }
-    });
+
+        for (const row of prepared) {
+          await tx.catalogItem.upsert({
+            where: { clinicId_externalId: { clinicId, externalId: row.externalId } },
+            // Classification is left alone on update: it is recomputed by the engine on
+            // every run, and a stored value the centre corrected must not be overwritten
+            // by a re-upload that merely changed a price.
+            update: {
+              name: row.name,
+              priceCents: row.priceCents,
+              durationMin: row.durationMin,
+              isProduct: row.isProduct,
+              categoryId: row.categoryId,
+              costPctOverride: row.costPctOverride,
+              estimated: row.estimated,
+              position: row.position
+            },
+            create: { clinicId, ...row }
+          });
+        }
+      },
+      { timeout: 120_000, maxWait: 15_000 }
+    );
 
     return this.listForClinic(clinicId);
   }

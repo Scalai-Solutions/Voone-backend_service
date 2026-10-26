@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { bonusPointsSchema, startAtSessionSchema } from "../bonos/bono.schema";
 import { ANSWER_LIMITS, CATEGORIES } from "./engine.config";
 
 /**
@@ -130,17 +131,32 @@ export const visitSchema = z.discriminatedUnion("kind", [
     kind: z.literal("PAYMENT"),
     lines: z.array(lineSchema).min(1, "Añade al menos un importe").max(50),
     discountedProducts: z.number().int().min(0).max(20).optional(),
+    bonusPoints: bonusPointsSchema.optional(),
     idempotencyKey: key
   }),
-  z.object({
-    kind: z.literal("BONO_SESSION"),
-    package: z.object({
-      name: z.string().trim().min(1).max(120).optional(),
-      priceEuro: z.number().positive("El bono tiene que tener un precio"),
-      sessions: z.number().int().min(1, "El bono tiene al menos una sesión").max(100)
-    }),
-    idempotencyKey: key
-  })
+  z
+    .object({
+      kind: z.literal("BONO_SESSION"),
+      /** The plan to start, or the member's active bono from it. */
+      planId: z.string().trim().min(1).max(64).optional(),
+      /** The member's bono directly, e.g. one started at another till. */
+      memberBonoId: z.string().trim().min(1).max(64).optional(),
+      /** Legacy free-text package: recorded with no bono to track. */
+      package: z
+        .object({
+          name: z.string().trim().min(1).max(120).optional(),
+          priceEuro: z.number().positive("El bono tiene que tener un precio"),
+          sessions: z.number().int().min(1, "El bono tiene al menos una sesión").max(100)
+        })
+        .optional(),
+      /** For a client who already did sessions elsewhere before tracking started here. */
+      startAtSession: startAtSessionSchema.optional(),
+      bonusPoints: bonusPointsSchema.optional(),
+      idempotencyKey: key
+    })
+    .refine((body) => Boolean(body.planId || body.memberBonoId || body.package), {
+      message: "Indica el bono: elige un plan o un bono de la clienta, o su precio y sesiones."
+    })
 ]);
 
 export const redeemSchema = z.object({

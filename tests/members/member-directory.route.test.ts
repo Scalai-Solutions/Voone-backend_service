@@ -41,16 +41,24 @@ const buildApp = () => {
     },
     delete: async (options: unknown) => {
       calls.push({ delete: options });
+    },
+    update: async (options: unknown) => {
+      calls.push({ update: options });
+
+      return summary;
     }
   } as unknown as MemberDirectoryService;
 
   const app = express();
+  // The real app mounts express.json() globally (src/app.ts); a PATCH body needs it.
+  app.use(express.json());
   app.use(
     "/api/v1",
     createMemberDirectoryRouter({
       directory,
       clinicIdForSlug: async (slug) => (slug === "aurea" ? CLINIC : null),
       revokeMemberCard: async () => true,
+      syncMemberCard: () => undefined,
       treatmentsFor: async (clinicId) => {
         calls.push({ treatmentsFor: clinicId });
 
@@ -80,6 +88,12 @@ const request = async (app: Express, path: string, init?: RequestInit) => {
 
 const get = (app: Express, path: string) => request(app, path);
 const del = (app: Express, path: string) => request(app, path, { method: "DELETE" });
+const patch = (app: Express, path: string, body: unknown) =>
+  request(app, path, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
 
 describe("GET /members", () => {
   it("requires clinicId, because the staff key cannot identify a clinic", async () => {
@@ -227,5 +241,32 @@ describe("GET /points/treatments", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual([{ id: "t-1", name: "Hydrafacial", priceEuro: 120, points: 120 }]);
+  });
+});
+
+describe("PATCH /clinics/:slug/members/:memberId", () => {
+  it("edits a member through the directory service, scoped to the slug", async () => {
+    const { app, calls } = buildApp();
+
+    const response = await patch(app, "/api/v1/clinics/aurea/members/m-1", {
+      name: "Verónica Navarro Ruiz"
+    });
+
+    expect(response.status).toBe(200);
+    expect(calls).toContainEqual({
+      update: {
+        clinicId: CLINIC,
+        memberId: "m-1",
+        patch: { name: "Verónica Navarro Ruiz" },
+        syncMemberCard: expect.any(Function)
+      }
+    });
+  });
+
+  it("404s an unknown slug and 422s a patch with nothing to change", async () => {
+    const { app } = buildApp();
+
+    expect((await patch(app, "/api/v1/clinics/other/members/m-1", { name: "N" })).status).toBe(404);
+    expect((await patch(app, "/api/v1/clinics/aurea/members/m-1", {})).status).toBe(422);
   });
 });

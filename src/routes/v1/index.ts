@@ -14,6 +14,7 @@ import { PointsService } from "../../modules/points/points.service";
 import { buildNotificationService } from "../../modules/notifications/notification.composition";
 import { buildWalletSyncQueue } from "../../wallet/wallet.composition";
 import { buildImageStorage } from "../../modules/media/image-storage";
+import { createBonosRouter } from "./bonos.route";
 import { createPointsRouter } from "./points.route";
 import { createImagesRouter } from "./images.route";
 import { createOnboardingRouter } from "./onboarding.route";
@@ -23,6 +24,13 @@ import {
   scanScreenTreatments
 } from "../../modules/treatments/treatment-catalogue.service";
 import { findClinicBySlug } from "../../modules/clinics/clinic.service";
+import {
+  createPlan,
+  listPlans,
+  removePlan,
+  updatePlan
+} from "../../modules/bonos/bono-plan.service";
+import { cancelMemberBono, listForMember } from "../../modules/bonos/member-bono.service";
 import { PrismaCatalogRepository } from "../../modules/onboarding/catalog.repository";
 import { OnboardingService } from "../../modules/onboarding/onboarding.service";
 import {
@@ -175,6 +183,28 @@ v1Router.use(
 );
 
 /**
+ * Bono de sesiones: the plans the owner defines, and the bonos members hold. The same two
+ * audiences as the onboarding router — admin by clinic id while setting a centre up, the
+ * centre's own staff by slug afterwards.
+ */
+v1Router.use(
+  createBonosRouter({
+    plans: {
+      list: (clinicId) => listPlans(prisma, clinicId),
+      create: (clinicId, input) => createPlan(prisma, clinicId, input),
+      update: (clinicId, id, patch) => updatePlan(prisma, clinicId, id, patch),
+      remove: (clinicId, id) => removePlan(prisma, clinicId, id)
+    },
+    memberBonos: {
+      listForMember: (clinicId, memberId) => listForMember(prisma, clinicId, memberId),
+      cancel: (clinicId, memberId, bonoId) => cancelMemberBono(prisma, clinicId, memberId, bonoId)
+    },
+    findClinic: (slug) => findClinicBySlug(prisma, slug),
+    clinicExists: async (clinicId) => (await prisma.clinic.count({ where: { id: clinicId } })) > 0
+  })
+);
+
+/**
  * Staff card download. Needs the same two variables as the Apple routes, because without
  * a redemption secret no card can be assembled and without signing material none can be
  * built.
@@ -254,6 +284,11 @@ v1Router.use(
       await provider.revokeCard(ref);
 
       return true;
+    },
+    syncMemberCard: (memberId) => {
+      // Best effort: an edit must not fail because the wallet queue is not configured.
+      // The next pass issue or sync picks the change up either way.
+      void walletSyncQueue?.enqueueMemberSync(memberId);
     },
     clinicIdForSlug: async (slug) => {
       const clinic = await prisma.clinic.findFirst({

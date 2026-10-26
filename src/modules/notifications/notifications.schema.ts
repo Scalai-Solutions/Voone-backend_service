@@ -19,7 +19,9 @@ export const notificationSegmentSchema = z.object({
   tier: z.string().trim().min(1).max(80).optional(),
   inactiveDays: z.number().int().positive().max(3650).optional(),
   lastVisitBefore: z.coerce.date().optional(),
-  categoryNotVisited: z.string().trim().min(1).max(120).optional()
+  categoryNotVisited: z.string().trim().min(1).max(120).optional(),
+  /** The auto-created segment: members holding a bono with sessions left. */
+  activeBono: z.boolean().optional()
 });
 
 export const segmentNotificationSchema = notificationMessageSchema.extend({
@@ -38,7 +40,11 @@ export const notificationSettingsSchema = z.object({
   birthdayEnabled: z.boolean(),
   birthdayHeader: z.string().trim().min(1).max(60),
   birthdayBody: z.string().trim().min(1).max(500),
-  birthdayNotify: z.boolean()
+  birthdayNotify: z.boolean(),
+  bonoReminderEnabled: z.boolean(),
+  bonoReminderHeader: z.string().trim().min(1).max(60),
+  bonoReminderBody: z.string().trim().min(1).max(500),
+  bonoReminderNotify: z.boolean()
 });
 
 export const clinicLocationSchema = z.object({

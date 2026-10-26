@@ -49,6 +49,20 @@ export class MembershipValidationError extends AppError {
   }
 }
 
+/**
+ * Another member of the same clinic already holds that phone number. The phone is the
+ * identity, so it cannot be silently duplicated. Spanish copy, exposed.
+ */
+export class MemberPhoneTakenError extends AppError {
+  constructor() {
+    super("Ese número de móvil ya pertenece a otra persona de este centro.", {
+      statusCode: 409,
+      code: "MEMBER_PHONE_TAKEN",
+      expose: true
+    });
+  }
+}
+
 /** The slug is already taken. Slugs are printed on posters, so they cannot be reassigned. */
 export class ClinicSlugTakenError extends AppError {
   constructor(slug: string) {

@@ -8,6 +8,7 @@ import {
 import { asyncHandler } from "../../common/middleware/async-handler";
 import { createRequireStaffKey } from "../../common/middleware/staff-key";
 import { config } from "../../config/env";
+import { memberUpdateSchema } from "../../modules/members/membership.schema";
 import type { MemberDirectoryService } from "../../modules/members/member-directory.service";
 import type { CardRef } from "../../wallet/engine/wallet-pass-provider.interface";
 
@@ -16,6 +17,8 @@ export interface MemberDirectoryRouterDeps {
   /** Resolves a public clinic slug to its id, or null when there is no such clinic. */
   clinicIdForSlug: (slug: string) => Promise<string | null>;
   revokeMemberCard: (ref: CardRef) => Promise<boolean>;
+  /** Queues a wallet re-sync; best effort, so an edit never fails over the wallet queue. */
+  syncMemberCard: (memberId: string) => void;
   treatmentsFor: (
     clinicId: string
   ) => Promise<Array<{ id: string; name: string; priceEuro: number | null; points: number }>>;
@@ -109,6 +112,27 @@ export const createMemberDirectoryRouter = (deps: MemberDirectoryRouterDeps): Ro
       const { q, limit, offset } = parse(listQuery.omit({ clinicId: true }), req.query);
 
       res.json(await deps.directory.list({ clinicId, query: q, limit, offset }));
+    })
+  );
+
+  router.patch(
+    "/clinics/:slug/members/:memberId",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const clinicId = await deps.clinicIdForSlug(req.params.slug);
+
+      if (!clinicId) throw new ClinicNotFoundError(req.params.slug);
+
+      const patch = parse(memberUpdateSchema, req.body);
+
+      res.json(
+        await deps.directory.update({
+          clinicId,
+          memberId: req.params.memberId,
+          patch,
+          syncMemberCard: deps.syncMemberCard
+        })
+      );
     })
   );
 

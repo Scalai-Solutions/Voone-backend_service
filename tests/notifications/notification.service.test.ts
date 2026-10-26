@@ -331,3 +331,161 @@ describe("NotificationService", () => {
     expect(members.map((member) => member.id)).toEqual(["member-old-silver"]);
   });
 });
+
+describe("bono reminder automation", () => {
+  const settings = {
+    bonoReminderEnabled: true,
+    bonoReminderHeader: "Sesiones pendientes",
+    bonoReminderBody: "Te quedan sesiones de tu bono.",
+    bonoReminderNotify: true
+  };
+
+  const build = (overrides: {
+    day?: Date;
+    existing?: unknown;
+    members?: unknown[];
+    settings?: Record<string, unknown>;
+    notificationCreate?: (data: unknown) => unknown;
+  }) => {
+    const enqueued: string[] = [];
+    const created: unknown[] = [];
+
+    const service = new NotificationService(
+      {
+        clinic: {
+          findMany: async () => [
+            {
+              id: "clinic-1",
+              isActive: true,
+              createdAt: new Date("2026-01-01T00:00:00.000Z"),
+              notificationSettings: { ...settings, ...(overrides.settings ?? {}) }
+            }
+          ]
+        },
+        member: {
+          findMany: async () =>
+            overrides.members ?? [
+              {
+                // No consentMarketing field at all: the reminder is deliberately not
+                // gated on consent, and this member must still be a candidate.
+                id: "member-1",
+                walletObjects: [
+                  { provider: WalletProviderType.GOOGLE, status: WalletSyncStatus.SYNCED }
+                ]
+              },
+              {
+                id: "member-2",
+                walletObjects: [
+                  { provider: WalletProviderType.GOOGLE, status: WalletSyncStatus.PENDING }
+                ]
+              }
+            ]
+        },
+        notification: {
+          findFirst: async () => overrides.existing ?? null,
+          create: async ({ data }: { data: unknown }) => {
+            created.push(data);
+
+            return {
+              id: "notification-bono",
+              deliveries: [{ id: "delivery-1" }, { id: "delivery-2" }]
+            };
+          }
+        },
+        notificationDelivery: {
+          findMany: async () => [
+            { id: "delivery-0", memberId: "member-1", provider: "GOOGLE", status: "SENT" }
+          ],
+          create: async () => ({ id: "delivery-created" })
+        },
+        notificationAuditLog: { create: async () => undefined },
+        clinicNotificationSettings: { update: async () => undefined }
+      } as never,
+      {} as never,
+      {} as never,
+      { enqueueDelivery: async (deliveryId: string) => enqueued.push(deliveryId) } as never
+    );
+
+    return { service, enqueued, created };
+  };
+
+  it("sends on the 1st to members with an active bono and a synced pass", async () => {
+    const { service, enqueued, created } = build({});
+
+    const result = await service.runBonoReminderAutomations(new Date("2026-11-01T08:05:00.000Z"));
+
+    expect(result).toMatchObject({
+      month: "2026-11",
+      clinicsChecked: 1,
+      candidates: 1,
+      notificationsCreated: 1,
+      deliveriesCreated: 2
+    });
+    expect(enqueued).toEqual(["delivery-1", "delivery-2"]);
+    expect(created[0]).toMatchObject({
+      clinicId: "clinic-1",
+      type: "BONO_REMINDER",
+      header: "Sesiones pendientes",
+      segmentJson: { automation: "bono_reminder", month: "2026-11" }
+    });
+  });
+
+  it("does nothing on any other day of the month", async () => {
+    const { service, enqueued, created } = build({});
+
+    const result = await service.runBonoReminderAutomations(new Date("2026-11-02T08:05:00.000Z"));
+
+    expect(result).toEqual({
+      month: "2026-11",
+      clinicsChecked: 0,
+      candidates: 0,
+      notificationsCreated: 0,
+      deliveriesCreated: 0
+    });
+    expect(enqueued).toEqual([]);
+    expect(created).toEqual([]);
+  });
+
+  it("skips a clinic that turned the reminder off", async () => {
+    const { service, created } = build({ settings: { bonoReminderEnabled: false } });
+
+    const result = await service.runBonoReminderAutomations(new Date("2026-11-01T08:05:00.000Z"));
+
+    expect(result.notificationsCreated).toBe(0);
+    expect(created).toEqual([]);
+  });
+
+  it("does not create a second notification for the same month", async () => {
+    const { service, created } = build({ existing: { id: "notification-bono" } });
+
+    const result = await service.runBonoReminderAutomations(new Date("2026-11-01T08:05:00.000Z"));
+
+    expect(result.notificationsCreated).toBe(0);
+    expect(created).toEqual([]);
+    // The already-sent delivery is not re-queued; only what is missing is created.
+    expect(result.deliveriesCreated).toBe(0);
+  });
+
+  it("resolves the active-bono segment by the relation the schema names", async () => {
+    const wheres: unknown[] = [];
+    const service = new NotificationService(
+      {
+        member: {
+          findMany: async ({ where }: { where: unknown }) => {
+            wheres.push(where);
+
+            return [{ id: "member-1", pointsLedger: [] }];
+          }
+        }
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never
+    );
+
+    const members = await service.resolveSegment("clinic-1", { activeBono: true });
+
+    expect(members.map((member) => member.id)).toEqual(["member-1"]);
+    expect(wheres[0]).toMatchObject({ bonos: { some: { status: "ACTIVE" } } });
+  });
+});

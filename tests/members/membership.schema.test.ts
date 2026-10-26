@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   clinicSlugSchema,
+  memberUpdateSchema,
   privacyAcceptanceMissing,
   membershipSignupSchema,
-  newClinicSlugSchema
+  newClinicSlugSchema,
+  qrSignupRequirementMissing
 } from "../../src/modules/members/membership.schema";
 
 const VALID = {
@@ -59,8 +61,8 @@ describe("membershipSignupSchema", () => {
   });
 
   describe("consent", () => {
-    // Membership rests on contract, not consent. Marketing consent is a mandatory FIELD
-    // whose VALUE may be false — requiring true would condition sign-up on consent.
+    // The schema keeps the value free because staff cannot consent on a client's behalf;
+    // the QR route is what requires true now (see qrSignupRequirementMissing).
     it("creates a member when marketing consent is declined", () => {
       expect(membershipSignupSchema.parse({ ...VALID, consentMarketing: false })).toMatchObject({
         consentMarketing: false
@@ -308,6 +310,25 @@ describe("birthDate", () => {
 
     expect(withDate(`${nextYear}-01-01`).success).toBe(false);
   });
+
+  it("rejects a member under 16", () => {
+    const fifteen = new Date();
+    fifteen.setUTCFullYear(fifteen.getUTCFullYear() - 15);
+
+    const parsed = withDate(fifteen.toISOString().slice(0, 10));
+
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues[0].message).toBe("Debes tener al menos 16 años para unirte.");
+    }
+  });
+
+  it("accepts a member who turns 16 today", () => {
+    const sixteen = new Date();
+    sixteen.setUTCFullYear(sixteen.getUTCFullYear() - 16);
+
+    expect(withDate(sixteen.toISOString().slice(0, 10)).success).toBe(true);
+  });
 });
 
 describe("birthYear", () => {
@@ -396,5 +417,71 @@ describe("accepting the processing of personal data (founders' E2E item 44)", ()
     expect(privacyAcceptanceMissing(membershipSignupSchema.parse(VALID), "staff_entry")).toBe(
       false
     );
+  });
+});
+
+describe("qrSignupRequirementMissing", () => {
+  const COMPLETE = {
+    birthDate: new Date("1994-05-18T00:00:00.000Z"),
+    sex: "mujer" as const,
+    consentMarketing: true
+  };
+
+  it("accepts a complete self sign-up", () => {
+    expect(qrSignupRequirementMissing(COMPLETE, "qr_signup")).toBeNull();
+  });
+
+  it("refuses a self sign-up without a date of birth", () => {
+    expect(qrSignupRequirementMissing({ ...COMPLETE, birthDate: undefined }, "qr_signup")).toBe(
+      "Introduce tu fecha de nacimiento."
+    );
+  });
+
+  it("refuses a self sign-up without a sex", () => {
+    expect(qrSignupRequirementMissing({ ...COMPLETE, sex: undefined }, "qr_signup")).toBe(
+      "Selecciona una opción."
+    );
+  });
+
+  it("refuses a self sign-up with an unticked marketing box", () => {
+    expect(qrSignupRequirementMissing({ ...COMPLETE, consentMarketing: false }, "qr_signup")).toBe(
+      "Debes aceptar recibir novedades y ofertas para unirte."
+    );
+  });
+
+  it("does not ask staff-entered members", () => {
+    expect(qrSignupRequirementMissing({}, "staff_entry")).toBeNull();
+  });
+});
+
+describe("memberUpdateSchema", () => {
+  it("cleans the name and normalises the phone exactly as sign-up does", () => {
+    const parsed = memberUpdateSchema.parse({
+      name: "  Verónica   Navarro ",
+      phone: "612 34 56 78"
+    });
+
+    expect(parsed.name).toBe("Verónica Navarro");
+    expect(parsed.phone?.e164).toBe("+34612345678");
+  });
+
+  it("shares the 16-and-over gate with the sign-up form", () => {
+    const fifteen = new Date();
+    fifteen.setUTCFullYear(fifteen.getUTCFullYear() - 15);
+
+    expect(
+      memberUpdateSchema.safeParse({ birthDate: fifteen.toISOString().slice(0, 10) }).success
+    ).toBe(false);
+  });
+
+  it("treats null as clearing a field, not as a value to store", () => {
+    const parsed = memberUpdateSchema.parse({ email: null, birthDate: null, sex: null });
+
+    expect(parsed).toEqual({ email: null, birthDate: null, sex: null });
+  });
+
+  it("refuses a patch with nothing to change and a phone no Spaniard could hold", () => {
+    expect(memberUpdateSchema.safeParse({}).success).toBe(false);
+    expect(memberUpdateSchema.safeParse({ phone: "12345" }).success).toBe(false);
   });
 });

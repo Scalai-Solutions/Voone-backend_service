@@ -1,5 +1,6 @@
 import {
   ClinicNotifyOnCredit,
+  MemberBonoStatus,
   NotificationDeliveryStatus,
   NotificationStatus,
   NotificationType,
@@ -91,6 +92,15 @@ export interface NotificationCounts {
 
 export interface BirthdayAutomationResult {
   date: string;
+  clinicsChecked: number;
+  candidates: number;
+  notificationsCreated: number;
+  deliveriesCreated: number;
+}
+
+export interface BonoReminderResult {
+  /** The month the run is for, "YYYY-MM" in the automation's time zone. */
+  month: string;
   clinicsChecked: number;
   candidates: number;
   notificationsCreated: number;
@@ -420,6 +430,160 @@ export class NotificationService {
       await this.prisma.clinicNotificationSettings.update({
         where: { clinicId: clinic.id },
         data: { birthdayLastRunDate: today.dateKey }
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * The monthly "you have sessions left" automation: on the 1st, to every member holding a
+   * bono with sessions left and a synced pass.
+   *
+   * NOT gated on marketingEnabled or consentMarketing (2026-10 product decision): the
+   * sessions are already paid for. The clinic's off switch is bonoReminderEnabled.
+   * Idempotent by (clinic, month).
+   */
+  async runBonoReminderAutomations(
+    now = new Date(),
+    timeZone = config.BIRTHDAY_NOTIFICATION_TIME_ZONE
+  ): Promise<BonoReminderResult> {
+    const today = birthdayDay(now, timeZone);
+    const month = today.dateKey.slice(0, 7);
+    const result: BonoReminderResult = {
+      month,
+      clinicsChecked: 0,
+      candidates: 0,
+      notificationsCreated: 0,
+      deliveriesCreated: 0
+    };
+
+    // The cron ticks daily; this gate is what makes the send monthly.
+    if (today.day !== 1) return result;
+
+    const clinics = await this.prisma.clinic.findMany({
+      where: { isActive: true },
+      include: { notificationSettings: true },
+      orderBy: { createdAt: "asc" }
+    });
+
+    for (const clinic of clinics) {
+      result.clinicsChecked += 1;
+      const settings =
+        clinic.notificationSettings ??
+        (await this.prisma.clinicNotificationSettings.upsert({
+          where: { clinicId: clinic.id },
+          create: { clinicId: clinic.id },
+          update: {}
+        }));
+
+      if (!settings.bonoReminderEnabled) continue;
+
+      const members = await this.prisma.member.findMany({
+        where: {
+          clinicId: clinic.id,
+          erasedAt: null,
+          bonos: { some: { status: MemberBonoStatus.ACTIVE } }
+        },
+        include: { walletObjects: true },
+        orderBy: { createdAt: "asc" }
+      });
+      const candidates = members.filter((member) =>
+        member.walletObjects.some(
+          (walletObject) =>
+            walletObject.status === WalletSyncStatus.SYNCED &&
+            (walletObject.provider === WalletProviderType.GOOGLE ||
+              walletObject.provider === WalletProviderType.APPLE)
+        )
+      );
+
+      result.candidates += candidates.length;
+
+      if (candidates.length > 0) {
+        const idempotencyKey = `bono:${clinic.id}:${month}`;
+        const existing = await this.findIdempotent(clinic.id, idempotencyKey);
+        const deliveries = candidates.flatMap((member) =>
+          member.walletObjects
+            .filter(
+              (walletObject) =>
+                walletObject.status === WalletSyncStatus.SYNCED &&
+                (walletObject.provider === WalletProviderType.GOOGLE ||
+                  walletObject.provider === WalletProviderType.APPLE)
+            )
+            .map((walletObject) => ({
+              memberId: member.id,
+              provider: walletObject.provider,
+              status: NotificationDeliveryStatus.QUEUED
+            }))
+        );
+
+        if (existing) {
+          // A retry after a crash between the two halves: deliver what is missing.
+          const existingDeliveries = await this.prisma.notificationDelivery.findMany({
+            where: { notificationId: existing.id },
+            select: { id: true, memberId: true, provider: true, status: true }
+          });
+          const known = new Set(
+            existingDeliveries.map((delivery) => `${delivery.memberId}:${delivery.provider}`)
+          );
+          const missing = deliveries.filter(
+            (delivery) => !known.has(`${delivery.memberId}:${delivery.provider}`)
+          );
+          const createdDeliveries = await Promise.all(
+            missing.map((delivery) =>
+              this.prisma.notificationDelivery.create({
+                data: { notificationId: existing.id, ...delivery },
+                select: { id: true }
+              })
+            )
+          );
+          const queuedDeliveryIds = [
+            ...existingDeliveries
+              .filter((delivery) => delivery.status === NotificationDeliveryStatus.QUEUED)
+              .map((delivery) => delivery.id),
+            ...createdDeliveries.map((delivery) => delivery.id)
+          ];
+
+          await Promise.all(
+            queuedDeliveryIds.map((deliveryId) => this.jobs.enqueueDelivery(deliveryId))
+          );
+          result.deliveriesCreated += createdDeliveries.length;
+        } else {
+          const notification = await this.prisma.notification.create({
+            data: {
+              clinicId: clinic.id,
+              type: NotificationType.BONO_REMINDER,
+              header: settings.bonoReminderHeader,
+              body: settings.bonoReminderBody,
+              notify: settings.bonoReminderNotify,
+              idempotencyKey,
+              segmentJson: { automation: "bono_reminder", month, timeZone },
+              deliveries: { create: deliveries }
+            },
+            include: { deliveries: { select: { id: true } } }
+          });
+
+          await this.audit(
+            notification.id,
+            clinic.id,
+            { role: "SYSTEM" },
+            "BONO_REMINDER_CREATED",
+            candidates.length,
+            { month, timeZone }
+          );
+
+          await Promise.all(
+            notification.deliveries.map((delivery) => this.jobs.enqueueDelivery(delivery.id))
+          );
+
+          result.notificationsCreated += 1;
+          result.deliveriesCreated += notification.deliveries.length;
+        }
+      }
+
+      await this.prisma.clinicNotificationSettings.update({
+        where: { clinicId: clinic.id },
+        data: { bonoReminderLastRunMonth: month }
       });
     }
 
@@ -794,7 +958,13 @@ export class NotificationService {
 
   async resolveSegment(clinicId: string, segment: NotificationSegmentInput) {
     const members = await this.prisma.member.findMany({
-      where: { clinicId, erasedAt: null, ...(segment.tier ? { tier: segment.tier } : {}) },
+      where: {
+        clinicId,
+        erasedAt: null,
+        ...(segment.tier ? { tier: segment.tier } : {}),
+        // The auto-created segment: every member holding a bono with sessions left.
+        ...(segment.activeBono ? { bonos: { some: { status: MemberBonoStatus.ACTIVE } } } : {})
+      },
       include: { pointsLedger: { orderBy: { createdAt: "desc" }, take: 1 } },
       orderBy: { createdAt: "asc" }
     });
