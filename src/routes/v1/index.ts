@@ -13,7 +13,9 @@ import {
 import { PointsService } from "../../modules/points/points.service";
 import { buildNotificationService } from "../../modules/notifications/notification.composition";
 import { buildWalletSyncQueue } from "../../wallet/wallet.composition";
+import { buildImageStorage } from "../../modules/media/image-storage";
 import { createPointsRouter } from "./points.route";
+import { createImagesRouter } from "./images.route";
 import { createOnboardingRouter } from "./onboarding.route";
 import { createTreatmentsRouter } from "./treatments.route";
 import {
@@ -60,6 +62,17 @@ v1Router.use(clinicsRouter);
 v1Router.use(membersRouter);
 v1Router.use(templatesRouter);
 v1Router.use(createNotificationsRouter({ notifications: notificationService }));
+
+/**
+ * Logo and hero uploads. Always mounted: with no Bunny configuration the routes answer 503
+ * with a message saying so, which is more useful to the dashboard than a 404.
+ */
+v1Router.use(
+  createImagesRouter({
+    storage: buildImageStorage(config),
+    findClinic: (slug) => findClinicBySlug(prisma, slug)
+  })
+);
 
 /**
  * Apple's pass web service.

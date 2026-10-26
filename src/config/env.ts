@@ -23,6 +23,21 @@ const timeZoneEnv = z
     { message: "must be a valid IANA time zone" }
   );
 
+/**
+ * A variable that may be left blank. An empty string (`BUNNY_STORAGE_ZONE=` in a hosting
+ * panel, or a compose file's unset substitution) means "not configured", not "invalid", so
+ * the app still boots and the feature reports itself as unconfigured.
+ */
+const blankIsUnset = (value: unknown): unknown =>
+  typeof value === "string" && value.trim() === "" ? undefined : value;
+
+const httpsUrlWithoutTrailingSlash = (name: string) =>
+  z
+    .string()
+    .url(`${name} must be a valid URL`)
+    .refine((value) => value.startsWith("https://"), { message: `${name} must be an https URL` })
+    .transform((value) => value.replace(/\/+$/, ""));
+
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   REDIS_URL: z.string().min(1, "REDIS_URL is required"),
@@ -114,6 +129,33 @@ const envSchema = z.object({
   // logo, and Google may reject a class created that way: those clinics are then created but
   // stay "google_pending" until they have a logo of their own.
   VOONE_DEFAULT_LOGO_URL: z.string().url("VOONE_DEFAULT_LOGO_URL must be a valid URL").optional(),
+
+  // Image uploads (logo, dark-background logo, hero) are stored in Bunny.net and served from
+  // its pull zone, because Apple and Google both need a public https image URL. All optional:
+  // without the zone, the key and the public base URL the upload routes answer 503 and the
+  // rest of the app is unaffected.
+  //
+  // The zone name goes into the request path, so it is restricted to what Bunny allows.
+  BUNNY_STORAGE_ZONE: z.preprocess(
+    blankIsUnset,
+    z
+      .string()
+      .regex(/^[A-Za-z0-9-]+$/, "BUNNY_STORAGE_ZONE must contain only letters, digits and hyphens")
+      .optional()
+  ),
+  // The regional storage endpoint; Frankfurt is Bunny's default region.
+  BUNNY_STORAGE_ENDPOINT: z.preprocess(
+    blankIsUnset,
+    httpsUrlWithoutTrailingSlash("BUNNY_STORAGE_ENDPOINT").default("https://storage.bunnycdn.com")
+  ),
+  // The storage zone's WRITE password (not the read-only one). A bearer credential for the
+  // whole zone: server-side only, never logged, never returned.
+  BUNNY_STORAGE_ACCESS_KEY: z.preprocess(blankIsUnset, z.string().min(1).optional()),
+  // Where the files are publicly served from: the pull zone linked to the storage zone.
+  BUNNY_PUBLIC_BASE_URL: z.preprocess(
+    blankIsUnset,
+    httpsUrlWithoutTrailingSlash("BUNNY_PUBLIC_BASE_URL").optional()
+  ),
 
   SENDGRID_API_KEY: z.string().min(1).optional(),
   SENDGRID_FROM_EMAIL: z.string().email("SENDGRID_FROM_EMAIL must be a valid email").optional()
