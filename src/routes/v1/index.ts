@@ -197,8 +197,7 @@ v1Router.use(
     },
     memberBonos: {
       listForMember: (clinicId, memberId) => listForMember(prisma, clinicId, memberId),
-      cancel: (clinicId, memberId, bonoId) =>
-        cancelMemberBono(prisma, clinicId, memberId, bonoId)
+      cancel: (clinicId, memberId, bonoId) => cancelMemberBono(prisma, clinicId, memberId, bonoId)
     },
     findClinic: (slug) => findClinicBySlug(prisma, slug),
     clinicExists: async (clinicId) => (await prisma.clinic.count({ where: { id: clinicId } })) > 0

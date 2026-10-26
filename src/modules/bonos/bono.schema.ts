@@ -9,8 +9,10 @@ export const PLAN_NAME_MESSAGE = "Escribe el nombre del bono.";
 export const PLAN_PRICE_MESSAGE = "El precio del bono debe estar entre 0,01 € y 100.000 €.";
 export const PLAN_DECIMALS_MESSAGE = "El precio por sesión admite como máximo dos decimales.";
 export const PLAN_SESSIONS_MESSAGE = "El bono tiene entre 1 y 100 sesiones.";
-export const BONO_START_AT_MESSAGE = "La sesión inicial tiene que estar entre 1 y las sesiones del bono.";
-export const BONUS_POINTS_MESSAGE = "Los puntos extra deben ser múltiplos de 10 (10 puntos = 1 € de progreso).";
+export const BONO_START_AT_MESSAGE =
+  "La sesión inicial tiene que estar entre 1 y las sesiones del bono.";
+export const BONUS_POINTS_MESSAGE =
+  "Los puntos extra deben ser múltiplos de 10 (10 puntos = 1 € de progreso).";
 
 const NAME_MAX = 120;
 const PRICE_MIN = 0.01;

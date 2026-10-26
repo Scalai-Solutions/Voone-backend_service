@@ -37,11 +37,7 @@ import {
   statusAfterSession,
   type BonoOutcomeView
 } from "../../bonos/bono-rules";
-import {
-  BONO_START_AT_MESSAGE,
-  BONUS_POINTS_MESSAGE,
-  BONUS_STEP
-} from "../../bonos/bono.schema";
+import { BONO_START_AT_MESSAGE, BONUS_POINTS_MESSAGE, BONUS_STEP } from "../../bonos/bono.schema";
 
 /**
  * Recording a visit: the moment a payment becomes progress.
@@ -298,131 +294,134 @@ export class VisitService {
     // mid-flow and the next query answers P2028 against a closed handle.
     return this.prisma.$transaction(
       async (tx) => {
-      // The lock is the point. Everything below reads what a concurrent visit would change.
-      await tx.$queryRaw`SELECT id FROM "Member" WHERE id = ${input.memberId} FOR UPDATE`;
+        // The lock is the point. Everything below reads what a concurrent visit would change.
+        await tx.$queryRaw`SELECT id FROM "Member" WHERE id = ${input.memberId} FOR UPDATE`;
 
-      // A duplicate that raced past the first check lands here, behind the lock.
-      const dup = await tx.paidVisit.findUnique({
-        where: {
-          clinicId_idempotencyKey: {
-            clinicId: input.clinicId,
-            idempotencyKey: input.idempotencyKey
+        // A duplicate that raced past the first check lands here, behind the lock.
+        const dup = await tx.paidVisit.findUnique({
+          where: {
+            clinicId_idempotencyKey: {
+              clinicId: input.clinicId,
+              idempotencyKey: input.idempotencyKey
+            }
+          }
+        });
+
+        if (dup) return { visit: dup, created: false, doubled: false };
+
+        const member = await tx.member.findUniqueOrThrow({
+          where: { id: input.memberId },
+          select: { tier: true }
+        });
+        const tier = view.tiers.find((t) => t.key === tierKeyOf(member.tier)) ?? null;
+
+        // Behind the same lock, so two sessions recorded at once cannot take the same number.
+        const bono = input.kind === "BONO_SESSION" ? await this.resolveBono(tx, input) : null;
+        const { cents, hasTreatment } = this.price(input, bono);
+
+        if (discounted > 0) {
+          const used = await tx.paidVisit.aggregate({
+            where: {
+              memberId: input.memberId,
+              occurredAt: { gte: discountWindowStart(occurredAt) }
+            },
+            _sum: { discountedProducts: true }
+          });
+          const allowed = discountAllowance({
+            tier,
+            usedThisWindow: used._sum.discountedProducts ?? 0
+          });
+
+          if (discounted > allowed) {
+            throw new OnboardingError(
+              allowed === 0
+                ? "Su nivel no tiene descuento en cosmética, o ya usó los 3 productos de este año."
+                : `Solo puede comprar ${allowed} ${allowed === 1 ? "producto" : "productos"} más con descuento este año.`,
+              409
+            );
           }
         }
-      });
 
-      if (dup) return { visit: dup, created: false, doubled: false };
-
-      const member = await tx.member.findUniqueOrThrow({
-        where: { id: input.memberId },
-        select: { tier: true }
-      });
-      const tier = view.tiers.find((t) => t.key === tierKeyOf(member.tier)) ?? null;
-
-      // Behind the same lock, so two sessions recorded at once cannot take the same number.
-      const bono = input.kind === "BONO_SESSION" ? await this.resolveBono(tx, input) : null;
-      const { cents, hasTreatment } = this.price(input, bono);
-
-      if (discounted > 0) {
-        const used = await tx.paidVisit.aggregate({
-          where: { memberId: input.memberId, occurredAt: { gte: discountWindowStart(occurredAt) } },
-          _sum: { discountedProducts: true }
+        // Balance before this visit. The ledger is the truth, but a previous visit may have
+        // committed its snapshot and not yet credited, so the larger of the two is used: that
+        // visit's number is exactly what the ledger is about to say.
+        const ledger = await this.points.balanceFor(input.memberId);
+        const last = await tx.paidVisit.findFirst({
+          where: { memberId: input.memberId, lifetimeAfter: { not: null } },
+          orderBy: { createdAt: "desc" },
+          select: { lifetimeAfter: true }
         });
-        const allowed = discountAllowance({
-          tier,
-          usedThisWindow: used._sum.discountedProducts ?? 0
-        });
+        const before = Math.max(ledger.lifetime, last?.lifetimeAfter ?? 0);
 
-        if (discounted > allowed) {
-          throw new OnboardingError(
-            allowed === 0
-              ? "Su nivel no tiene descuento en cosmética, o ya usó los 3 productos de este año."
-              : `Solo puede comprar ${allowed} ${allowed === 1 ? "producto" : "productos"} más con descuento este año.`,
-            409
-          );
-        }
-      }
+        // A waiting double-points perk applies to the next visit in which money changes hands
+        // (RUNTIME_DECISIONS.doublePointsAppliesTo). A package session in between does not
+        // use it up, because that session's value was fixed when the package was bought.
+        const perk =
+          input.kind === "PAYMENT"
+            ? await tx.memberReward.findFirst({
+                where: {
+                  memberId: input.memberId,
+                  kind: MemberRewardKind.VENTAJA,
+                  redeemedAt: null,
+                  expiresAt: { gt: occurredAt },
+                  detail: { path: ["perk"], equals: DOUBLE_PERK }
+                },
+                orderBy: { issuedAt: "asc" }
+              })
+            : null;
 
-      // Balance before this visit. The ledger is the truth, but a previous visit may have
-      // committed its snapshot and not yet credited, so the larger of the two is used: that
-      // visit's number is exactly what the ledger is about to say.
-      const ledger = await this.points.balanceFor(input.memberId);
-      const last = await tx.paidVisit.findFirst({
-        where: { memberId: input.memberId, lifetimeAfter: { not: null } },
-        orderBy: { createdAt: "desc" },
-        select: { lifetimeAfter: true }
-      });
-      const before = Math.max(ledger.lifetime, last?.lifetimeAfter ?? 0);
+        // The bonus is flat: no multiplier, no double-points perk, added before the single
+        // credit so the milestones this visit crosses are judged on the whole number.
+        const progress = purchaseProgress({ cents, tier, doubled: Boolean(perk) }) + bonusEuros;
 
-      // A waiting double-points perk applies to the next visit in which money changes hands
-      // (RUNTIME_DECISIONS.doublePointsAppliesTo). A package session in between does not
-      // use it up, because that session's value was fixed when the package was bought.
-      const perk =
-        input.kind === "PAYMENT"
-          ? await tx.memberReward.findFirst({
-              where: {
-                memberId: input.memberId,
-                kind: MemberRewardKind.VENTAJA,
-                redeemedAt: null,
-                expiresAt: { gt: occurredAt },
-                detail: { path: ["perk"], equals: DOUBLE_PERK }
-              },
-              orderBy: { issuedAt: "asc" }
-            })
-          : null;
-
-      // The bonus is flat: no multiplier, no double-points perk, added before the single
-      // credit so the milestones this visit crosses are judged on the whole number.
-      const progress = purchaseProgress({ cents, tier, doubled: Boolean(perk) }) + bonusEuros;
-
-      const visit = await tx.paidVisit.create({
-        data: {
-          clinicId: input.clinicId,
-          memberId: input.memberId,
-          kind: input.kind === "PAYMENT" ? VisitKind.PAYMENT : VisitKind.BONO_SESSION,
-          source: VisitSource.STAFF_ENTRY,
-          // What EARNS progress, not what was paid: the table holds the number the maths used.
-          amountCents: cents,
-          hasTreatment,
-          discountedProducts: discounted,
-          idempotencyKey: input.idempotencyKey,
-          memberBonoId: bono?.id ?? null,
-          bonoSessionNumber: bono?.session ?? null,
-          bonusProgress: bonusEuros > 0 ? bonusEuros : null,
-          progressAwarded: progress,
-          lifetimeBefore: before,
-          lifetimeAfter: before + progress,
-          occurredAt,
-          createdBy: input.createdBy
-        }
-      });
-
-      // Consume the session in the same commit as the visit that used it: a crash between
-      // the two cannot leave a session both recorded and still available.
-      if (bono) {
-        await tx.memberBono.update({
-          where: { id: bono.id },
+        const visit = await tx.paidVisit.create({
           data: {
-            sessionsUsed: bono.session,
-            status:
-              statusAfterSession(
-                { totalSessions: bono.totalSessions, sessionsUsed: 0 },
-                bono.session
-              ) === "COMPLETED"
-                ? MemberBonoStatus.COMPLETED
-                : MemberBonoStatus.ACTIVE
+            clinicId: input.clinicId,
+            memberId: input.memberId,
+            kind: input.kind === "PAYMENT" ? VisitKind.PAYMENT : VisitKind.BONO_SESSION,
+            source: VisitSource.STAFF_ENTRY,
+            // What EARNS progress, not what was paid: the table holds the number the maths used.
+            amountCents: cents,
+            hasTreatment,
+            discountedProducts: discounted,
+            idempotencyKey: input.idempotencyKey,
+            memberBonoId: bono?.id ?? null,
+            bonoSessionNumber: bono?.session ?? null,
+            bonusProgress: bonusEuros > 0 ? bonusEuros : null,
+            progressAwarded: progress,
+            lifetimeBefore: before,
+            lifetimeAfter: before + progress,
+            occurredAt,
+            createdBy: input.createdBy
           }
         });
-      }
 
-      if (perk) {
-        await tx.memberReward.update({
-          where: { id: perk.id },
-          data: { redeemedAt: occurredAt, redeemedVisitId: visit.id, redeemedBy: input.createdBy }
-        });
-      }
+        // Consume the session in the same commit as the visit that used it: a crash between
+        // the two cannot leave a session both recorded and still available.
+        if (bono) {
+          await tx.memberBono.update({
+            where: { id: bono.id },
+            data: {
+              sessionsUsed: bono.session,
+              status:
+                statusAfterSession(
+                  { totalSessions: bono.totalSessions, sessionsUsed: 0 },
+                  bono.session
+                ) === "COMPLETED"
+                  ? MemberBonoStatus.COMPLETED
+                  : MemberBonoStatus.ACTIVE
+            }
+          });
+        }
 
-      return { visit, created: true, doubled: Boolean(perk) };
+        if (perk) {
+          await tx.memberReward.update({
+            where: { id: perk.id },
+            data: { redeemedAt: occurredAt, redeemedVisitId: visit.id, redeemedBy: input.createdBy }
+          });
+        }
+
+        return { visit, created: true, doubled: Boolean(perk) };
       },
       { timeout: 30_000, maxWait: 15_000 }
     );

@@ -444,9 +444,9 @@ describe("qrSignupRequirementMissing", () => {
   });
 
   it("refuses a self sign-up with an unticked marketing box", () => {
-    expect(
-      qrSignupRequirementMissing({ ...COMPLETE, consentMarketing: false }, "qr_signup")
-    ).toBe("Debes aceptar recibir novedades y ofertas para unirte.");
+    expect(qrSignupRequirementMissing({ ...COMPLETE, consentMarketing: false }, "qr_signup")).toBe(
+      "Debes aceptar recibir novedades y ofertas para unirte."
+    );
   });
 
   it("does not ask staff-entered members", () => {

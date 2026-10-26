@@ -376,7 +376,7 @@ describe("bono reminder automation", () => {
               {
                 id: "member-2",
                 walletObjects: [
-                  { provider: WalletProviderType.GOOGLE, status: WalletSyncStatus.NOT_SYNCED }
+                  { provider: WalletProviderType.GOOGLE, status: WalletSyncStatus.PENDING }
                 ]
               }
             ]
@@ -393,7 +393,9 @@ describe("bono reminder automation", () => {
           }
         },
         notificationDelivery: {
-          findMany: async () => [{ id: "delivery-0", memberId: "member-1", provider: "GOOGLE", status: "SENT" }],
+          findMany: async () => [
+            { id: "delivery-0", memberId: "member-1", provider: "GOOGLE", status: "SENT" }
+          ],
           create: async () => ({ id: "delivery-created" })
         },
         notificationAuditLog: { create: async () => undefined },

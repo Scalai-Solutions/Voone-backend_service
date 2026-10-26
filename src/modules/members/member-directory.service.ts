@@ -5,10 +5,7 @@ import {
   type PrismaClient
 } from "@prisma/client";
 
-import {
-  MemberNotFoundError,
-  MemberPhoneTakenError
-} from "../../common/errors/membership.errors";
+import { MemberNotFoundError, MemberPhoneTakenError } from "../../common/errors/membership.errors";
 import type { MemberUpdateInput } from "./membership.schema";
 import { toPoints } from "../onboarding/runtime/points-unit";
 import { listTreatments } from "../treatments/treatment-catalogue.service";

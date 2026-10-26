@@ -21,8 +21,12 @@ describe("createBonoPlanSchema", () => {
   it("refuses an empty name, a free price and a session count outside 1-100", () => {
     expect(createBonoPlanSchema.safeParse({ ...VALID_PLAN, name: "  " }).success).toBe(false);
     expect(createBonoPlanSchema.safeParse({ ...VALID_PLAN, priceEuro: 0 }).success).toBe(false);
-    expect(createBonoPlanSchema.safeParse({ ...VALID_PLAN, totalSessions: 101 }).success).toBe(false);
-    expect(createBonoPlanSchema.safeParse({ ...VALID_PLAN, totalSessions: 0.5 }).success).toBe(false);
+    expect(createBonoPlanSchema.safeParse({ ...VALID_PLAN, totalSessions: 101 }).success).toBe(
+      false
+    );
+    expect(createBonoPlanSchema.safeParse({ ...VALID_PLAN, totalSessions: 0.5 }).success).toBe(
+      false
+    );
   });
 });
 
@@ -57,9 +61,12 @@ describe("startAtSessionSchema", () => {
 
 describe("visitSchema BONO_SESSION", () => {
   it("accepts a plan, a member bono, or the legacy free-text package", () => {
-    expect(visitSchema.safeParse({ kind: "BONO_SESSION", planId: "plan-1", idempotencyKey: KEY }).success).toBe(true);
     expect(
-      visitSchema.safeParse({ kind: "BONO_SESSION", memberBonoId: "b-1", idempotencyKey: KEY }).success
+      visitSchema.safeParse({ kind: "BONO_SESSION", planId: "plan-1", idempotencyKey: KEY }).success
+    ).toBe(true);
+    expect(
+      visitSchema.safeParse({ kind: "BONO_SESSION", memberBonoId: "b-1", idempotencyKey: KEY })
+        .success
     ).toBe(true);
     expect(
       visitSchema.safeParse({

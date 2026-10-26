@@ -49,7 +49,10 @@ const planRow = (plan: {
   issuedCount: plan._count?.issued ?? 0
 });
 
-const parse = <T>(schema: { safeParse: (input: unknown) => { success: boolean; data?: T } }, input: unknown): T => {
+const parse = <T>(
+  schema: { safeParse: (input: unknown) => { success: boolean; data?: T } },
+  input: unknown
+): T => {
   const parsed = schema.safeParse(input);
 
   if (!parsed.success || parsed.data === undefined) {

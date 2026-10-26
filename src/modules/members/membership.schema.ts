@@ -86,8 +86,7 @@ const NAME_INVALID = "Introduce tu nombre y apellidos";
 const NAME_TOO_LONG = "El nombre es demasiado largo";
 const BIRTH_DATE_REQUIRED_MESSAGE = "Introduce tu fecha de nacimiento.";
 const SEX_REQUIRED_MESSAGE = "Selecciona una opción.";
-const MARKETING_CONSENT_REQUIRED_MESSAGE =
-  "Debes aceptar recibir novedades y ofertas para unirte.";
+const MARKETING_CONSENT_REQUIRED_MESSAGE = "Debes aceptar recibir novedades y ofertas para unirte.";
 const UNDERAGE_MESSAGE = "Debes tener al menos 16 años para unirte.";
 
 /**

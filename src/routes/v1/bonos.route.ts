@@ -76,9 +76,7 @@ export const createBonosRouter = (deps: BonosRouterDeps): Router => {
     asyncHandler(async (req, res) => {
       const body = parse(createBonoPlanSchema, req.body);
 
-      res.status(201).json(
-        await deps.plans.create(await clinicIdOr404(req.params.clinicId), body)
-      );
+      res.status(201).json(await deps.plans.create(await clinicIdOr404(req.params.clinicId), body));
     })
   );
 
@@ -164,9 +162,7 @@ export const createBonosRouter = (deps: BonosRouterDeps): Router => {
     asyncHandler(async (req, res) => {
       const clinic = await deps.findClinic(req.params.slug);
 
-      res.json(
-        await deps.memberBonos.cancel(clinic.id, req.params.memberId, req.params.bonoId)
-      );
+      res.json(await deps.memberBonos.cancel(clinic.id, req.params.memberId, req.params.bonoId));
     })
   );
 
