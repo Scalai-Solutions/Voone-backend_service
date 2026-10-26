@@ -306,7 +306,7 @@ const toGoogleLoyaltyObjectBody = (input: LoyaltyObjectInput): GoogleLoyaltyObje
       },
       {
         id: "member_id",
-        header: "N.º de socia",
+        header: "N.º de miembro",
         body: accountId
       },
       {

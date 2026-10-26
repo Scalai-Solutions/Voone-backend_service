@@ -1,11 +1,7 @@
 import { WalletProviderType } from "@prisma/client";
 
 import { config } from "../../../config/env";
-import {
-  DEFAULT_WALLET_BENEFIT_CTA,
-  DEFAULT_WALLET_HERO_IMAGE_URL,
-  DEFAULT_WALLET_LOGO_URL
-} from "../../../modules/templates/default-voone-template";
+import { DEFAULT_WALLET_BENEFIT_CTA } from "../../../modules/templates/default-voone-template";
 import { BaseWalletProvider } from "../../engine/base-wallet-provider";
 import type { LoyaltyCard } from "../../engine/loyalty-card";
 import type {
@@ -178,12 +174,14 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       classId,
       programName: template.programName,
       hexBackgroundColor: template.backgroundColor,
-      logoUrl: template.logoUrl ?? DEFAULT_WALLET_LOGO_URL,
-      heroImageUrl: template.heroImageUrl ?? DEFAULT_WALLET_HERO_IMAGE_URL,
-      heroImageDescription: `${template.programName} hero image`,
+      // The plain Voone logo when the clinic has none (absent if that is not configured),
+      // and no hero at all: another client's images are never a fallback.
+      logoUrl: template.logoUrl ?? config.VOONE_DEFAULT_LOGO_URL,
+      heroImageUrl: template.heroImageUrl,
+      heroImageDescription: `Imagen de ${template.programName}`,
       homepageUrl: websiteUrl,
-      accountNameLabel: "Nombre de socia",
-      accountIdLabel: "N.º de socia",
+      accountNameLabel: "Nombre de miembro",
+      accountIdLabel: "N.º de miembro",
       rewardsTierLabel: template.tierLabel,
       textModules: [
         {
@@ -217,15 +215,15 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       ],
       linkModules: [
         {
-          tag: "Website",
-          description: "Website",
+          tag: "Web",
+          description: "Web",
           url: websiteUrl
         },
         ...(appointmentUrl
           ? [
               {
-                tag: "Schedule Appointment",
-                description: "Schedule Appointment",
+                tag: "Reservar cita",
+                description: "Reservar cita",
                 url: appointmentUrl
               }
             ]
@@ -233,8 +231,8 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       ],
       appLink: appointmentUrl
         ? {
-            displayText: template.appLinkText ?? "Schedule Appointment",
-            description: template.appLinkDescription ?? "Schedule an appointment",
+            displayText: template.appLinkText ?? "Reservar cita",
+            description: template.appLinkDescription ?? "Reservar cita",
             url: appointmentUrl
           }
         : undefined

@@ -55,7 +55,7 @@ const clinics = [
       hexBackgroundColor: "#2a2e35",
       pointsLabel: "Puntos",
       tierLabel: "Categoría",
-      benefitsText: "Ventajas exclusivas para socias y acceso anticipado a novedades.",
+      benefitsText: "Ventajas exclusivas para miembros y acceso anticipado a novedades.",
       infoText: "Muestra tu pase al pagar para registrar la visita."
     }
   }

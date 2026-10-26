@@ -178,8 +178,9 @@ describe("ApplePassBuilder", () => {
   it("ships English translations alongside the Spanish keys", () => {
     const strings = Buffer.from(entries["en.lproj/pass.strings"]).toString("utf8");
 
-    expect(strings).toContain("SOCIA");
-    expect(strings).toContain("MEMBER");
+    expect(strings).toContain('"MIEMBRO" = "MEMBER";');
+    expect(strings).toContain('"N.º DE MIEMBRO" = "MEMBER NO.";');
+    expect(strings).not.toMatch(/SOCIA/);
   });
 
   it("reports a missing model directory without leaking key material", async () => {

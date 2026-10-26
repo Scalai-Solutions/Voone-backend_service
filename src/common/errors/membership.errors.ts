@@ -72,3 +72,26 @@ export class TemplatePresetNotFoundError extends AppError {
     });
   }
 }
+
+/**
+ * Onboarding could not create the clinic's wallet class for a reason other than Google
+ * rejecting the card, so the clinic that was being created has been removed again.
+ *
+ * 502: the failure is in the wallet step, not in what the operator sent. Exposed, because
+ * the message is fixed Spanish text the operator needs to read; the cause stays in the log.
+ */
+export class ClinicCardCreationError extends AppError {
+  constructor(options: { rolledBack: boolean; cause?: unknown }) {
+    super(
+      options.rolledBack
+        ? "No se ha podido crear la tarjeta del centro. No se ha guardado nada; inténtalo de nuevo."
+        : "No se ha podido crear la tarjeta del centro y el centro ha quedado a medias. Avisa al equipo técnico antes de volver a intentarlo.",
+      {
+        statusCode: 502,
+        code: "CLINIC_CARD_CREATION_FAILED",
+        expose: true,
+        cause: options.cause
+      }
+    );
+  }
+}

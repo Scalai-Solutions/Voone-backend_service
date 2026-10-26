@@ -16,7 +16,7 @@ const template = {
   hexBackgroundColor: "#f1dccd",
   pointsLabel: "Saldo Beauty",
   tierLabel: "Nivel",
-  benefitsText: "Acceso exclusivo a tratamientos, eventos y ofertas de socia.",
+  benefitsText: "Acceso exclusivo a tratamientos, eventos y ofertas para miembros.",
   infoText: "Presenta este pase en recepción para acumular puntos."
 };
 

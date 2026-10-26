@@ -157,7 +157,7 @@ describe("the member code, against a real unique index", () => {
     const second = await signUpMember(
       db,
       aurea,
-      input({ phone: "622222222", name: "Otra Socia" }),
+      input({ phone: "622222222", name: "Otro Miembro" }),
       "qr_signup"
     );
 
@@ -173,7 +173,7 @@ describe("the member code, against a real unique index", () => {
     const second = await signUpMember(
       db,
       aurea,
-      input({ phone: "622222222", name: "Otra Socia" }),
+      input({ phone: "622222222", name: "Otro Miembro" }),
       "qr_signup"
     );
 
