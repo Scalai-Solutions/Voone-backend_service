@@ -7,6 +7,7 @@ import {
 
 import { MemberNotFoundError } from "../../common/errors/membership.errors";
 import { toPoints } from "../onboarding/runtime/points-unit";
+import { listTreatments } from "../treatments/treatment-catalogue.service";
 import type { CardRef } from "../../wallet/engine/wallet-pass-provider.interface";
 import { tierRewardsSchema } from "../templates/templates.schema";
 import { normaliseScale } from "../points/tier-engine";
@@ -331,10 +332,9 @@ export class MemberDirectoryService {
     if (summaries.length === 0) return summaries;
 
     const [treatments, credits] = await Promise.all([
-      this.prisma.clinicTreatment.findMany({
-        where: { clinicId },
-        select: { name: true, priceEuro: true }
-      }),
+      // The same source as the scan screen, so a programme centre's prices come from its
+      // catalogue rather than a ClinicTreatment list nothing keeps up to date.
+      listTreatments(this.prisma, clinicId),
       this.prisma.pointsTransaction.findMany({
         where: {
           clinicId,
