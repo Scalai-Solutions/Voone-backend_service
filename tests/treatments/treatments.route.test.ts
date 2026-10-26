@@ -36,7 +36,7 @@ const buildApp = () => {
         list: async (clinicId) => {
           calls.push({ list: clinicId });
 
-          return [row];
+          return { usesCatalogue: true, items: [row] };
         },
         create: async (clinicId, input) => {
           calls.push({ create: [clinicId, input] });
@@ -86,7 +86,7 @@ describe("treatments routes", () => {
     const res = await send(app, "GET", "/clinics/aurea/treatments");
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual([row]);
+    expect(res.body).toEqual({ usesCatalogue: true, items: [row] });
     expect(calls).toEqual([{ list: "clinic-1" }]);
   });
 
@@ -109,7 +109,9 @@ describe("treatments routes", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toContainEqual({ id: "FAC", label: "Facial de cabina" });
-    expect(res.body.length).toBe(Object.keys(CATEGORIES).length);
+    expect(res.body.length).toBe(Object.keys(CATEGORIES).length - 1);
+    // The retail category is a product, not a treatment.
+    expect(res.body.map((c: { id: string }) => c.id)).not.toContain("COS");
     expect((await send(app, "GET", "/clinics/nope/treatment-categories")).status).toBe(404);
   });
 
@@ -137,7 +139,8 @@ describe("treatments routes", () => {
     [{ name: "A", priceEuro: 0 }, "El precio debe estar entre 0,01 € y 100.000 €."],
     [{ name: "A", priceEuro: -1 }, "El precio debe estar entre 0,01 € y 100.000 €."],
     [{ name: "A", priceEuro: 100001 }, "El precio debe estar entre 0,01 € y 100.000 €."],
-    [{ name: "A", priceEuro: 1.234 }, "El precio debe estar entre 0,01 € y 100.000 €."],
+    [{ name: "A", priceEuro: 1.234 }, "Usa como máximo dos decimales."],
+    [{ name: "A", priceEuro: 59.999 }, "Usa como máximo dos decimales."],
     [{ name: " ", priceEuro: 5 }, "Escribe el nombre del tratamiento."]
   ])("rejects %j with a 422 and the bare Spanish message", async (body, message) => {
     const { app, calls } = buildApp();
@@ -149,7 +152,6 @@ describe("treatments routes", () => {
   });
 
   it("answers a service validation error with its Spanish message", async () => {
-    const { app } = buildApp();
     const failing = express();
     failing.use(express.json());
     failing.use(
@@ -157,7 +159,7 @@ describe("treatments routes", () => {
       createTreatmentsRouter({
         findClinic: async () => ({ id: "c" }),
         catalogue: {
-          list: async () => [],
+          list: async () => ({ usesCatalogue: false, items: [] }),
           create: async () => {
             throw new TreatmentValidationError("Elige una categoría de la lista.");
           },
@@ -170,7 +172,6 @@ describe("treatments routes", () => {
 
     const res = await send(failing, "POST", "/clinics/x/treatments", { name: "A", priceEuro: 5 });
 
-    expect(app).toBeDefined();
     expect(res.status).toBe(422);
     expect(res.body.message).toBe("Elige una categoría de la lista.");
   });

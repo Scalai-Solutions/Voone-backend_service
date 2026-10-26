@@ -12,6 +12,13 @@ import { CATEGORIES } from "./engine.config";
  * reward ladder.
  */
 
+/**
+ * Prefix of the externalId the owner's treatment editor generates. A catalogue replace (the
+ * admin CSV import and PUT) leaves these rows alone: the admin's file has never heard of
+ * them, and an import must not delete what an owner added from My center.
+ */
+export const OWNER_EXTERNAL_ID_PREFIX = "owner-";
+
 /** What the caller supplies for one row. Prices arrive in euros, as a person types them. */
 export interface CatalogInput {
   /** The centre's own identifier, when it has one. Generated from the position if not. */
@@ -91,7 +98,8 @@ export class PrismaCatalogRepository implements CatalogRepository {
    * ClinicTreatment makes: regenerating ids on every save would change the engine's
    * tie-breaks and so the reward ladder, after an edit that touched nothing relevant.
    * Rows the new catalogue omits are removed, because a catalogue is a complete statement
-   * of what the centre sells.
+   * of what the centre sells, except rows an owner added themselves (see
+   * OWNER_EXTERNAL_ID_PREFIX).
    */
   async replaceForClinic(clinicId: string, items: CatalogInput[]): Promise<CatalogRow[]> {
     const prepared = items.map((item, index) => ({
@@ -113,7 +121,11 @@ export class PrismaCatalogRepository implements CatalogRepository {
       // deleting the last row in the editor sends exactly that. `notIn: []` is valid and matches
       // every row, so no special case is needed for it.
       await tx.catalogItem.deleteMany({
-        where: { clinicId, externalId: { notIn: keep } }
+        where: {
+          clinicId,
+          externalId: { notIn: keep },
+          NOT: { externalId: { startsWith: OWNER_EXTERNAL_ID_PREFIX } }
+        }
       });
 
       for (const row of prepared) {

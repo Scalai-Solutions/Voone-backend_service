@@ -7,6 +7,7 @@ import {
 } from "../../src/common/errors/treatment.errors";
 import {
   createTreatment,
+  listForEditor,
   listTreatments,
   removeTreatment,
   scanScreenTreatments,
@@ -154,8 +155,8 @@ describe("creating at a programme centre", () => {
     expect(stored.position).toBe(8);
   });
 
-  it("rejects a category the engine does not know, and a missing one", async () => {
-    for (const categoryId of ["ZZZ", "toString", undefined]) {
+  it("rejects a category the engine does not know, a missing one, and the retail one", async () => {
+    for (const categoryId of ["ZZZ", "toString", "COS", undefined]) {
       expect(
         await message(createTreatment(db, programme.id, { name: "X", priceEuro: 10, categoryId }))
       ).toBe("Elige una categoría de la lista.");
@@ -194,13 +195,24 @@ describe("creating at a plain centre", () => {
 });
 
 describe("validation", () => {
-  it.each([0, -5, 100001, 0.001, 12.345, Number.NaN, Number.POSITIVE_INFINITY])(
+  it.each([0, -5, 100001, 0.001, Number.NaN, Number.POSITIVE_INFINITY])(
     "rejects the price %s with the Spanish message",
     async (priceEuro) => {
       for (const clinicId of [programme.id, plain.id]) {
         expect(
           await message(createTreatment(db, clinicId, { name: "X", priceEuro, categoryId: "FAC" }))
         ).toBe("El precio debe estar entre 0,01 € y 100.000 €.");
+      }
+    }
+  );
+
+  it.each([12.345, 59.999, 0.015])(
+    "tells the owner a price with more than two decimals (%s) has too many",
+    async (priceEuro) => {
+      for (const clinicId of [programme.id, plain.id]) {
+        expect(
+          await message(createTreatment(db, clinicId, { name: "X", priceEuro, categoryId: "FAC" }))
+        ).toBe("Usa como máximo dos decimales.");
       }
     }
   );
@@ -238,6 +250,10 @@ describe("validation", () => {
       "El precio debe estar entre 0,01 € y 100.000 €."
     );
     expect(await message(updateTreatment(db, programme.id, row.id, { categoryId: "ZZZ" }))).toBe(
+      "Elige una categoría de la lista."
+    );
+    // Retail cosmetics are products, not treatments.
+    expect(await message(updateTreatment(db, programme.id, row.id, { categoryId: "COS" }))).toBe(
       "Elige una categoría de la lista."
     );
     expect(await db.catalogItem.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({
@@ -486,10 +502,11 @@ describe("one rule for which store a centre uses", () => {
 });
 
 describe("treatment categories", () => {
-  it("labels every category the engine accepts, so a new one cannot ship unlabelled", () => {
+  it("labels every category it offers, and leaves out the retail one", () => {
     const categories = treatmentCategories();
+    const expected = Object.keys(CATEGORIES).filter((id) => id !== "COS");
 
-    expect(categories.map((c) => c.id).sort()).toEqual(Object.keys(CATEGORIES).sort());
+    expect(categories.map((c) => c.id).sort()).toEqual(expected.sort());
     for (const category of categories) {
       expect(category.label.trim().length).toBeGreaterThan(0);
     }
@@ -497,5 +514,91 @@ describe("treatment categories", () => {
       id: "FAC",
       label: "Facial de cabina"
     });
+    // Medical categories stay: they are treatments.
+    expect(categories.map((c) => c.id)).toEqual(expect.arrayContaining(["DIA", "MFA", "MNF"]));
+  });
+
+  it("every category offered is accepted by create", async () => {
+    for (const { id } of treatmentCategories()) {
+      await createTreatment(db, programme.id, { name: `T ${id}`, priceEuro: 10, categoryId: id });
+    }
+  });
+});
+
+describe("what the editor is told", () => {
+  it("says which store applies and lists its rows", async () => {
+    expect(await listForEditor(db, programme.id)).toEqual({
+      usesCatalogue: true,
+      items: [expect.objectContaining({ id: seedItem.id, name: "Existente", categoryId: "FAC" })]
+    });
+    expect(await listForEditor(db, plain.id)).toEqual({ usesCatalogue: false, items: [] });
+  });
+});
+
+describe("limits", () => {
+  it("refuses a new catalogue treatment once the catalogue holds 300 rows, products included", async () => {
+    await db.catalogItem.createMany({
+      data: Array.from({ length: 298 }, (_, i) => ({
+        clinicId: programme.id,
+        externalId: `bulk-${i}`,
+        name: `Fila ${i}`,
+        priceCents: 1000,
+        isProduct: i % 2 === 0,
+        position: i + 1
+      }))
+    });
+
+    // 299 rows: one more is fine and makes 300.
+    await createTreatment(db, programme.id, { name: "La 300", priceEuro: 10, categoryId: "FAC" });
+
+    expect(
+      await message(
+        createTreatment(db, programme.id, { name: "La 301", priceEuro: 10, categoryId: "FAC" })
+      )
+    ).toBe("Has alcanzado el máximo de 300 tratamientos.");
+    expect(await db.catalogItem.count({ where: { clinicId: programme.id } })).toBe(300);
+  });
+
+  it("does not cap a plain centre's own list", async () => {
+    await db.clinicTreatment.createMany({
+      data: Array.from({ length: 300 }, (_, i) => ({
+        clinicId: plain.id,
+        name: `T${i}`,
+        priceEuro: 10,
+        pointsAllotted: 100
+      }))
+    });
+
+    expect((await createTreatment(db, plain.id, { name: "Más", priceEuro: 10 })).name).toBe("Más");
+  });
+
+  it("refuses to delete the last non-product catalogue row, even beside retail rows", async () => {
+    await db.catalogItem.create({
+      data: {
+        clinicId: programme.id,
+        externalId: "p",
+        name: "Crema",
+        priceCents: 900,
+        isProduct: true
+      }
+    });
+
+    expect(await message(removeTreatment(db, programme.id, seedItem.id))).toBe(
+      "No puedes borrar el último tratamiento del catálogo. Añade otro primero."
+    );
+    expect(await db.catalogItem.count({ where: { id: seedItem.id } })).toBe(1);
+
+    // With another treatment in place the same delete is allowed.
+    await createTreatment(db, programme.id, { name: "Otro", priceEuro: 10, categoryId: "FAC" });
+    await removeTreatment(db, programme.id, seedItem.id);
+    expect(await db.catalogItem.count({ where: { id: seedItem.id } })).toBe(0);
+  });
+
+  it("lets a plain centre delete its last treatment", async () => {
+    const row = await createTreatment(db, plain.id, { name: "A", priceEuro: 10 });
+
+    await removeTreatment(db, plain.id, row.id);
+
+    expect(await db.clinicTreatment.count({ where: { clinicId: plain.id } })).toBe(0);
   });
 });
