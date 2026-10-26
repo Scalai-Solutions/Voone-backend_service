@@ -3,7 +3,12 @@ import { logger } from "../../common/logger/logger";
 
 /** Where uploaded images are kept. A port, so tests and other providers need no network. */
 export interface ImageStorage {
-  /** Stores `bytes` at `key` and returns the PUBLIC https URL it is served from. */
+  /**
+   * Stores `bytes` at `key` and returns the PUBLIC https URL it is served from.
+   *
+   * A failure is an ImageStorageError, and the implementation logs it (that error is marked
+   * as already logged, so the HTTP error handler does not log it a second time).
+   */
   put(key: string, bytes: Buffer, contentType: string): Promise<{ url: string }>;
 }
 
@@ -43,6 +48,9 @@ export class BunnyImageStorage implements ImageStorage {
     try {
       response = await fetch(`${endpoint}/${zone}/${path}`, {
         method: "PUT",
+        // Never follow a redirect: it would replay the PUT, and the AccessKey with it, to
+        // whatever host the response names.
+        redirect: "error",
         headers: { AccessKey: accessKey, "Content-Type": contentType },
         body: new Uint8Array(bytes),
         signal: AbortSignal.timeout(timeoutMs)
@@ -68,6 +76,9 @@ export class BunnyImageStorage implements ImageStorage {
 
       throw new ImageStorageError();
     }
+
+    // Nothing in the body is needed; releasing it frees the connection.
+    await response.body?.cancel().catch(() => undefined);
 
     return { url: `${publicBaseUrl}/${path}` };
   }

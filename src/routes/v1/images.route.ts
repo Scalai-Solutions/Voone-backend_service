@@ -3,11 +3,11 @@ import express, { Router, type RequestHandler } from "express";
 import {
   ImageStorageUnavailableError,
   ImageTooLargeError,
+  ImageUnreadableError,
   ImageUnsupportedMediaTypeError
 } from "../../common/errors/image.errors";
 import { asyncHandler } from "../../common/middleware/async-handler";
 import { createRequireStaffKey } from "../../common/middleware/staff-key";
-import { config } from "../../config/env";
 import type { ImageStorage } from "../../modules/media/image-storage";
 import {
   MAX_IMAGE_BYTES,
@@ -16,6 +16,11 @@ import {
 } from "../../modules/media/image-upload.service";
 
 export interface ImagesRouterDeps {
+  /**
+   * The staff key. Unlike the other staff routes these FAIL CLOSED: with no key configured
+   * the routes answer 503 instead of letting anyone upload to the storage account.
+   */
+  staffKey: string | undefined;
   /** Null when storage is not configured: the routes then answer 503. */
   storage: ImageStorage | null;
   /** Resolves a clinic slug to its id, or throws the 404 the rest of the API uses. */
@@ -23,6 +28,25 @@ export interface ImagesRouterDeps {
 }
 
 const ACCEPTED_TYPES = ["image/png", "image/jpeg", "image/webp"];
+
+/**
+ * What body-parser's own errors mean here. Each carries a `type` and an HTTP `status`;
+ * left alone they would all reach the generic handler as a 500.
+ */
+const bodyParserFailure = (error: unknown): unknown => {
+  const { type, status } = error as { type?: unknown; status?: unknown };
+
+  if (type === "entity.too.large") return new ImageTooLargeError();
+  if (type === "encoding.unsupported") return new ImageUnsupportedMediaTypeError();
+
+  // Corrupt gzip, a Content-Length that does not match, an aborted request: the client's
+  // problem, and worth retrying. Anything without a client status stays a 500.
+  if (typeof status === "number" && status >= 400 && status < 500) {
+    return new ImageUnreadableError(error);
+  }
+
+  return error;
+};
 
 /**
  * The raw image bytes as a Buffer, and clean errors for what body-parser would otherwise
@@ -35,9 +59,7 @@ const rawImageBody = (): RequestHandler => {
   return (req, res, next) => {
     parse(req, res, (error?: unknown) => {
       if (error) {
-        const tooLarge = (error as { type?: string }).type === "entity.too.large";
-
-        next(tooLarge ? new ImageTooLargeError() : error);
+        next(bodyParserFailure(error));
 
         return;
       }
@@ -67,10 +89,16 @@ const rawImageBody = (): RequestHandler => {
  */
 export const createImagesRouter = (deps: ImagesRouterDeps): Router => {
   const router = Router();
-  const requireStaff = createRequireStaffKey(config.STAFF_API_KEY);
+  const requireStaff = createRequireStaffKey(deps.staffKey);
+
+  // First of all, before the key is even compared and before any body is read.
+  const requireStaffConfigured: RequestHandler = (_req, _res, next) => {
+    next(deps.staffKey ? undefined : new ImageStorageUnavailableError());
+  };
 
   const upload = (scope: (slug: string) => Promise<{ clinicId: string } | "shared">) =>
     [
+      requireStaffConfigured,
       requireStaff,
       // Cheap refusals first, before a body is read.
       asyncHandler(async (req, res, next) => {

@@ -71,4 +71,25 @@ describe("Bunny image storage configuration", () => {
   it("refuses a zone name that could change the request path", async () => {
     await expect(loadConfig({ BUNNY_STORAGE_ZONE: "a/b" })).rejects.toThrow(/BUNNY_STORAGE_ZONE/);
   });
+
+  it.each([
+    "https://cdn.example.com?x=1",
+    "https://cdn.example.com/?x=1",
+    "https://cdn.example.com/media#top",
+    "https://cdn.example.com?",
+    "https://localhost",
+    "https://127.0.0.1",
+    "https://10.0.0.5/media",
+    "https://intranet"
+  ])("refuses the public base URL %s (query, fragment or non-public host)", async (url) => {
+    await expect(loadConfig({ BUNNY_PUBLIC_BASE_URL: url })).rejects.toThrow(
+      /BUNNY_PUBLIC_BASE_URL/
+    );
+  });
+
+  it("accepts a public base URL with a path prefix and drops the trailing slash", async () => {
+    const config = await loadConfig({ BUNNY_PUBLIC_BASE_URL: "https://cdn.example.com/media/" });
+
+    expect(config.BUNNY_PUBLIC_BASE_URL).toBe("https://cdn.example.com/media");
+  });
 });

@@ -1,6 +1,8 @@
 import dotenv from "dotenv";
 import { z } from "zod";
 
+import { isPublicHttpsUrl } from "../common/utils/public-https-url";
+
 dotenv.config();
 
 const booleanEnv = z
@@ -152,9 +154,16 @@ const envSchema = z.object({
   // whole zone: server-side only, never logged, never returned.
   BUNNY_STORAGE_ACCESS_KEY: z.preprocess(blankIsUnset, z.string().min(1).optional()),
   // Where the files are publicly served from: the pull zone linked to the storage zone.
+  // Every uploaded file's URL is this plus a path, and Apple fetches it without following
+  // redirects, so it must be a public https host with no query string or fragment (a "?x"
+  // here would swallow the path that follows). A path prefix is fine.
   BUNNY_PUBLIC_BASE_URL: z.preprocess(
     blankIsUnset,
-    httpsUrlWithoutTrailingSlash("BUNNY_PUBLIC_BASE_URL").optional()
+    httpsUrlWithoutTrailingSlash("BUNNY_PUBLIC_BASE_URL")
+      .refine((value) => isPublicHttpsUrl(value) && !value.includes("?") && !value.includes("#"), {
+        message: "BUNNY_PUBLIC_BASE_URL must be a public https URL with no query string or fragment"
+      })
+      .optional()
   ),
 
   SENDGRID_API_KEY: z.string().min(1).optional(),

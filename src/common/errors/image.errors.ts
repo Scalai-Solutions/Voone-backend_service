@@ -16,6 +16,18 @@ export class ImageUnsupportedError extends AppError {
   }
 }
 
+/** The body could not be read: corrupt compression, a length mismatch, an aborted upload. */
+export class ImageUnreadableError extends AppError {
+  constructor(cause?: unknown) {
+    super("La imagen no se ha podido leer. Inténtalo de nuevo.", {
+      statusCode: 400,
+      code: "IMAGE_UNREADABLE",
+      expose: true,
+      cause
+    });
+  }
+}
+
 /** The request's content type is not one of the three accepted. */
 export class ImageUnsupportedMediaTypeError extends AppError {
   constructor() {
@@ -60,7 +72,9 @@ export class ImageStorageUnavailableError extends AppError {
     super("La subida de imágenes no está configurada.", {
       statusCode: 503,
       code: "IMAGE_STORAGE_UNCONFIGURED",
-      expose: true
+      expose: true,
+      // A configuration state, not a failure: no error line per request.
+      logged: true
     });
   }
 }
@@ -72,6 +86,9 @@ export class ImageStorageError extends AppError {
       statusCode: 502,
       code: "IMAGE_STORAGE_FAILED",
       expose: true,
+      // The ImageStorage adapter logs the provider's status and body, which is what an
+      // operator needs; the handler repeating the line would only be noise.
+      logged: true,
       cause
     });
   }

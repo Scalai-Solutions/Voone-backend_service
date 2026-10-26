@@ -34,6 +34,17 @@ class Hidden extends AppError {
   }
 }
 
+class AlreadyLogged extends AppError {
+  constructor() {
+    super("upstream said no", {
+      statusCode: 502,
+      code: "THING_UPSTREAM",
+      expose: true,
+      logged: true
+    });
+  }
+}
+
 const appThrowing = (error: unknown): Express => {
   const app = express();
 
@@ -59,6 +70,26 @@ const get = async (app: Express) => {
     server.close();
   }
 };
+
+describe("errorHandler logging", () => {
+  it("logs a 5xx AppError once by default", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await get(appThrowing(new Hidden()));
+
+    expect(log).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not repeat a 5xx the origin has already logged, and still answers it", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const res = await get(appThrowing(new AlreadyLogged()));
+
+    expect(res.status).toBe(502);
+    expect(res.body).toEqual({ code: "THING_UPSTREAM", message: "upstream said no" });
+    expect(log).not.toHaveBeenCalled();
+  });
+});
 
 describe("errorHandler", () => {
   it("answers with the error's own status, not 500", async () => {

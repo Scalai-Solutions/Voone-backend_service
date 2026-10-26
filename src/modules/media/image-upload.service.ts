@@ -81,6 +81,14 @@ export const validateImage = async (bytes: Buffer): Promise<ValidatedImage> => {
     throw new ImageUnsupportedError();
   }
 
+  // An animated WebP is refused: wallets show a still or nothing, so the clinic would see
+  // something other than what it uploaded. An APNG is deliberately accepted: its default
+  // image is an ordinary PNG that every decoder shows, which is a sensible still fallback.
+  // (sharp reports `pages` > 1 for animated WebP and for GIF, which is refused anyway.)
+  if (format === "webp" && (metadata.pages ?? 1) > 1) {
+    throw new ImageUnsupportedError();
+  }
+
   if (
     width < MIN_SIDE ||
     height < MIN_SIDE ||

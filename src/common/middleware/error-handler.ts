@@ -33,8 +33,9 @@ const generic = (status: number): string =>
 
 export const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
   if (isAppError(error)) {
-    // 5xx is ours to explain, so it is logged even when it is a known error type.
-    if (error.statusCode >= 500) {
+    // 5xx is ours to explain, so it is logged even when it is a known error type, unless
+    // the code that raised it has already logged it (see AppErrorOptions.logged).
+    if (error.statusCode >= 500 && !error.logged) {
       console.error(`[error] ${req.method} ${req.originalUrl}`, error);
     }
 

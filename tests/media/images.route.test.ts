@@ -1,6 +1,8 @@
 import type { AddressInfo } from "node:net";
 
 import express from "express";
+import { gzipSync } from "node:zlib";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ImageStorageError } from "../../src/common/errors/image.errors";
@@ -8,22 +10,17 @@ import { ClinicNotFoundError } from "../../src/common/errors/membership.errors";
 import { errorHandler } from "../../src/common/middleware/error-handler";
 import type { ImageStorage } from "../../src/modules/media/image-storage";
 import { MAX_IMAGE_BYTES } from "../../src/modules/media/image-upload.service";
-import { makeImage, makeSvg } from "./image-fixtures";
+import { makeImage, makeRandomPng, makeSvg } from "./image-fixtures";
 
-const STAFF_KEY = vi.hoisted(() => "test-staff-key");
+import { createImagesRouter } from "../../src/routes/v1/images.route";
 
-// The staff gate is a no-op when no key is configured, so configure one.
-vi.mock("../../src/config/env", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../../src/config/env")>();
-
-  return { ...original, config: { ...original.config, STAFF_API_KEY: STAFF_KEY } };
-});
-
-const { createImagesRouter } = await import("../../src/routes/v1/images.route");
+const STAFF_KEY = "test-staff-key";
 
 const GENERIC_MESSAGE = "Sube una imagen PNG, JPG o WebP.";
 
-const build = (options: { configured?: boolean; failStorage?: Error } = {}) => {
+const build = (
+  options: { configured?: boolean; failStorage?: Error; staffKey?: string | undefined } = {}
+) => {
   const puts: Array<{ key: string; contentType: string; size: number }> = [];
   const lookups: string[] = [];
 
@@ -44,6 +41,7 @@ const build = (options: { configured?: boolean; failStorage?: Error } = {}) => {
   app.use(
     "/api/v1",
     createImagesRouter({
+      staffKey: "staffKey" in options ? options.staffKey : STAFF_KEY,
       storage: options.configured === false ? null : storage,
       findClinic: async (slug) => {
         lookups.push(slug);
@@ -61,7 +59,14 @@ const build = (options: { configured?: boolean; failStorage?: Error } = {}) => {
 const send = async (
   app: express.Express,
   path: string,
-  options: { body?: Buffer | string; type?: string; staff?: boolean | string } = {}
+  options: {
+    body?: Buffer | string;
+    type?: string;
+    staff?: boolean | string;
+    headers?: Record<string, string>;
+    /** Send the body as a stream, so there is no Content-Length (chunked). */
+    chunked?: Buffer;
+  } = {}
 ) => {
   const server = app.listen(0);
 
@@ -74,11 +79,31 @@ const send = async (
       headers["x-voone-staff-key"] = typeof options.staff === "string" ? options.staff : STAFF_KEY;
     }
 
+    Object.assign(headers, options.headers);
+
+    const chunked = options.chunked;
+    const body = chunked
+      ? new ReadableStream<Uint8Array>({
+          start(controller) {
+            const step = 64 * 1024;
+
+            for (let at = 0; at < chunked.length; at += step) {
+              controller.enqueue(new Uint8Array(chunked.subarray(at, at + step)));
+            }
+
+            controller.close();
+          }
+        })
+      : typeof options.body === "object"
+        ? new Uint8Array(options.body)
+        : options.body;
+
     const response = await fetch(`http://127.0.0.1:${port}/api/v1${path}`, {
       method: "POST",
       headers,
-      body: typeof options.body === "object" ? new Uint8Array(options.body) : options.body
-    });
+      body,
+      ...(chunked ? { duplex: "half" } : {})
+    } as RequestInit);
     const text = await response.text();
 
     return {
@@ -286,17 +311,132 @@ describe.each([
     expect(puts).toEqual([]);
   });
 
-  it("answers 502 when storage fails, without the underlying error", async () => {
+  it("answers 502 with only the fixed code and message when storage fails", async () => {
     const { app } = build({ failStorage: new ImageStorageError(new Error("boom secret")) });
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     const res = await send(app, `${base}?kind=logo`, {
       body: await makeImage("png"),
       type: "image/png"
     });
 
+    // toEqual on the whole body: a cause, a stack or provider detail added to the response
+    // would fail it.
     expect(res.status).toBe(502);
-    expect(res.body?.message).toBe("No se ha podido guardar la imagen. Inténtalo de nuevo.");
-    expect(JSON.stringify(res.body)).not.toContain("boom");
+    expect(res.body).toEqual({
+      code: "IMAGE_STORAGE_FAILED",
+      message: "No se ha podido guardar la imagen. Inténtalo de nuevo."
+    });
+    // The storage adapter logged the failure; the generic handler does not repeat it.
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it("does not log the unconfigured case as an error", async () => {
+    const { app } = build({ configured: false });
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await send(app, `${base}?kind=logo`, { body: await makeImage("png"), type: "image/png" });
+
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it("answers 503, not 403 or 201, when no staff key is configured (fails closed)", async () => {
+    const { app, puts, lookups } = build({ staffKey: undefined });
+
+    for (const staff of [false, true, "anything"] as const) {
+      const res = await send(app, `${base}?kind=logo`, {
+        body: await makeImage("png"),
+        type: "image/png",
+        staff
+      });
+
+      expect(res.status).toBe(503);
+      expect(res.body?.message).toBe("La subida de imágenes no está configurada.");
+    }
+
+    expect(puts).toEqual([]);
+    expect(lookups).toEqual([]);
+  });
+
+  it("checks the staff configuration before reading any body", async () => {
+    const { app } = build({ staffKey: undefined });
+
+    // Over the limit: if the body were read first this would be 413.
+    const res = await send(app, `${base}?kind=logo`, {
+      body: Buffer.alloc(MAX_IMAGE_BYTES + 1),
+      type: "image/png"
+    });
+
+    expect(res.status).toBe(503);
+  });
+
+  it("answers 413 for an over-limit body sent chunked, with no Content-Length", async () => {
+    const { app, puts } = build();
+
+    const res = await send(app, `${base}?kind=logo`, {
+      chunked: Buffer.alloc(MAX_IMAGE_BYTES + 1),
+      type: "image/png"
+    });
+
+    expect(res.status).toBe(413);
+    expect(res.body?.message).toBe("La imagen supera los 5 MB.");
+    expect(puts).toEqual([]);
+  });
+
+  it("answers 415 for a Content-Encoding it cannot decode", async () => {
+    const { app, puts } = build();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const res = await send(app, `${base}?kind=logo`, {
+      body: await makeImage("png"),
+      type: "image/png",
+      headers: { "content-encoding": "br" }
+    });
+
+    expect(res.status).toBe(415);
+    expect(res.body?.message).toBe(GENERIC_MESSAGE);
+    expect(puts).toEqual([]);
+  });
+
+  it("answers 400 with the Spanish message for a corrupt gzip body, not 500", async () => {
+    const { app, puts } = build();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const res = await send(app, `${base}?kind=logo`, {
+      body: Buffer.from("this is not gzip data at all"),
+      type: "image/png",
+      headers: { "content-encoding": "gzip" }
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body?.message).toBe("La imagen no se ha podido leer. Inténtalo de nuevo.");
+    expect(puts).toEqual([]);
+  });
+
+  it("accepts a gzip-encoded image body", async () => {
+    const { app, puts } = build();
+
+    const res = await send(app, `${base}?kind=logo`, {
+      body: gzipSync(await makeImage("png")),
+      type: "image/png",
+      headers: { "content-encoding": "gzip" }
+    });
+
+    expect(res.status).toBe(201);
+    expect(puts).toHaveLength(1);
+  });
+
+  it("accepts a real image of about 4 MB, well over the default parser limit", async () => {
+    const { app, puts } = build();
+    const big = await makeRandomPng(1150);
+
+    expect(big.length).toBeGreaterThan(3_500_000);
+    expect(big.length).toBeLessThan(MAX_IMAGE_BYTES);
+
+    const res = await send(app, `${base}?kind=hero`, { body: big, type: "image/png" });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ bytes: big.length, width: 1150, height: 1150 });
+    expect(puts[0]?.size).toBe(big.length);
   });
 });

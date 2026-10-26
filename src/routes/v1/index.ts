@@ -69,6 +69,7 @@ v1Router.use(createNotificationsRouter({ notifications: notificationService }));
  */
 v1Router.use(
   createImagesRouter({
+    staffKey: config.STAFF_API_KEY,
     storage: buildImageStorage(config),
     findClinic: (slug) => findClinicBySlug(prisma, slug)
   })

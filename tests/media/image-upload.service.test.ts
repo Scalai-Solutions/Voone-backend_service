@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -15,7 +16,7 @@ import {
   uploadImage,
   validateImage
 } from "../../src/modules/media/image-upload.service";
-import { makeImage, makeNoisyImage, makeSvg } from "./image-fixtures";
+import { makeAnimatedWebp, makeImage, makeNoisyImage, makeSvg } from "./image-fixtures";
 
 const fakeStorage = () => {
   const puts: Array<{ key: string; bytes: Buffer; contentType: string }> = [];
@@ -90,6 +91,28 @@ describe("validateImage", () => {
     await expect(
       validateImage(jpeg.subarray(0, Math.floor(jpeg.length / 2)))
     ).rejects.toBeInstanceOf(ImageUnsupportedError);
+  });
+
+  it("rejects a truncated WebP", async () => {
+    const webp = await makeNoisyImage("webp");
+
+    await expect(
+      validateImage(webp.subarray(0, Math.floor(webp.length / 2)))
+    ).rejects.toBeInstanceOf(ImageUnsupportedError);
+  });
+
+  it("rejects an animated WebP, which a wallet would show badly or not at all", async () => {
+    const animated = await makeAnimatedWebp(2);
+
+    // Sanity: the fixture really is animated, so the test cannot pass for the wrong reason.
+    expect((await sharp(animated).metadata()).pages).toBe(2);
+    await expect(validateImage(animated)).rejects.toBeInstanceOf(ImageUnsupportedError);
+  });
+
+  it("accepts a WebP with a single frame", async () => {
+    await expect(validateImage(await makeImage("webp"))).resolves.toMatchObject({
+      format: "webp"
+    });
   });
 
   it("rejects a 1x1 image as too small", async () => {
