@@ -1,11 +1,13 @@
 import { PointsTransactionKind, PrismaClient, type Clinic } from "@prisma/client";
 import express, { type Express } from "express";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { errorHandler } from "../../src/common/middleware/error-handler";
 import { PrismaCatalogRepository } from "../../src/modules/onboarding/catalog.repository";
-import type { CatalogItem } from "../../src/modules/onboarding/engine.types";
+import type { CatalogItem, Program } from "../../src/modules/onboarding/engine.types";
 import { OnboardingService } from "../../src/modules/onboarding/onboarding.service";
+import { presentProgram } from "../../src/modules/onboarding/presentation";
+import { programView } from "../../src/modules/onboarding/runtime/program-view";
 import { PrismaProgramTierPort } from "../../src/modules/onboarding/runtime/program-tier.port";
 import { RewardService } from "../../src/modules/onboarding/runtime/reward.service";
 import { VisitService } from "../../src/modules/onboarding/runtime/visit.service";
@@ -1278,5 +1280,390 @@ describe("replacing a live programme with a new version", () => {
     );
 
     expect(redeemed.status, JSON.stringify(redeemed.body)).toBe(200);
+  });
+});
+
+describe("texts the centre edits on a draft", () => {
+  const textsPath = (programId: string) => admin(`/programs/${programId}/texts`);
+  const OTHER_SLUG = "test-route-other";
+  let other: Clinic;
+
+  beforeAll(async () => {
+    other = await db.clinic.upsert({
+      where: { slug: OTHER_SLUG },
+      update: {},
+      create: {
+        slug: OTHER_SLUG,
+        name: "Otro centro",
+        addressLine: "Calle Cinco 5",
+        pincode: "28005"
+      }
+    });
+  });
+
+  afterAll(async () => {
+    await db.onboardingProgram.deleteMany({ where: { clinicId: other.id } });
+    await db.clinic.deleteMany({ where: { slug: OTHER_SLUG } });
+  });
+
+  const newDraft = async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+
+    return (await call("POST", admin("/programs"), ANSWERS)).body;
+  };
+
+  const perkOf = (body: { program: { ladder: Array<{ n: number; perk?: unknown }> } }) =>
+    body.program.ladder.find((m) => m.perk) as {
+      n: number;
+      perk: { kind: string; name: string; description: string };
+    };
+
+  const rewardOf = (body: { program: { ladder: Array<{ n: number; reward?: unknown }> } }) =>
+    body.program.ladder.find((m) => m.reward) as {
+      n: number;
+      reward: { name: string; items: unknown[] };
+    };
+
+  it("applies referral, perk, reward and recurring edits and returns the programme", async () => {
+    const draft = await newDraft();
+    const perk = perkOf(draft);
+    const reward = rewardOf(draft);
+    const r = await call("PATCH", textsPath(draft.id), {
+      referral: [{ index: 0, name: "  Sesión de bienvenida  " }],
+      perks: [{ milestone: perk.n, name: "Ventaja propia", desc: "Descripción propia" }],
+      rewards: [{ milestone: reward.n, label: "Premio propio" }],
+      recurring: { label: "Recurrente propio" }
+    });
+
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body.program.referrals[0].name).toBe("Sesión de bienvenida");
+    expect(r.body.program.referrals[0].n).toBe(draft.program.referrals[0].n);
+
+    const perkAfter = perkOf(r.body);
+
+    expect(perkAfter.perk).toEqual({
+      kind: perk.perk.kind,
+      name: "Ventaja propia",
+      description: "Descripción propia"
+    });
+
+    const rewardAfter = rewardOf(r.body);
+
+    expect(rewardAfter.reward.name).toBe("Premio propio");
+    expect(rewardAfter.reward.items).toEqual(reward.reward.items);
+    expect(r.body.program.recurring.name).toBe("Recurrente propio");
+    expect(JSON.stringify(r.body.program)).not.toMatch(/"cost|costPct/i);
+
+    const again = await call("GET", admin(`/programs/${draft.id}`));
+
+    expect(again.body.program.recurring.name).toBe("Recurrente propio");
+  });
+
+  it("clears a label with null and returns to the generated title", async () => {
+    const draft = await newDraft();
+    const reward = rewardOf(draft);
+
+    await call("PATCH", textsPath(draft.id), {
+      rewards: [{ milestone: reward.n, label: "Temporal" }],
+      recurring: { label: "Temporal" }
+    });
+    const r = await call("PATCH", textsPath(draft.id), {
+      rewards: [{ milestone: reward.n, label: null }],
+      recurring: { label: null }
+    });
+
+    expect(r.status).toBe(200);
+    expect(rewardOf(r.body).reward.name).toBe(reward.reward.name);
+    expect(r.body.program.recurring.name).toBe(draft.program.recurring.name);
+  });
+
+  it("refuses empty, over-long, control characters and an empty body, with 422", async () => {
+    const draft = await newDraft();
+    const reward = rewardOf(draft);
+    const send = (body: unknown) => call("PATCH", textsPath(draft.id), body);
+
+    expect((await send({ referral: [{ index: 0, name: "   " }] })).status).toBe(422);
+    expect((await send({ referral: [{ index: 0, name: "x".repeat(121) }] })).status).toBe(422);
+    expect((await send({ referral: [{ index: 0, name: "a\u0007b" }] })).status).toBe(422);
+    expect((await send({ rewards: [{ milestone: reward.n, label: "" }] })).status).toBe(422);
+    expect((await send({ perks: [{ milestone: perkOf(draft).n }] })).status).toBe(422);
+    expect((await send({})).status).toBe(422);
+
+    // Nothing was stored by any of those.
+    const after = await call("GET", admin(`/programs/${draft.id}`));
+
+    expect(after.body.program.referrals[0].name).toBe(draft.program.referrals[0].name);
+  });
+
+  it("answers 422 in Spanish for a step, perk or reward that does not exist, and stores nothing", async () => {
+    const draft = await newDraft();
+    const send = (body: unknown) => call("PATCH", textsPath(draft.id), body);
+
+    const referral = await send({
+      referral: [
+        { index: 0, name: "Valido" },
+        { index: 42, name: "No existe" }
+      ]
+    });
+    const perk = await send({ perks: [{ milestone: 9999, name: "X" }] });
+    const reward = await send({ rewards: [{ milestone: 9999, label: "X" }] });
+
+    for (const r of [referral, perk, reward]) {
+      expect(r.status).toBe(422);
+      expect(r.body.message).toMatch(/^No existe|^Ese hito/);
+    }
+
+    // All or nothing: the valid first edit of the failing request was not kept.
+    const after = await call("GET", admin(`/programs/${draft.id}`));
+
+    expect(after.body.program.referrals[0].name).toBe(draft.program.referrals[0].name);
+  });
+
+  it("refuses a programme that is not a draft, with the same 409 as the other edits", async () => {
+    const id = await goLive();
+    const r = await call("PATCH", textsPath(id), { referral: [{ index: 0, name: "Tarde" }] });
+
+    expect(r.status).toBe(409);
+    expect(r.body.message).toContain("borrador");
+  });
+
+  it("answers 404 for another clinic's programme and for an unknown programme or clinic", async () => {
+    const draft = await newDraft();
+    const body = { referral: [{ index: 0, name: "Intruso" }] };
+    const viaOther = await call(
+      "PATCH",
+      `/admin/clinics/${other.id}/onboarding/programs/${draft.id}/texts`,
+      body
+    );
+    const unknown = await call("PATCH", textsPath("no-such-program"), body);
+    const noClinic = await call(
+      "PATCH",
+      `/admin/clinics/no-such/onboarding/programs/${draft.id}/texts`,
+      body
+    );
+
+    expect(viaOther.status).toBe(404);
+    expect(unknown.status).toBe(404);
+    expect(noClinic.status).toBe(404);
+
+    const after = await call("GET", admin(`/programs/${draft.id}`));
+
+    expect(after.body.program.referrals[0].name).toBe(draft.program.referrals[0].name);
+  });
+
+  it("answers the benefits route's conflict when the draft changed under the editor", async () => {
+    const draft = await newDraft();
+    const stale = await onboarding.getProgram(clinic.id, draft.id);
+
+    // Someone else saves first, which moves updatedAt.
+    await call("PUT", admin(`/programs/${draft.id}/tiers/oro/benefits`), { benefits: ["Otro"] });
+
+    const spy = vi.spyOn(onboarding, "getProgram").mockResolvedValueOnce(stale);
+
+    try {
+      const r = await call("PATCH", textsPath(draft.id), {
+        referral: [{ index: 0, name: "Perdida" }]
+      });
+
+      expect(r.status).toBe(409);
+      expect(r.body.message).toBe(
+        "El borrador ha cambiado mientras lo editabas. Recarga la página y vuelve a intentarlo."
+      );
+    } finally {
+      spy.mockRestore();
+    }
+
+    const after = await call("GET", admin(`/programs/${draft.id}`));
+
+    expect(after.body.program.referrals[0].name).toBe(draft.program.referrals[0].name);
+  });
+
+  it("is dropped for a reward when that reward is swapped", async () => {
+    const draft = await newDraft();
+    const alt = draft.program.ladder.find(
+      (m: { reward?: { alternatives: unknown[] } }) => m.reward?.alternatives.length
+    ) as { n: number; reward: { alternatives: Array<{ name: string }> } };
+
+    await call("PATCH", textsPath(draft.id), { rewards: [{ milestone: alt.n, label: "Mio" }] });
+    const r = await call("PATCH", admin(`/programs/${draft.id}/milestones/${alt.n}`), {
+      alternative: 0
+    });
+
+    expect(r.status).toBe(200);
+    expect(r.body.program.ladder.find((m: { n: number }) => m.n === alt.n).reward.name).toBe(
+      alt.reward.alternatives[0].name
+    );
+  });
+
+  it("carries edited texts through publishing into both views, and leaves issued rewards alone", async () => {
+    const draft = await newDraft();
+    const perk = perkOf(draft);
+    const reward = rewardOf(draft);
+
+    await call("PATCH", textsPath(draft.id), {
+      referral: [{ index: 0, name: "Referido propio" }],
+      perks: [{ milestone: perk.n, name: "Ventaja propia", desc: "Descripción propia" }],
+      rewards: [{ milestone: reward.n, label: "Premio propio" }],
+      recurring: { label: "Recurrente propio" }
+    });
+
+    const published = await call("POST", admin(`/programs/${draft.id}/publish`));
+
+    expect(published.status).toBe(200);
+
+    // The centre's view of the live programme.
+    const staff = await call("GET", `/clinics/${SLUG}/program`);
+
+    expect(staff.body.program.referrals[0].name).toBe("Referido propio");
+    expect(perkOf(staff.body).perk.name).toBe("Ventaja propia");
+    expect(perkOf(staff.body).perk.description).toBe("Descripción propia");
+    expect(rewardOf(staff.body).reward.name).toBe("Premio propio");
+    expect(staff.body.program.recurring.name).toBe("Recurrente propio");
+
+    // The runtime view, read from what is stored.
+    const live = await onboarding.active(clinic.id);
+    const output = live!.output as unknown as Program;
+    const view = programView(output);
+
+    expect(view.referral[0].title).toBe("Referido propio");
+    expect(view.recurring.title).toBe("Recurrente propio");
+    expect(view.milestones.find((m) => m.n === perk.n)!.issue!.title).toBe("Ventaja propia");
+    expect(view.milestones.find((m) => m.n === reward.n)!.issue!.title).toBe("Premio propio");
+    expect(presentProgram(output).recurring.name).toBe(view.recurring.title);
+  });
+});
+
+describe("a new draft that keeps the edits (clone)", () => {
+  const OTHER_SLUG = "test-route-clone-other";
+  let other: Clinic;
+
+  beforeAll(async () => {
+    other = await db.clinic.upsert({
+      where: { slug: OTHER_SLUG },
+      update: {},
+      create: {
+        slug: OTHER_SLUG,
+        name: "Otro centro",
+        addressLine: "Calle Seis 6",
+        pincode: "28006"
+      }
+    });
+  });
+
+  afterAll(async () => {
+    await db.onboardingProgram.deleteMany({ where: { clinicId: other.id } });
+    await db.clinic.deleteMany({ where: { slug: OTHER_SLUG } });
+  });
+
+  const clonePath = (programId: string) => admin(`/programs/${programId}/draft`);
+
+  /** A published programme that carries every kind of edit the centre can make. */
+  const editedLive = async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const draft = (await call("POST", admin("/programs"), ANSWERS)).body;
+    const swappable = draft.program.ladder.find(
+      (m: { reward?: { alternatives: unknown[] } }) => m.reward?.alternatives.length
+    ) as { n: number };
+    const labelled = draft.program.ladder.find(
+      (m: { n: number; reward?: unknown }) => m.reward && m.n !== swappable.n
+    ) as { n: number };
+
+    await call("PUT", admin(`/programs/${draft.id}/tiers/oro/benefits`), {
+      benefits: ["Café de bienvenida"]
+    });
+    await call("PATCH", admin(`/programs/${draft.id}/milestones/${swappable.n}`), {
+      alternative: 0
+    });
+    await call("PATCH", admin(`/programs/${draft.id}/texts`), {
+      referral: [{ index: 0, name: "Referido propio" }],
+      rewards: [{ milestone: labelled.n, label: "Premio propio" }],
+      recurring: { label: "Recurrente propio" }
+    });
+    expect((await call("POST", admin(`/programs/${draft.id}/publish`))).status).toBe(200);
+
+    return draft.id as string;
+  };
+
+  it("copies the programme verbatim into a new draft, one version up", async () => {
+    const liveId = await editedLive();
+    const r = await call("POST", clonePath(liveId));
+
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    expect(r.body.status).toBe("BORRADOR");
+    expect(r.body.version).toBe(2);
+    expect(r.body.id).not.toBe(liveId);
+    expect(r.body.publishedAt).toBeNull();
+
+    const live = await call("GET", admin(`/programs/${liveId}`));
+
+    expect(r.body.program).toEqual(live.body.program);
+    expect(r.body.answers).toEqual(live.body.answers);
+    expect(r.body.program.referrals[0].name).toBe("Referido propio");
+    expect(r.body.program.recurring.name).toBe("Recurrente propio");
+    expect(
+      r.body.program.tiers.find((t: { key: string }) => t.key === "oro").customBenefits
+    ).toEqual(["Café de bienvenida"]);
+
+    // The stored JSON is identical, not merely the presentation of it.
+    const rows = await db.onboardingProgram.findMany({ where: { clinicId: clinic.id } });
+    const [a, b] = [liveId, r.body.id].map((id) => rows.find((x) => x.id === id)!);
+
+    expect(b.output).toEqual(a.output);
+    expect(b.catalogSnapshot).toEqual(a.catalogSnapshot);
+    expect(b.engineVersion).toBe(a.engineVersion);
+    expect(b.configVersion).toBe(a.configVersion);
+
+    // The live version is untouched.
+    expect(a.status).toBe("ACTIVO");
+  });
+
+  it("lets the new draft be edited and published, retiring the old version", async () => {
+    const liveId = await editedLive();
+    const draft = (await call("POST", clonePath(liveId))).body;
+    const edit = await call("PATCH", admin(`/programs/${draft.id}/texts`), {
+      referral: [{ index: 0, name: "Segunda versión" }]
+    });
+
+    expect(edit.status).toBe(200);
+    expect((await call("GET", admin(`/programs/${liveId}`))).body.program.referrals[0].name).toBe(
+      "Referido propio"
+    );
+    expect((await call("POST", admin(`/programs/${draft.id}/publish`))).status).toBe(200);
+    expect((await call("GET", `/clinics/${SLUG}/program`)).body.program.referrals[0].name).toBe(
+      "Segunda versión"
+    );
+  });
+
+  it("refuses with 409 while a draft already exists", async () => {
+    const liveId = await editedLive();
+
+    expect((await call("POST", clonePath(liveId))).status).toBe(201);
+
+    const again = await call("POST", clonePath(liveId));
+
+    expect(again.status).toBe(409);
+    expect(again.body.message).toContain("borrador");
+    expect(await db.onboardingProgram.count({ where: { clinicId: clinic.id } })).toBe(2);
+  });
+
+  it("answers 404 for a programme of another clinic or one that does not exist", async () => {
+    const liveId = await editedLive();
+    const viaOther = await call(
+      "POST",
+      `/admin/clinics/${other.id}/onboarding/programs/${liveId}/draft`
+    );
+
+    expect(viaOther.status).toBe(404);
+    expect((await call("POST", clonePath("no-such-program"))).status).toBe(404);
+    expect(await db.onboardingProgram.count({ where: { clinicId: other.id } })).toBe(0);
+  });
+
+  it("leaves createDraft as it was: a fresh engine run that drops the edits", async () => {
+    const liveId = await editedLive();
+    const fresh = await call("POST", admin("/programs"), ANSWERS);
+
+    expect(fresh.status).toBe(201);
+    expect(fresh.body.program.referrals[0].name).not.toBe("Referido propio");
+    expect(liveId).not.toBe(fresh.body.id);
   });
 });

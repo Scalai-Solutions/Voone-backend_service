@@ -1,5 +1,6 @@
 import { MIN_TENURE, TIERS, TIER_BENEFITS, TIER_NAMES } from "../engine.config";
 import type { PerkKind, Program, TierCode } from "../engine.types";
+import { rewardTitle } from "../reward-title";
 
 /**
  * A published programme, as the runtime reads it.
@@ -62,8 +63,6 @@ export interface ProgramView {
   welcome: number;
 }
 
-const names = (items: Array<{ name: string }>): string => items.map((i) => i.name).join(" y ");
-
 export const programView = (output: Program): ProgramView => {
   const levels = output.lad.ms.filter((m) => m.type === "nivel");
 
@@ -80,21 +79,21 @@ export const programView = (output: Program): ProgramView => {
     discount: TIER_BENEFITS[key].discount
   }));
 
-  const rewardAt = new Map(output.chosen.map((c) => [c.m.n, c.o]));
+  const rewardAt = new Map(output.chosen.map((c) => [c.m.n, c]));
 
   const milestones: MilestoneView[] = output.lad.ms.map((m) => {
     const base: MilestoneView = { n: m.n, tramo: m.tramo, th: m.th, type: m.type, tier: m.tier };
 
     if (m.type === "premio") {
-      const option = rewardAt.get(m.n);
+      const chosen = rewardAt.get(m.n);
 
-      if (option) {
+      if (chosen) {
         base.issue = {
           kind: "PREMIO",
-          title: names(option.items),
+          title: rewardTitle(chosen),
           detail: {
-            items: option.items.map((i) => ({ id: i.id, name: i.name, value: i.value })),
-            value: option.value
+            items: chosen.o.items.map((i) => ({ id: i.id, name: i.name, value: i.value })),
+            value: chosen.o.value
           }
         };
       }
@@ -120,7 +119,7 @@ export const programView = (output: Program): ProgramView => {
   return {
     tiers,
     milestones,
-    recurring: { every: output.rec.every, startsAt: diamond, title: names(output.rec.o.items) },
+    recurring: { every: output.rec.every, startsAt: diamond, title: rewardTitle(output.rec) },
     referral: output.refLad.map((r) => ({
       n: r.n,
       title: r.name,

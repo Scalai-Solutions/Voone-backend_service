@@ -25,6 +25,7 @@ import {
   redeemSchema,
   calculatorSchema,
   swapSchema,
+  textsSchema,
   tierBenefitsSchema,
   visitSchema
 } from "../../modules/onboarding/onboarding.schema";
@@ -386,6 +387,46 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
           await deps.onboarding.setTierBenefits(clinicId, req.params.programId, tier, benefits)
         )
       );
+    })
+  );
+
+  /**
+   * Clones a programme into a new draft, copying its output verbatim: the benefits the centre
+   * wrote, swapped rewards and edited texts all survive. `POST /programs` (createDraft) stays for
+   * "change the answers", because it re-runs the engine and starts from the generated programme.
+   *
+   * 201 with the same body as `GET /programs/:programId`; 409 when a draft already exists; 404
+   * when the programme belongs to another clinic or does not exist.
+   */
+  router.post(
+    "/admin/clinics/:clinicId/onboarding/programs/:programId/draft",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const clinicId = await clinicOr404(req.params.clinicId);
+
+      res
+        .status(201)
+        .json(forAdmin(await deps.onboarding.cloneDraft(clinicId, req.params.programId)));
+    })
+  );
+
+  /**
+   * Edits the texts of a DRAFT: `{ referral?, perks?, rewards?, recurring? }` (see textsSchema).
+   * Answers 200 with the same body as `GET /programs/:programId`, 409 when the programme is not
+   * a draft or changed under the editor, 422 for invalid text or an unknown index or milestone.
+   *
+   * A reward's title is copied into MemberReward.title when it is issued, so an edit made here
+   * only affects rewards issued after the draft is published; rewards members already hold keep
+   * the title they were issued with.
+   */
+  router.patch(
+    "/admin/clinics/:clinicId/onboarding/programs/:programId/texts",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const clinicId = await clinicOr404(req.params.clinicId);
+      const edits = parse(textsSchema, req.body);
+
+      res.json(forAdmin(await deps.onboarding.setTexts(clinicId, req.params.programId, edits)));
     })
   );
 

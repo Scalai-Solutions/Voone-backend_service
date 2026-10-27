@@ -184,4 +184,71 @@ export const swapSchema = z.union([
   z.object({ itemId: z.string().trim().min(1).max(64) })
 ]);
 
+/**
+ * A text the centre writes for a reward. Trimmed, never empty, no control characters (a pasted
+ * newline or NUL would break the single-line pass and wallet fields that carry it), and capped at
+ * the 120 characters the pass accepts for a reward title.
+ */
+// eslint-disable-next-line no-control-regex
+const NO_CONTROL = /^[^\u0000-\u001f\u007f-\u009f]*$/;
+
+const text = (max: number, what: string) =>
+  z
+    .string({ message: `${what}: tiene que ser un texto` })
+    .trim()
+    .min(1, `${what}: no puede estar vacío`)
+    .max(max, `${what}: máximo ${max} caracteres`)
+    .regex(NO_CONTROL, `${what}: contiene caracteres no permitidos`);
+
+const milestoneNumber = z
+  .number({ message: "milestone: indica un número de hito válido" })
+  .int("milestone: indica un número de hito válido")
+  .min(1, "milestone: indica un número de hito válido");
+
+/** Texts editable on a draft. Anything omitted is left as it is. */
+export const textsSchema = z
+  .object({
+    referral: z
+      .array(
+        z.object({
+          index: z.number().int("index: tiene que ser un número entero").min(0).max(99),
+          name: text(120, "El nombre del premio por referido")
+        })
+      )
+      .max(50)
+      .optional(),
+    perks: z
+      .array(
+        z
+          .object({
+            milestone: milestoneNumber,
+            name: text(120, "El nombre de la ventaja").optional(),
+            desc: text(200, "La descripción de la ventaja").optional()
+          })
+          .refine((perk) => perk.name !== undefined || perk.desc !== undefined, {
+            message: "Indica el nombre o la descripción de la ventaja"
+          })
+      )
+      .max(50)
+      .optional(),
+    rewards: z
+      .array(
+        z.object({
+          milestone: milestoneNumber,
+          label: text(120, "El título del premio").nullable()
+        })
+      )
+      .max(50)
+      .optional(),
+    recurring: z
+      .object({ label: text(120, "El título del premio recurrente").nullable() })
+      .optional()
+  })
+  .refine(
+    (body) =>
+      Boolean(body.referral?.length || body.perks?.length || body.rewards?.length) ||
+      body.recurring !== undefined,
+    { message: "No hay nada que cambiar" }
+  );
+
 export type VisitBody = z.infer<typeof visitSchema>;

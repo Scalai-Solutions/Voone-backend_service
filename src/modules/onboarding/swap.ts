@@ -90,6 +90,8 @@ const replaceReward = (
   const previous = entry.o;
 
   entry.o = replacement;
+  // A label was written for the reward that is leaving; on the new one it would be a lie.
+  delete entry.label;
   // The reward swapped out becomes an alternative, so the centre can undo the change.
   entry.alts = [previous, ...entry.alts.filter((_, k) => k !== alternativeIndex)].slice(0, 2);
 

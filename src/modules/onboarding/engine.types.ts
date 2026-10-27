@@ -207,6 +207,12 @@ export interface ChosenReward {
   o: RewardOption;
   /** Up to two swaps the centre may make without breaking the ladder's ordering. */
   alts: RewardOption[];
+  /**
+   * The title the centre wrote for this reward, replacing the one derived from the item names.
+   * Text only: the items, their value and the cost are what issuing and the rules read, and a
+   * label never changes them. Cleared whenever the reward is swapped.
+   */
+  label?: string;
 }
 
 export interface ReferralStep {
@@ -229,7 +235,8 @@ export interface Program {
   est: Estimates;
   lad: Ladder;
   chosen: ChosenReward[];
-  rec: { every: number; o: RewardOption };
+  /** `label`: as on ChosenReward. Cleared whenever the recurring reward is re-picked. */
+  rec: { every: number; o: RewardOption; label?: string };
   gifts: Record<TierCode, TierGift>;
   /**
    * Benefits the centre wrote itself, per tier (founders' E2E item 27). Shown after the ones the
