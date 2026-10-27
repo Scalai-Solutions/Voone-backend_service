@@ -355,6 +355,19 @@ model ApplePassCredential {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
+  /// Evidence the pass reached a person, which the WalletObject cannot give: that row is
+  /// written when the pass is ISSUED, so an Android member or an iPhone member who never
+  /// tapped Add has a SYNCED Apple object too.
+  ///
+  /// The last time a .pkpass was served to a person (staff download, claim link or the
+  /// public pass page). Moved on every download, so it reads as "last handed a pass".
+  downloadedAt DateTime?
+
+  /// The first time any phone registered for this pass. Set once and never cleared, so it
+  /// outlives the registration row: iOS deletes that row when the member turns Automatic
+  /// Updates off, and "was registered, now is not" is precisely the case staff must see.
+  firstRegisteredAt DateTime?
+
   @@id([passTypeIdentifier, serialNumber])
 }
 

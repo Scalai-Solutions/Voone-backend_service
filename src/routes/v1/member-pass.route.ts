@@ -13,6 +13,11 @@ export interface MemberPassRouterDeps {
   memberForClaim: (token: string) => Promise<string | null>;
   /** Refuses a member who does not exist or has been erased, before anything is issued. */
   memberExists: (memberId: string) => Promise<boolean>;
+  /**
+   * Notes that a pass was served to a person: the first evidence it may be installed.
+   * Best effort and optional; it must never fail the download.
+   */
+  recordAppleDownload?: (memberId: string) => Promise<void>;
 }
 
 /**
@@ -31,6 +36,14 @@ export const createMemberPassRouter = (deps: MemberPassRouterDeps): Router => {
   const router = Router();
   const requireStaff = createRequireStaffKey(config.STAFF_API_KEY);
 
+  const noteDownload = async (memberId: string): Promise<void> => {
+    try {
+      await deps.recordAppleDownload?.(memberId);
+    } catch {
+      // Bookkeeping only; the member still gets their card.
+    }
+  };
+
   router.get(
     "/members/:memberId/pass/apple",
     requireStaff,
@@ -48,6 +61,8 @@ export const createMemberPassRouter = (deps: MemberPassRouterDeps): Router => {
 
         return;
       }
+
+      await noteDownload(req.params.memberId);
 
       res
         .status(200)
@@ -93,6 +108,8 @@ export const createMemberPassRouter = (deps: MemberPassRouterDeps): Router => {
 
         return;
       }
+
+      await noteDownload(memberId);
 
       res
         .status(200)

@@ -30,18 +30,26 @@ interface MemberWithWalletObjects {
  * Whether each member's Apple card has a phone registered to be told about changes.
  *
  * An Apple card updates only when the server pushes to a phone that registered for it.
- * A member who never registered, or switched Automatic Updates off (iOS then deletes the
- * registration), has a card that stays as it was however many points they earn — and
- * staff had no way to see that.
+ * A member who switched Automatic Updates off (iOS then deletes the registration) has a
+ * card that stays as it was however many points they earn, and staff had no way to see it.
  *
- *  - null:  nothing to say — no SYNCED Apple card, or Apple is not available here.
- *  - true:  the SYNCED card has at least one registered device.
- *  - false: the SYNCED card has none, so no update will reach a phone.
+ * A SYNCED Apple object is NOT proof the card is installed: it is recorded when the pass
+ * is ISSUED, so every Android member, and every iPhone member who never tapped Add, has
+ * one. `false` therefore needs evidence the card reached a phone.
  *
- * One query for the whole list, and none at all when nobody has a card to look up.
+ *  - true:  at least one registration row exists.
+ *  - false: no registration row AND the credential shows the pass was downloaded or a
+ *           phone registered at some point (both outlive the registration row).
+ *  - null:  no SYNCED Apple card, Apple unavailable, or no evidence either way.
+ *
+ * Deliberate limitation: the evidence columns only fill in from when they shipped, so
+ * every existing member reads null until they next download the pass or register a phone.
+ * An honest "unknown" beats flagging the whole membership as broken.
+ *
+ * At most two queries for the whole list, and none when nobody has a card to look up.
  */
 export const appleUpdatesRegisteredFor = async (
-  devices: Pick<PassDeviceRepository, "registeredSerials">,
+  devices: Pick<PassDeviceRepository, "installState">,
   passTypeIdentifier: string | null,
   members: ReadonlyArray<MemberWithWalletObjects>
 ): Promise<Map<string, boolean | null>> => {
@@ -61,11 +69,38 @@ export const appleUpdatesRegisteredFor = async (
 
   if (passTypeIdentifier === null || serialByMember.size === 0) return result;
 
-  const registered = await devices.registeredSerials(passTypeIdentifier, [
+  const { registered, evidenced } = await devices.installState(passTypeIdentifier, [
     ...new Set(serialByMember.values())
   ]);
 
-  serialByMember.forEach((serial, memberId) => result.set(memberId, registered.has(serial)));
+  serialByMember.forEach((serial, memberId) => {
+    if (registered.has(serial)) result.set(memberId, true);
+    else if (evidenced.has(serial)) result.set(memberId, false);
+  });
 
   return result;
+};
+
+/**
+ * Note that a pass was just handed to a person, for the evidence above.
+ *
+ * Best effort: the member is waiting for their card, and a failed bookkeeping write must
+ * never cost them it. Apple unavailable is a no-op.
+ */
+export const recordAppleDownload = async (
+  devices: Pick<PassDeviceRepository, "markDownloadedForMember">,
+  memberId: string
+): Promise<void> => {
+  const passTypeIdentifier = applePassTypeIdentifier();
+
+  if (passTypeIdentifier === null) return;
+
+  try {
+    await devices.markDownloadedForMember(passTypeIdentifier, memberId);
+  } catch (error) {
+    console.warn(
+      `[apple-wallet] could not record the download for member ${memberId}:`,
+      error instanceof Error ? error.message : error
+    );
+  }
 };

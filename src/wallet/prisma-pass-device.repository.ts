@@ -35,6 +35,18 @@ export class PrismaPassDeviceRepository implements PassDeviceRepository {
       create: registration
     });
 
+    // Only the first registration counts, and it is kept when the row is deleted: iOS
+    // removes the registration when Automatic Updates goes off, and the dashboard needs
+    // to know a phone WAS here. updateMany, so a missing credential is not an error.
+    await this.prisma.applePassCredential.updateMany({
+      where: {
+        passTypeIdentifier: registration.passTypeIdentifier,
+        serialNumber: registration.serialNumber,
+        firstRegisteredAt: null
+      },
+      data: { firstRegisteredAt: new Date() }
+    });
+
     return { created: !existing };
   }
 
@@ -92,16 +104,46 @@ export class PrismaPassDeviceRepository implements PassDeviceRepository {
     return rows.map((row) => row.pushToken);
   }
 
-  async registeredSerials(passTypeIdentifier: string, serials: string[]): Promise<Set<string>> {
-    if (serials.length === 0) return new Set();
+  async installState(
+    passTypeIdentifier: string,
+    serials: string[]
+  ): Promise<{ registered: Set<string>; evidenced: Set<string> }> {
+    if (serials.length === 0) return { registered: new Set(), evidenced: new Set() };
 
-    const rows = await this.prisma.passDeviceRegistration.findMany({
-      where: { passTypeIdentifier, serialNumber: { in: serials } },
-      select: { serialNumber: true },
-      distinct: ["serialNumber"]
+    const [registrations, credentials] = await Promise.all([
+      this.prisma.passDeviceRegistration.findMany({
+        where: { passTypeIdentifier, serialNumber: { in: serials } },
+        select: { serialNumber: true },
+        distinct: ["serialNumber"]
+      }),
+      this.prisma.applePassCredential.findMany({
+        where: {
+          passTypeIdentifier,
+          serialNumber: { in: serials },
+          OR: [{ downloadedAt: { not: null } }, { firstRegisteredAt: { not: null } }]
+        },
+        select: { serialNumber: true }
+      })
+    ]);
+
+    return {
+      registered: new Set(registrations.map((row) => row.serialNumber)),
+      evidenced: new Set(credentials.map((row) => row.serialNumber))
+    };
+  }
+
+  async markDownloadedForMember(passTypeIdentifier: string, memberId: string): Promise<void> {
+    const object = await this.prisma.walletObject.findFirst({
+      where: { memberId, provider: WalletProviderType.APPLE },
+      select: { externalObjectId: true }
     });
 
-    return new Set(rows.map((row) => row.serialNumber));
+    if (!object) return;
+
+    await this.prisma.applePassCredential.updateMany({
+      where: { passTypeIdentifier, serialNumber: object.externalObjectId },
+      data: { downloadedAt: new Date() }
+    });
   }
 
   async removeRegistrationsByPushToken(pushToken: string): Promise<number> {

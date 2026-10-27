@@ -64,7 +64,8 @@ import { deriveRedemptionCode } from "../../wallet/engine/redemption-code";
 import { PrismaLoyaltyCardAssembler } from "../../wallet/prisma-loyalty-card.assembler";
 import {
   applePassTypeIdentifier,
-  appleUpdatesRegisteredFor
+  appleUpdatesRegisteredFor,
+  recordAppleDownload
 } from "../../wallet/apple-updates-registered";
 import { PrismaPassDeviceRepository } from "../../wallet/prisma-pass-device.repository";
 
@@ -702,6 +703,10 @@ membersRouter.get(
       res.status(404).json({ code: "APPLE_PASS_UNAVAILABLE", message: "Apple Wallet unavailable" });
       return;
     }
+
+    // A pass is about to reach a person; the dashboard reads this to tell "never
+    // installed" from "installed but no longer updating".
+    await recordAppleDownload(new PrismaPassDeviceRepository(prisma), member.id);
 
     res.setHeader("Content-Type", issued.install.contentType);
     res.setHeader("Content-Disposition", `attachment; filename="${issued.install.fileName}"`);

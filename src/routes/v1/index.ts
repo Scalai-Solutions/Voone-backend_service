@@ -5,6 +5,7 @@ import { WalletConfigurationError } from "../../common/errors/wallet.errors";
 import { config } from "../../config/env";
 import { PrismaLoyaltyCardAssembler } from "../../wallet/prisma-loyalty-card.assembler";
 import { PrismaPassDeviceRepository } from "../../wallet/prisma-pass-device.repository";
+import { recordAppleDownload } from "../../wallet/apple-updates-registered";
 import { PrismaWalletSyncRepository } from "../../wallet/prisma-wallet-sync.repository";
 import {
   PrismaMemberPointsCache,
@@ -256,7 +257,9 @@ if (config.CARD_REDEMPTION_SECRET) {
         });
 
         return Boolean(member && !member.erasedAt);
-      }
+      },
+      recordAppleDownload: (memberId) =>
+        recordAppleDownload(new PrismaPassDeviceRepository(prisma), memberId)
     })
   );
 }
