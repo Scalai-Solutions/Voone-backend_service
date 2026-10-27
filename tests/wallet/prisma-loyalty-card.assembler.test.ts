@@ -384,3 +384,204 @@ describe("PrismaLoyaltyCardAssembler: overlong clinic texts", () => {
     expect(loyaltyCardSchema.safeParse(card).success).toBe(true);
   });
 });
+
+describe("PrismaLoyaltyCardAssembler: redeemable rewards", () => {
+  const NOW = new Date("2026-10-27T10:00:00Z");
+  const programOutput = (() => {
+    const result = run(catalogFixture as CatalogItem[], {
+      ticket: null,
+      freq: null,
+      objective: "equilibrado",
+      investment: "equilibrado",
+      occupancy: "o2",
+      members: "m3"
+    });
+
+    if (isEngineError(result)) throw new Error(result.error);
+
+    return result;
+  })();
+
+  const reward = (
+    title: string,
+    expiresAt: string,
+    extra: Record<string, unknown> = {}
+  ): Record<string, unknown> => ({
+    title,
+    kind: "PREMIO",
+    issuedAt: new Date("2026-10-01T09:00:00Z"),
+    id: `id-${title}`,
+    redeemedAt: null,
+    expiresAt: new Date(expiresAt),
+    ...extra
+  });
+
+  const programmeMember = (rewards?: Array<Record<string, unknown>>) => ({
+    ...member,
+    tier: "Bronce",
+    lifetimePoints: 175,
+    clinic: { ...member.clinic, onboardingPrograms: [{ output: programOutput }] },
+    ...(rewards ? { rewards } : {})
+  });
+
+  /**
+   * A stand-in for the database that honours the rewards `where` and `take` the assembler asks for,
+   * so "the redeemed one is dropped" is proved by the query it sends, not by what the test returns.
+   */
+  const assembler = (value: { rewards?: Array<Record<string, unknown>> }) => {
+    const findUnique = vi.fn(
+      async (args: {
+        include: {
+          rewards: {
+            where: { redeemedAt: null; expiresAt: { gt: Date } };
+            orderBy: Array<Record<string, "asc">>;
+            take: number;
+          };
+        };
+      }) => {
+        const { where, orderBy, take } = args.include.rewards;
+        const compare = (a: Record<string, unknown>, b: Record<string, unknown>): number => {
+          for (const clause of orderBy) {
+            const [field] = Object.keys(clause);
+            const x =
+              a[field] instanceof Date ? (a[field] as Date).getTime() : (a[field] as string);
+            const y =
+              b[field] instanceof Date ? (b[field] as Date).getTime() : (b[field] as string);
+
+            if (x < y) return -1;
+            if (x > y) return 1;
+          }
+
+          return 0;
+        };
+
+        return {
+          ...value,
+          rewards: (value.rewards ?? [])
+            .filter(
+              (r) =>
+                r.redeemedAt === where.redeemedAt &&
+                (r.expiresAt as Date).getTime() > where.expiresAt.gt.getTime()
+            )
+            .sort(compare)
+            .slice(0, take)
+        };
+      }
+    );
+
+    return new PrismaLoyaltyCardAssembler(
+      { member: { findUnique } } as unknown as PrismaClient,
+      SECRET,
+      () => NOW
+    );
+  };
+
+  it("lists the two available rewards ordered by expiry, dropping the redeemed and the expired", async () => {
+    const card = await assembler(
+      programmeMember([
+        reward("Segundo", "2026-12-20T10:00:00Z"),
+        reward("Canjeado", "2026-11-30T10:00:00Z", {
+          redeemedAt: new Date("2026-10-20T10:00:00Z")
+        }),
+        reward("Caducado", "2026-10-26T10:00:00Z"),
+        reward("Primero", "2026-11-15T10:00:00Z")
+      ])
+    ).assemble(member.id);
+
+    expect(card.rewards).toEqual({
+      available: [
+        { title: "Primero", expiresAt: "2026-11-15T10:00:00.000Z" },
+        { title: "Segundo", expiresAt: "2026-12-20T10:00:00.000Z" }
+      ]
+    });
+  });
+
+  it("asks the database for available rewards only, in a stable order, in the member's own query", async () => {
+    const findUnique = vi.fn(async () => programmeMember([]));
+    const prisma = { member: { findUnique } } as unknown as PrismaClient;
+
+    await new PrismaLoyaltyCardAssembler(prisma, SECRET, () => NOW).assemble(member.id);
+
+    expect(findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          rewards: {
+            where: { redeemedAt: null, expiresAt: { gt: NOW } },
+            // Rewards issued by one visit share an expiry; the tie-breakers keep two builds equal.
+            orderBy: [{ expiresAt: "asc" }, { issuedAt: "asc" }, { id: "asc" }],
+            take: 20,
+            select: { title: true, kind: true, expiresAt: true }
+          }
+        })
+      })
+    );
+  });
+
+  it("breaks an expiry tie by issue time and then id, so two builds are byte-equal", async () => {
+    const same = "2026-12-01T10:00:00Z";
+    const rows = [
+      reward("C", same, { id: "z", issuedAt: new Date("2026-10-02T00:00:00Z") }),
+      reward("B", same, { id: "b", issuedAt: new Date("2026-10-01T00:00:00Z") }),
+      reward("A", same, { id: "a", issuedAt: new Date("2026-10-01T00:00:00Z") })
+    ];
+    const first = await assembler(programmeMember(rows)).assemble(member.id);
+    const second = await assembler(programmeMember([...rows].reverse())).assemble(member.id);
+
+    expect(first.rewards?.available.map((r) => r.title)).toEqual(["A", "B", "C"]);
+    expect(second).toEqual(first);
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+  });
+
+  it("carries an empty list, not nothing, for a programme member with no rewards", async () => {
+    expect((await assembler(programmeMember([])).assemble(member.id)).rewards).toEqual({
+      available: []
+    });
+    expect((await assembler(programmeMember()).assemble(member.id)).rewards).toEqual({
+      available: []
+    });
+  });
+
+  it("carries no rewards at all for a clinic with no programme", async () => {
+    const none = {
+      ...member,
+      clinic: { ...member.clinic, onboardingPrograms: [] },
+      rewards: [reward("Premio", "2026-12-01T10:00:00Z")]
+    };
+
+    expect((await assembler(none).assemble(member.id)).rewards).toBeUndefined();
+  });
+
+  it("passes the real card schema, shortening a title the pass cannot hold", async () => {
+    const card = await assembler(
+      programmeMember([reward("T".repeat(300), "2026-12-01T10:00:00Z")])
+    ).assemble(member.id);
+
+    expect(card.rewards?.available[0].title).toHaveLength(120);
+    expect(loyaltyCardSchema.safeParse(card).success).toBe(true);
+  });
+
+  it("rejects more than 20 rewards in the schema", () => {
+    const card = {
+      memberId: "m",
+      serialNumber: "s",
+      redemptionCode: "MFRGGZDFMZTWQ2LKNNWG23Q",
+      clinic: { name: "C" },
+      member: { fullName: "N" },
+      points: 0,
+      rewards: {
+        available: Array.from({ length: 21 }, () => ({
+          title: "x",
+          expiresAt: "2026-12-01T10:00:00.000Z"
+        }))
+      },
+      template: {
+        programName: "P",
+        backgroundColor: "#ffffff",
+        pointsLabel: "p",
+        tierLabel: "t"
+      }
+    };
+
+    expect(loyaltyCardSchema.safeParse(card).success).toBe(false);
+  });
+});

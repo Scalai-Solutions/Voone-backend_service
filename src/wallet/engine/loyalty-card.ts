@@ -123,6 +123,25 @@ export const loyaltyCardSchema = z
      */
     message: z.object({ text: z.string().min(1).max(300) }).optional(),
 
+    /**
+     * The rewards this member has earned and can redeem at the clinic right now. Present (and
+     * possibly empty) for a clinic on an onboarding programme, absent for every other clinic.
+     * `expiresAt` is an ISO instant: it is stored, never derived from the clock, so two builds
+     * of an unchanged member stay byte-equal.
+     */
+    rewards: z
+      .object({
+        available: z
+          .array(
+            z.object({
+              title: z.string().min(1).max(120),
+              expiresAt: z.string().datetime()
+            })
+          )
+          .max(20)
+      })
+      .optional(),
+
     template: cardTemplateSchema
   })
   .refine((data) => data.redemptionCode !== data.serialNumber, {

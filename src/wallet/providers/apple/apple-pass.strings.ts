@@ -25,6 +25,9 @@ export const PASS_LABELS = {
   pointsChangeMessage: "Tu saldo ahora es %@",
   tierChangeMessage: "Ahora eres nivel %@",
   lastMessage: "ÚLTIMO MENSAJE",
+  rewards: "REGALOS",
+  availableRewards: "RECOMPENSAS DISPONIBLES",
+  rewardsChangeMessage: "Tus regalos disponibles: %@",
   // The bare format: the lock-screen notification is the field's own value, which already
   // carries the date, the title and the text of the clinic's message.
   messageChangeMessage: "%@"
@@ -50,6 +53,9 @@ export const PASS_TRANSLATIONS: Record<string, Record<string, string>> = {
     "Tu saldo ahora es %@": "Your balance is now %@",
     "Ahora eres nivel %@": "You are now %@ tier",
     "ÚLTIMO MENSAJE": "LAST MESSAGE",
+    REGALOS: "GIFTS",
+    "RECOMPENSAS DISPONIBLES": "AVAILABLE REWARDS",
+    "Tus regalos disponibles: %@": "Your available gifts: %@",
     "%@": "%@"
   }
 };

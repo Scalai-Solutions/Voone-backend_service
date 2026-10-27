@@ -99,16 +99,30 @@ const programRewardFor = (
   };
 };
 
+/** The most rewards a card shows; the pass only ever lists a handful and counts the rest. */
+const AVAILABLE_REWARDS_LIMIT = 20;
+
 export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
   constructor(
     private readonly prisma: PrismaClient,
-    private readonly redemptionSecret: string
+    private readonly redemptionSecret: string,
+    private readonly now: () => Date = () => new Date()
   ) {}
 
   async assemble(memberId: string): Promise<LoyaltyCard> {
+    const now = this.now();
     const member = await this.prisma.member.findUnique({
       where: { id: memberId },
       include: {
+        // The rewards the member can redeem now, in the same round trip. Ordered with tie-breakers
+        // because one visit issues its rewards with the same expiry, and the card must come out
+        // byte-equal each time. Cheap for a clinic with no programme: the member has no rows.
+        rewards: {
+          where: { redeemedAt: null, expiresAt: { gt: now } },
+          orderBy: [{ expiresAt: "asc" }, { issuedAt: "asc" }, { id: "asc" }],
+          take: AVAILABLE_REWARDS_LIMIT,
+          select: { title: true, kind: true, expiresAt: true }
+        },
         // The latest clinic message, in the same round trip for the same reason as the programme.
         walletMessage: true,
         clinic: {
@@ -171,6 +185,15 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
       // A programme centre shows points (ten per euro); the ledger holds euro progress.
       points: live ? toPoints(member.pointsBalance) : member.pointsBalance,
       reward,
+      // Only a programme centre issues rewards. Filtered here as well as in the query: the
+      // clock is the caller's, and the card must never offer one that has lapsed.
+      rewards: live
+        ? {
+            available: (member.rewards ?? [])
+              .filter((r) => r.expiresAt.getTime() > now.getTime())
+              .map((r) => ({ title: r.title.slice(0, 120), expiresAt: r.expiresAt.toISOString() }))
+          }
+        : undefined,
       message: member.walletMessage ? { text: formatCardMessage(member.walletMessage) } : undefined,
       template: {
         programName: template.programName,
