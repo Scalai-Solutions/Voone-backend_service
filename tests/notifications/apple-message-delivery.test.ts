@@ -416,6 +416,59 @@ describe("which deliveries each kind of message creates", () => {
   });
 });
 
+describe("retrying a broadcast whose class message already went out", () => {
+  it.each([NotificationStatus.SENT, NotificationStatus.PARTIAL_FAILED])(
+    "does not send the Google class message again when the broadcast is %s, and still fans out",
+    async (status) => {
+      let googleSends = 0;
+      let created = 0;
+      const service = new NotificationService(
+        {
+          notification: {
+            findUnique: async () => ({
+              id: "n-1",
+              clinicId: "clinic-1",
+              type: NotificationType.BROADCAST,
+              status,
+              header: "H",
+              body: "B",
+              actionUrl: null,
+              notify: true
+            }),
+            update: async () => undefined
+          },
+          walletClass: { findFirst: async () => ({ externalClassId: "class-1" }) },
+          clinic: {
+            update: async () => {
+              throw new Error("must not be counted again");
+            }
+          },
+          walletObject: { findMany: async () => [{ memberId: "m-1" }] },
+          notificationDelivery: {
+            findMany: async () => [],
+            createMany: async () => {
+              created += 1;
+            }
+          }
+        } as never,
+        {
+          addClassMessage: async () => {
+            googleSends += 1;
+            return { messageId: "msg" };
+          }
+        } as never,
+        {} as never,
+        { enqueueDelivery: async () => undefined } as never
+      );
+
+      await service.processNotification("n-1");
+
+      expect(googleSends).toBe(0);
+      expect(created).toBe(1);
+    }
+  );
+});
+
 describe("counts for a broadcast", () => {
   const countsFor = async (status: NotificationStatus, failedDeliveries: number) => {
     const service = new NotificationService(

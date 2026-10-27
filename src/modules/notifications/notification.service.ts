@@ -643,7 +643,11 @@ export class NotificationService {
     if (!notification) throw new NotificationNotFoundError();
     if (notification.status === NotificationStatus.CANCELLED) return;
 
-    if (notification.status === NotificationStatus.SENT) {
+    if (
+      notification.status === NotificationStatus.SENT ||
+      // Reachable now that Apple deliveries can fail after the class message went out.
+      notification.status === NotificationStatus.PARTIAL_FAILED
+    ) {
       // A retry after the class message went out but before the Apple fan-out finished:
       // the fan-out is idempotent, the Google message must not be sent twice.
       if (notification.type === NotificationType.BROADCAST) {
