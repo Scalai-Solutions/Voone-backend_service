@@ -1,6 +1,7 @@
 import { prisma } from "../../infrastructure/database/prisma-client";
 import type { WalletSyncQueue } from "../../wallet/engine/wallet-sync.queue";
 import { buildWalletSyncQueue } from "../../wallet/wallet.composition";
+import { refreshGoogleClasses } from "./google-class-refresh";
 
 /**
  * Brings every installed card of a clinic up to date with its template and programme.
@@ -23,11 +24,30 @@ const walletQueue = (): WalletSyncQueue | null => {
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Returns how many members were queued. Never throws: a refresh must not fail a save. */
+const refreshClinicGoogleClasses = async (clinicId: string): Promise<void> => {
+  await refreshGoogleClasses({ clinicId, apply: true });
+};
+
+/**
+ * Returns how many members were queued. Never throws: a refresh must not fail a save.
+ *
+ * The clinic's Google class is re-PATCHed first, because a recorded class is otherwise never
+ * touched again. That step is non-fatal and never holds up the member refresh.
+ */
 export const refreshClinicCards = async (
   clinicId: string,
-  syncQueue: WalletSyncQueue | null = walletQueue()
+  syncQueue: WalletSyncQueue | null = walletQueue(),
+  refreshClasses: (clinicId: string) => Promise<void> = refreshClinicGoogleClasses
 ): Promise<number> => {
+  try {
+    await refreshClasses(clinicId);
+  } catch (error) {
+    console.error("[wallet] could not refresh the clinic's Google class", {
+      clinicId,
+      error: error instanceof Error ? error.name : "unknown"
+    });
+  }
+
   if (!syncQueue) return 0;
 
   try {

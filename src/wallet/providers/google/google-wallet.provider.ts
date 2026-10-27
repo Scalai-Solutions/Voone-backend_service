@@ -62,6 +62,15 @@ export class GoogleWalletProvider extends BaseWalletProvider {
     return { provider: this.provider, externalId };
   }
 
+  /**
+   * Re-PATCH an existing class from its template. `provisionProgram` deliberately returns a
+   * recorded class untouched (a template saved twice must not create a second one), so this is the
+   * only way a change to the class's own layout reaches classes that already exist.
+   */
+  async refreshClass(template: ProgramTemplate, ref: ProgramRef): Promise<void> {
+    await createOrUpdateClass(this.toLoyaltyClassInput(template, ref.externalId));
+  }
+
   protected async doIssue(card: LoyaltyCard, program: ProgramRef): Promise<IssuedCard> {
     const externalId = this.objectIdFor(card.memberId);
 

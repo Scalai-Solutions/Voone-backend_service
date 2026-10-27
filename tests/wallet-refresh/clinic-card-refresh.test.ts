@@ -4,6 +4,9 @@ import { prisma } from "../../src/infrastructure/database/prisma-client";
 import { refreshClinicCards } from "../../src/modules/wallet-refresh/clinic-card-refresh";
 import { createTemplateSchema } from "../../src/modules/templates/templates.schema";
 
+// These cases are about the members; the Google class step has its own tests.
+const noClasses = async (): Promise<void> => undefined;
+
 describe("refreshClinicCards", () => {
   it("queues one sync per member of the clinic that holds a wallet pass", async () => {
     const find = vi
@@ -15,7 +18,7 @@ describe("refreshClinicCards", () => {
       close: async () => undefined
     };
 
-    expect(await refreshClinicCards("clinic-1", queue)).toBe(3);
+    expect(await refreshClinicCards("clinic-1", queue, noClasses)).toBe(3);
     expect(enqueued).toEqual(["m1", "m2", "m3"]);
     expect(find).toHaveBeenCalledWith({
       where: { clinicId: "clinic-1", erasedAt: null, walletObjects: { some: {} } },
@@ -25,7 +28,7 @@ describe("refreshClinicCards", () => {
   });
 
   it("does nothing, and does not throw, when wallets are not configured", async () => {
-    expect(await refreshClinicCards("clinic-1", null)).toBe(0);
+    expect(await refreshClinicCards("clinic-1", null, noClasses)).toBe(0);
   });
 
   it("does not throw when the member lookup fails", async () => {
@@ -33,7 +36,7 @@ describe("refreshClinicCards", () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const queue = { enqueueMemberSync: async () => undefined, close: async () => undefined };
 
-    expect(await refreshClinicCards("clinic-1", queue)).toBe(0);
+    expect(await refreshClinicCards("clinic-1", queue, noClasses)).toBe(0);
     find.mockRestore();
     log.mockRestore();
   });
