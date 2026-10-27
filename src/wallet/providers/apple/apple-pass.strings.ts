@@ -14,6 +14,9 @@ export const PASS_LABELS = {
   progress: "PROGRESO",
   program: "PROGRAMA",
   benefits: "BENEFICIOS",
+  // Replaces BENEFICIOS for a member of a clinic on a programme: the value starts with the tier's
+  // name, so the label itself stays static and translatable.
+  tierBenefits: "BENEFICIOS DE TU NIVEL",
   info: "INFORMACIÓN",
   memberSince: "MIEMBRO DESDE",
   redemptionCode: "CÓDIGO DE CANJE",
@@ -42,6 +45,7 @@ export const PASS_TRANSLATIONS: Record<string, Record<string, string>> = {
     PROGRESO: "PROGRESS",
     PROGRAMA: "PROGRAMME",
     BENEFICIOS: "BENEFITS",
+    "BENEFICIOS DE TU NIVEL": "YOUR TIER BENEFITS",
     INFORMACIÓN: "INFORMATION",
     "MIEMBRO DESDE": "MEMBER SINCE",
     "CÓDIGO DE CANJE": "REDEMPTION CODE",

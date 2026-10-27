@@ -1,5 +1,6 @@
 import { LoyaltyCard } from "../../engine/loyalty-card";
 import { availableRewardCount, availableRewardsText } from "../../engine/rewards-text";
+import { tierBenefitsText } from "../../engine/tier-benefits-text";
 import { PASS_LABELS } from "./apple-pass.strings";
 import { PassField } from "./passkit";
 
@@ -132,7 +133,13 @@ export const buildStoreCardFields = (data: LoyaltyCard): StoreCardFields => {
     });
   }
 
-  if (data.template.benefitsText) {
+  const tierText = tierBenefitsText(data);
+
+  if (tierText !== undefined) {
+    // The programme's benefits for the member's tier, in the place and under the key of the
+    // hand-typed text it replaces.
+    backFields.push({ key: "benefits", label: PASS_LABELS.tierBenefits, value: tierText });
+  } else if (data.template.benefitsText) {
     backFields.push({
       key: "benefits",
       label: PASS_LABELS.benefits,

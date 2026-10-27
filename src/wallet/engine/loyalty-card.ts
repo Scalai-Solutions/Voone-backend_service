@@ -142,6 +142,20 @@ export const loyaltyCardSchema = z
       })
       .optional(),
 
+    /**
+     * The benefits of the member's CURRENT tier as the clinic's live onboarding programme defines
+     * them: the single source of truth, which replaces the hand-typed `template.benefitsText` on the
+     * pass. Absent for a clinic with no live programme, and when the tier has none, so the pass then
+     * falls back to `benefitsText`. The lines are already fitted so the rendered text stays within
+     * 500 characters; a last "… y N más" line says how many were left out.
+     */
+    tierBenefits: z
+      .object({
+        tier: z.string().min(1).max(40),
+        lines: z.array(z.string().min(1).max(120)).min(1).max(12)
+      })
+      .optional(),
+
     template: cardTemplateSchema
   })
   .refine((data) => data.redemptionCode !== data.serialNumber, {

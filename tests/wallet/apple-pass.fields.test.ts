@@ -507,3 +507,54 @@ describe("buildStoreCardFields: redeemable rewards", () => {
     expect(text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
   });
 });
+
+describe("tier benefits on the back of the pass", () => {
+  const withTier: LoyaltyCard = {
+    ...rewardsPass,
+    tier: "Plata",
+    tierBenefits: {
+      tier: "Plata",
+      lines: ["Descuento del 3% en cosmética", "Prioridad en huecos de última hora"]
+    }
+  };
+  const backOf = (card: LoyaltyCard) =>
+    Object.fromEntries(buildStoreCardFields(card).backFields.map((f) => [f.key, f]));
+
+  it("shows the tier's own benefits, tier name first, one bullet per line", () => {
+    const { benefits } = backOf(withTier);
+
+    expect(benefits.value).toBe(
+      "Plata\n• Descuento del 3% en cosmética\n• Prioridad en huecos de última hora"
+    );
+    expect(benefits.label).toBe(PASS_LABELS.tierBenefits);
+    expect(benefits.label).toBe("BENEFICIOS DE TU NIVEL");
+  });
+
+  it("replaces the hand-typed benefits text rather than adding a second field", () => {
+    const fields = buildStoreCardFields(withTier);
+
+    expect(JSON.stringify(fields)).not.toContain("Acceso exclusivo");
+    expect(fields.backFields.filter((f) => f.key === "benefits")).toHaveLength(1);
+  });
+
+  it("translates the new label to English", () => {
+    expect(PASS_TRANSLATIONS.en["BENEFICIOS DE TU NIVEL"]).toBe("YOUR TIER BENEFITS");
+  });
+
+  it("keeps the information field as it was", () => {
+    expect(backOf(withTier).info.value).toBe(aureaGoldPass.template.infoText);
+  });
+
+  it("leaves a card with no tier benefits exactly as before", () => {
+    const { benefits } = backOf(rewardsPass);
+
+    expect(benefits.label).toBe(PASS_LABELS.benefits);
+    expect(benefits.value).toBe(aureaGoldPass.template.benefitsText);
+  });
+
+  it("keeps every key unique", () => {
+    const keys = allKeys(buildStoreCardFields(withTier));
+
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+});

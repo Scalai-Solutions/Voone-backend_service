@@ -7,7 +7,9 @@ import { run } from "../../src/modules/onboarding/engine";
 import type { CatalogItem } from "../../src/modules/onboarding/engine.types";
 import { isEngineError } from "../../src/modules/onboarding/engine.types";
 import catalogFixture from "../onboarding/reference/sapphira.catalogo.json";
+import { presentProgram } from "../../src/modules/onboarding/presentation";
 import { loyaltyCardSchema } from "../../src/wallet/engine/loyalty-card";
+import { tierBenefitsText } from "../../src/wallet/engine/tier-benefits-text";
 import { PrismaLoyaltyCardAssembler } from "../../src/wallet/prisma-loyalty-card.assembler";
 
 const SECRET = "a-server-secret-not-a-member-attribute";
@@ -624,5 +626,123 @@ describe("PrismaLoyaltyCardAssembler: redeemable rewards", () => {
     expect(title).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
     expect(title).toBe("x".repeat(119));
     expect(loyaltyCardSchema.safeParse(card).success).toBe(true);
+  });
+});
+
+describe("PrismaLoyaltyCardAssembler: the member's tier benefits", () => {
+  const output = (() => {
+    const result = run(catalogFixture as CatalogItem[], {
+      ticket: null,
+      freq: null,
+      objective: "equilibrado",
+      investment: "equilibrado",
+      occupancy: "o2",
+      members: "m3"
+    });
+
+    if (isEngineError(result)) throw new Error(result.error);
+
+    return result;
+  })();
+
+  const programme = (programOutput: unknown) => ({
+    clinic: { ...member.clinic, onboardingPrograms: [{ output: programOutput }] }
+  });
+  const memberOf = (tier: string | null, programOutput: unknown = output) => ({
+    ...member,
+    tier,
+    lifetimePoints: 0,
+    ...programme(programOutput)
+  });
+  const presented = (label: string, programOutput: unknown = output) =>
+    presentProgram(programOutput as never).tiers.find((t) => t.label === label)?.benefits ?? [];
+
+  it("gives the benefits of the member's own tier as the programme defines them", async () => {
+    const card = await assemblerFor(memberOf("Plata")).assemble(member.id);
+
+    expect(card.tierBenefits?.tier).toBe("Plata");
+    expect(card.tierBenefits?.lines).toEqual(presented("Plata"));
+    expect(card.tierBenefits?.lines.length).toBeGreaterThan(0);
+  });
+
+  it("includes the benefits the clinic wrote itself", async () => {
+    const custom = { ...output, customBenefits: { plata: ["Masaje de bienvenida"] } };
+    const card = await assemblerFor(memberOf("Plata", custom)).assemble(member.id);
+
+    expect(card.tierBenefits?.lines).toEqual(presented("Plata", custom));
+    expect(card.tierBenefits?.lines).toContain("Masaje de bienvenida");
+  });
+
+  it("gives a member of another tier that tier's benefits, not Plata's", async () => {
+    const bronce = await assemblerFor(memberOf("Bronce")).assemble(member.id);
+    const oro = await assemblerFor(memberOf("Oro")).assemble(member.id);
+
+    expect(bronce.tierBenefits?.tier).toBe("Bronce");
+    expect(bronce.tierBenefits?.lines).toEqual(presented("Bronce"));
+    expect(oro.tierBenefits?.tier).toBe("Oro");
+    expect(oro.tierBenefits?.lines).toEqual(presented("Oro"));
+    expect(bronce.tierBenefits?.lines).not.toEqual(oro.tierBenefits?.lines);
+  });
+
+  it("has none for a clinic with no programme, which keeps its hand-typed text", async () => {
+    const card = await assemblerFor({
+      ...member,
+      clinic: { ...member.clinic, onboardingPrograms: [] }
+    }).assemble(member.id);
+
+    expect(card.tierBenefits).toBeUndefined();
+    expect(card.template.benefitsText).toBe(template.benefitsText);
+  });
+
+  it("has none when the member's tier is not in the programme, or the member has no tier", async () => {
+    expect((await assemblerFor(memberOf("Gold")).assemble(member.id)).tierBenefits).toBeUndefined();
+    expect((await assemblerFor(memberOf(null)).assemble(member.id)).tierBenefits).toBeUndefined();
+  });
+
+  it("has none, rather than failing the card, when the programme cannot be presented", async () => {
+    const card = await assemblerFor(memberOf("Plata", { ...output, gifts: undefined })).assemble(
+      member.id
+    );
+
+    expect(card.tierBenefits).toBeUndefined();
+    expect(card.template.benefitsText).toBe(template.benefitsText);
+  });
+
+  it("clips a long list inside 500 characters and says how many it left out", async () => {
+    const custom = {
+      ...output,
+      customBenefits: {
+        diamante: Array.from({ length: 6 }, (_, i) => `${i + 1} ${"Beneficio largo ".repeat(5)}`)
+      }
+    };
+    const card = await assemblerFor(memberOf("Diamante", custom)).assemble(member.id);
+    const all = presented("Diamante", custom);
+    const lines = card.tierBenefits?.lines ?? [];
+    const shown = lines.length - 1;
+
+    expect(all.length).toBeGreaterThan(shown);
+    expect(lines.at(-1)).toBe(`… y ${all.length - shown} más`);
+    expect(lines.slice(0, shown)).toEqual(all.slice(0, shown).map((l) => l.trim()));
+    expect(tierBenefitsText(card)?.length).toBeLessThanOrEqual(500);
+    expect(lines.length).toBeLessThanOrEqual(12);
+  });
+
+  it("builds a card the schema accepts, byte-equal on a second build", async () => {
+    const first = await assemblerFor(memberOf("Plata")).assemble(member.id);
+    const second = await assemblerFor(memberOf("Plata")).assemble(member.id);
+
+    expect(loyaltyCardSchema.safeParse(first).success).toBe(true);
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+  });
+
+  it("does not ask the database for anything more", async () => {
+    const findUnique = vi.fn(async () => memberOf("Plata"));
+
+    await new PrismaLoyaltyCardAssembler(
+      { member: { findUnique } } as unknown as PrismaClient,
+      SECRET
+    ).assemble(member.id);
+
+    expect(findUnique).toHaveBeenCalledTimes(1);
   });
 });

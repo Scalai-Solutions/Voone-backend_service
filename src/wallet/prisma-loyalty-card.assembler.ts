@@ -7,9 +7,11 @@ import { LoyaltyCard, loyaltyCardSchema } from "./engine/loyalty-card";
 import { formatCardMessage } from "./engine/card-message";
 import { clipCardText } from "./engine/card-text";
 import { clipText } from "./engine/rewards-text";
+import { fitTierBenefits } from "./engine/tier-benefits-text";
 import { deriveRedemptionCode } from "./engine/redemption-code";
 import { milestoneProgress } from "../modules/points/milestone-engine";
 import type { Program } from "../modules/onboarding/engine.types";
+import { presentProgram } from "../modules/onboarding/presentation";
 import { programView } from "../modules/onboarding/runtime/program-view";
 import { toPoints } from "../modules/onboarding/runtime/points-unit";
 import { isDoublePointsPerk, nextRewardFor } from "../modules/onboarding/runtime/rules";
@@ -98,6 +100,35 @@ const programRewardFor = (
     title: next.title.slice(0, 120),
     remainingPoints: toPoints(next.remaining)
   };
+};
+
+/**
+ * The benefits of the member's current tier, from the live programme (the one place they are
+ * defined: the engine's rules plus the clinic's own lines, merged by `presentProgram`).
+ *
+ * Undefined when the member has no tier, the tier is not in the programme, or it has nothing to
+ * say. A programme that cannot be presented must not stop the member's card: it falls back to the
+ * template's text, as a clinic with no programme does.
+ */
+const tierBenefitsFor = (
+  programOutput: unknown,
+  tier: string | null
+): { tier: string; lines: string[] } | undefined => {
+  if (!tier) return undefined;
+
+  try {
+    const presented = presentProgram(programOutput as Program).tiers.find(
+      (candidate) => candidate.label === tier
+    );
+
+    if (!presented) return undefined;
+
+    const lines = fitTierBenefits(presented.label, presented.benefits);
+
+    return lines.length > 0 ? { tier: presented.label, lines } : undefined;
+  } catch {
+    return undefined;
+  }
 };
 
 /** The most rewards a card shows; the pass only ever lists a handful and counts the rest. */
@@ -203,6 +234,8 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
               }))
           }
         : undefined,
+      // The programme's benefits for the member's tier replace the hand-typed text on the pass.
+      tierBenefits: live ? tierBenefitsFor(live.output, member.tier) : undefined,
       message: member.walletMessage ? { text: formatCardMessage(member.walletMessage) } : undefined,
       template: {
         programName: template.programName,
