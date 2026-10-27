@@ -50,13 +50,16 @@ export const formatCardMessage = ({ header, body, sentAt }: StoredCardMessage): 
   const month = Number(parts.find((part) => part.type === "month")?.value);
   const text = `${day} ${MONTHS_ES[month - 1]} · ${header}: ${body}`;
 
-  // By code point, so an emoji is never cut in half.
-  const characters = Array.from(text);
+  // Counted in UTF-16 units, the unit the card schema's max(300) counts: capping by code points
+  // let an emoji-heavy message through here and then fail validation in assemble(), which would
+  // break every later sync of that member.
+  if (text.length <= CARD_MESSAGE_MAX_LENGTH) return text;
 
-  return characters.length > CARD_MESSAGE_MAX_LENGTH
-    ? `${characters
-        .slice(0, CARD_MESSAGE_MAX_LENGTH - 1)
-        .join("")
-        .trimEnd()}…`
-    : text;
+  let end = CARD_MESSAGE_MAX_LENGTH - 1;
+  const last = text.charCodeAt(end - 1);
+
+  // A cut right after a high surrogate would leave half an emoji.
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+
+  return `${text.slice(0, end).trimEnd()}…`;
 };

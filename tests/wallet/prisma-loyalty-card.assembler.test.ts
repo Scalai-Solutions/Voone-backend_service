@@ -110,6 +110,20 @@ describe("PrismaLoyaltyCardAssembler", () => {
       expect(card.message?.text).toBe("27 oct · Título: cuerpo");
     });
 
+    it.each([
+      ["emoji that fit under the cap", "😀".repeat(100)],
+      ["emoji that are truncated", "😀".repeat(150)],
+      ["emoji cut mid-pair", `${"x".repeat(286)}😀😀`]
+    ])("passes the real card schema with %s", async (_label, body) => {
+      const card = await assemblerFor({
+        ...member,
+        walletMessage: { ...stored, header: "H", body }
+      }).assemble(member.id);
+
+      expect(card.message?.text.length).toBeLessThanOrEqual(300);
+      expect(card.message?.text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    });
+
     it("has no message when none was ever sent", async () => {
       expect((await assemblerFor(member).assemble(member.id)).message).toBeUndefined();
       expect(

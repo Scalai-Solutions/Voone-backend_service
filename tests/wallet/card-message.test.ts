@@ -77,9 +77,45 @@ describe("formatCardMessage", () => {
     });
 
     expect(CARD_MESSAGE_MAX_LENGTH).toBe(300);
-    expect(Array.from(text)).toHaveLength(300);
+    // UTF-16 units, the unit the card schema's max(300) counts.
+    expect(text).toHaveLength(300);
     expect(text.endsWith("…")).toBe(true);
     expect(text.startsWith("27 oct · ")).toBe(true);
+  });
+
+  it("counts UTF-16 units, so an emoji-heavy message never exceeds what the schema allows", () => {
+    for (const emojis of [100, 150, 400]) {
+      const text = formatCardMessage({
+        header: "H",
+        body: "😀".repeat(emojis),
+        sentAt: new Date("2026-10-27T10:00:00Z")
+      });
+
+      expect(text.length).toBeLessThanOrEqual(300);
+    }
+  });
+
+  it("steps back one unit when the cut would land inside a surrogate pair", () => {
+    // "27 oct · H: " is 12 units. 286 x's make 298; the emoji then spans units 298-299, so a cut
+    // after 299 units would keep only its high half.
+    const insidePair = formatCardMessage({
+      header: "H",
+      body: `${"x".repeat(286)}😀😀`,
+      sentAt: new Date("2026-10-27T10:00:00Z")
+    });
+
+    expect(insidePair).toBe(`27 oct · H: ${"x".repeat(286)}…`);
+    expect(insidePair).toHaveLength(299);
+
+    // 287 x's: the cut falls cleanly between the text and the first emoji.
+    const clean = formatCardMessage({
+      header: "H",
+      body: `${"x".repeat(287)}😀😀`,
+      sentAt: new Date("2026-10-27T10:00:00Z")
+    });
+
+    expect(clean).toBe(`27 oct · H: ${"x".repeat(287)}…`);
+    expect(clean).toHaveLength(300);
   });
 
   it("does not cut an emoji in half when truncating", () => {
