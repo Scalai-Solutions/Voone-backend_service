@@ -64,7 +64,8 @@ describe("NotificationService", () => {
               deliveries: [{ id: "delivery-1" }]
             };
           },
-          update: async () => undefined
+          update: async () => undefined,
+          updateMany: async () => ({ count: 1 })
         },
         notificationDelivery: {
           update: async () => undefined,
@@ -120,7 +121,7 @@ describe("NotificationService", () => {
         },
         findMany: async () => [{ status: deliveryStatus }]
       },
-      notification: { update: async () => undefined }
+      notification: { update: async () => undefined, updateMany: async () => ({ count: 1 }) }
     };
     const service = new NotificationService(
       prisma as never,
@@ -203,7 +204,7 @@ describe("NotificationService", () => {
           },
           findMany: async () => [{ status: deliveryStatus }]
         },
-        notification: { update: async () => undefined }
+        notification: { update: async () => undefined, updateMany: async () => ({ count: 1 }) }
       } as never,
       { addObjectMessage: async () => ({ messageId: "should-not-run" }) } as never,
       { canMarketingPush: async () => true, recordPush: async () => undefined } as never,

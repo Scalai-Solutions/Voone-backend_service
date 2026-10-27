@@ -19,6 +19,13 @@ interface World {
   walletObjects?: Array<{ provider: WalletProviderType; status: WalletSyncStatus }>;
   /** Statuses of the other deliveries of the same notification. */
   otherDeliveries?: Status[];
+  /** The Google class message already went out (a broadcast with a Google class). */
+  googleSent?: boolean;
+  createdAt?: Date;
+  /** What MemberWalletMessage already holds for the member. */
+  stored?: { notificationId: string | null; sentAt: Date };
+  /** Creation time of the notification the stored message came from. */
+  storedNotificationCreatedAt?: Date;
 }
 
 /** An in-memory stand-in for the handful of tables processDelivery touches, with an event log. */
@@ -29,7 +36,8 @@ const buildWorld = (world: World = {}) => {
     errorCode: undefined as string | null | undefined,
     messages: [] as Array<{ memberId: string; header: string; body: string; sentAt: Date }>,
     clinicIncrements: 0,
-    notificationStatus: undefined as NotificationStatus | undefined
+    notificationStatus: (world.notificationStatus ??
+      NotificationStatus.QUEUED) as NotificationStatus
   };
   const delivery = {
     id: "delivery-apple",
@@ -45,6 +53,9 @@ const buildWorld = (world: World = {}) => {
       body: "cuerpo",
       actionUrl: null,
       notify: true,
+      createdAt: world.createdAt ?? new Date("2026-10-27T09:00:00Z"),
+      providerMessageId: world.googleSent ? "google-msg" : null,
+      // A snapshot, as processDelivery reads it: it never follows later status writes.
       status: world.notificationStatus ?? NotificationStatus.QUEUED
     },
     member: {
@@ -69,6 +80,7 @@ const buildWorld = (world: World = {}) => {
       ]
     },
     memberWalletMessage: {
+      findUnique: async () => world.stored ?? null,
       upsert: async ({
         create
       }: {
@@ -79,8 +91,23 @@ const buildWorld = (world: World = {}) => {
       }
     },
     notification: {
+      findUnique: async () => ({
+        createdAt: world.storedNotificationCreatedAt ?? new Date("2026-10-01T00:00:00Z")
+      }),
       update: async ({ data }: { data: { status?: NotificationStatus } }) => {
         if (data.status) state.notificationStatus = data.status;
+      },
+      // Models the conditional write atomically: check and set in one synchronous step.
+      updateMany: async ({
+        where,
+        data
+      }: {
+        where: { status?: { notIn: NotificationStatus[] } };
+        data: { status?: NotificationStatus };
+      }) => {
+        if (where.status?.notIn.includes(state.notificationStatus)) return { count: 0 };
+        if (data.status) state.notificationStatus = data.status;
+        return { count: 1 };
       }
     },
     clinic: {
@@ -217,20 +244,34 @@ describe("processDelivery for an Apple card", () => {
     expect(calls).toEqual([]);
   });
 
-  it("does not count a send whose only delivery was skipped, but counts an Apple SENT one", async () => {
-    const skipped = buildWorld({ walletObjects: [] });
-
-    await serviceFor(skipped.prisma, async () => undefined).processDelivery("delivery-apple");
-
-    expect(skipped.state.notificationStatus).toBe(NotificationStatus.SENT);
-    expect(skipped.state.clinicIncrements).toBe(0);
-
+  it("counts a notification once, when it first reaches SENT, as before", async () => {
     const sent = buildWorld();
 
     await serviceFor(sent.prisma, async () => undefined).processDelivery("delivery-apple");
 
     expect(sent.state.notificationStatus).toBe(NotificationStatus.SENT);
     expect(sent.state.clinicIncrements).toBe(1);
+
+    // Unchanged Google-era rule: an all-skipped notification still ends SENT and is counted.
+    const skipped = buildWorld({ walletObjects: [] });
+
+    await serviceFor(skipped.prisma, async () => undefined).processDelivery("delivery-apple");
+
+    expect(skipped.state.notificationStatus).toBe(NotificationStatus.SENT);
+    expect(skipped.state.clinicIncrements).toBe(1);
+  });
+
+  it("marks an Apple-only broadcast whose deliveries all failed FAILED, not partial", async () => {
+    const world = buildWorld({
+      type: NotificationType.BROADCAST,
+      notificationStatus: NotificationStatus.PROCESSING
+    });
+
+    await serviceFor(world.prisma, async () => {
+      throw new Error("x");
+    }).processDelivery("delivery-apple");
+
+    expect(world.state.notificationStatus).toBe(NotificationStatus.FAILED);
   });
 
   it("counts a notification once when Google already sent and Apple skipped", async () => {
@@ -259,7 +300,8 @@ describe("processDelivery for an Apple card", () => {
     // The Google class message already went out before any Apple delivery exists.
     const world = buildWorld({
       type: NotificationType.BROADCAST,
-      notificationStatus: NotificationStatus.SENT
+      notificationStatus: NotificationStatus.SENT,
+      googleSent: true
     });
 
     await serviceFor(world.prisma, async () => {
@@ -478,7 +520,8 @@ describe("counts for a broadcast", () => {
             id: "n-1",
             clinicId: "clinic-1",
             type: NotificationType.BROADCAST,
-            status
+            status,
+            providerMessageId: "google-msg"
           })
         },
         member: { count: async () => 10 },
@@ -511,6 +554,318 @@ describe("counts for a broadcast", () => {
       downgraded: 0,
       failed: 0,
       skipped: 0
+    });
+  });
+});
+
+describe("guards on the stored Apple message", () => {
+  const stamp = new Date("2026-10-20T08:00:00Z");
+
+  it("keeps the original message and date when the same notification is reprocessed, but still refreshes and marks SENT", async () => {
+    const { prisma, log, state } = buildWorld({
+      stored: { notificationId: "notification-1", sentAt: stamp }
+    });
+    let refreshes = 0;
+
+    await serviceFor(prisma, async () => {
+      refreshes += 1;
+    }).processDelivery("delivery-apple");
+
+    expect(log).toEqual(["mark:SENT"]);
+    expect(refreshes).toBe(1);
+    expect(state.messages).toHaveLength(0);
+  });
+
+  it("does not let an older notification overwrite a newer message: SKIPPED SUPERSEDED_BY_NEWER_MESSAGE", async () => {
+    const { prisma, log, state } = buildWorld({
+      createdAt: new Date("2026-10-27T09:00:00Z"),
+      stored: { notificationId: "notification-newer", sentAt: stamp },
+      storedNotificationCreatedAt: new Date("2026-10-27T10:00:00Z")
+    });
+    let refreshes = 0;
+
+    await serviceFor(prisma, async () => {
+      refreshes += 1;
+    }).processDelivery("delivery-apple");
+
+    expect(log).toEqual(["mark:SKIPPED"]);
+    expect(state.errorCode).toBe("SUPERSEDED_BY_NEWER_MESSAGE");
+    expect(state.messages).toHaveLength(0);
+    expect(refreshes).toBe(0);
+  });
+
+  it("overwrites a message that came from an older notification", async () => {
+    const { prisma, log, state } = buildWorld({
+      createdAt: new Date("2026-10-27T09:00:00Z"),
+      stored: { notificationId: "notification-older", sentAt: stamp },
+      storedNotificationCreatedAt: new Date("2026-10-26T10:00:00Z")
+    });
+
+    await serviceFor(prisma, async () => undefined).processDelivery("delivery-apple");
+
+    expect(log).toEqual(["upsert", "mark:SENT"]);
+    expect(state.messages).toHaveLength(1);
+  });
+
+  it("overwrites a message whose notification no longer exists", async () => {
+    const { prisma, log } = buildWorld({
+      stored: { notificationId: "notification-gone", sentAt: stamp }
+    });
+
+    (prisma.notification as { findUnique: () => Promise<unknown> }).findUnique = async () => null;
+    await serviceFor(prisma, async () => undefined).processDelivery("delivery-apple");
+
+    expect(log).toEqual(["upsert", "mark:SENT"]);
+  });
+});
+
+describe("two deliveries of one notification finishing together", () => {
+  it("increments the monthly figure exactly once", async () => {
+    const statuses: Record<string, NotificationDeliveryStatus> = {
+      "d-google": NotificationDeliveryStatus.QUEUED,
+      "d-apple": NotificationDeliveryStatus.QUEUED
+    };
+    let notificationStatus: NotificationStatus = NotificationStatus.QUEUED;
+    let increments = 0;
+    const snapshot = {
+      id: "n-1",
+      clinicId: "clinic-1",
+      type: NotificationType.SINGLE,
+      header: "H",
+      body: "B",
+      actionUrl: null,
+      notify: false,
+      createdAt: new Date("2026-10-27T09:00:00Z"),
+      providerMessageId: null,
+      // Both jobs read the notification while it is still QUEUED.
+      status: NotificationStatus.QUEUED
+    };
+    const deliveryFor = (id: string, provider: WalletProviderType) => ({
+      id,
+      notificationId: "n-1",
+      memberId: "m-1",
+      provider,
+      status: NotificationDeliveryStatus.QUEUED,
+      notification: snapshot,
+      member: {
+        walletObjects: [
+          { provider, status: WalletSyncStatus.SYNCED, externalObjectId: `obj-${provider}` }
+        ]
+      }
+    });
+    const deliveries: Record<string, ReturnType<typeof deliveryFor>> = {
+      "d-google": deliveryFor("d-google", WalletProviderType.GOOGLE),
+      "d-apple": deliveryFor("d-apple", WalletProviderType.APPLE)
+    };
+    const tick = () => new Promise((resolve) => setImmediate(resolve));
+    const prisma = {
+      notificationDelivery: {
+        findUnique: async ({ where }: { where: { id: string } }) => deliveries[where.id],
+        update: async ({
+          where,
+          data
+        }: {
+          where: { id: string };
+          data: { status: NotificationDeliveryStatus };
+        }) => {
+          await tick();
+          statuses[where.id] = data.status;
+        },
+        findMany: async () => {
+          // Hold every reader until both deliveries are written, so both see zero QUEUED:
+          // the interleaving that double-counted.
+          for (let i = 0; i < 50 && Object.values(statuses).includes("QUEUED"); i += 1) {
+            await tick();
+          }
+          return Object.values(statuses).map((status) => ({ status }));
+        }
+      },
+      memberWalletMessage: { findUnique: async () => null, upsert: async () => undefined },
+      notification: {
+        update: async ({ data }: { data: { status: NotificationStatus } }) => {
+          notificationStatus = data.status;
+        },
+        updateMany: async ({
+          where,
+          data
+        }: {
+          where: { status: { notIn: NotificationStatus[] } };
+          data: { status: NotificationStatus };
+        }) => {
+          await tick();
+          if (where.status.notIn.includes(notificationStatus)) return { count: 0 };
+          notificationStatus = data.status;
+          return { count: 1 };
+        }
+      },
+      clinic: {
+        update: async () => {
+          increments += 1;
+        }
+      }
+    };
+    const service = serviceFor(
+      prisma,
+      async () => {
+        await tick();
+      },
+      quotaSpy().quota,
+      { addObjectMessage: async () => ({ messageId: "g-1" }) }
+    );
+
+    await Promise.all([service.processDelivery("d-google"), service.processDelivery("d-apple")]);
+
+    expect(notificationStatus).toBe(NotificationStatus.SENT);
+    expect(increments).toBe(1);
+  });
+});
+
+describe("a broadcast from a clinic with no Google class", () => {
+  const baseNotification = {
+    id: "n-1",
+    clinicId: "clinic-1",
+    type: NotificationType.BROADCAST,
+    status: NotificationStatus.QUEUED,
+    header: "H",
+    body: "B",
+    actionUrl: null,
+    notify: true,
+    providerMessageId: null
+  };
+
+  it.each([
+    ["has no Google class", null],
+    ["has a Google class", { externalClassId: "class-1" }]
+  ])("creates the notification and queues it when the clinic %s", async (_label, googleClass) => {
+    const enqueued: string[] = [];
+    const service = new NotificationService(
+      {
+        clinicNotificationSettings: { upsert: async () => ({ marketingEnabled: true }) },
+        notification: {
+          count: async () => 0,
+          findFirst: async () => null,
+          create: async () => ({ id: "n-1" })
+        },
+        walletClass: { findFirst: async () => googleClass },
+        member: { count: async () => 4 },
+        notificationAuditLog: { create: async () => undefined }
+      } as never,
+      {} as never,
+      {} as never,
+      { enqueueNotification: async (id: string) => enqueued.push(id) } as never
+    );
+
+    await service.broadcast("clinic-1", { header: "H", body: "B", notify: true }, actor);
+
+    expect(enqueued).toEqual(["n-1"]);
+  });
+
+  const apple = (members: string[]) => {
+    const updates: Array<{ status?: NotificationStatus }> = [];
+    const created: string[] = [];
+    const enqueuedDeliveries: string[] = [];
+    let googleSends = 0;
+    let notificationStatus: NotificationStatus = NotificationStatus.QUEUED;
+    const service = new NotificationService(
+      {
+        notification: {
+          findUnique: async () => ({ ...baseNotification, status: notificationStatus }),
+          update: async ({ data }: { data: { status?: NotificationStatus } }) => {
+            updates.push(data);
+            if (data.status) notificationStatus = data.status;
+          },
+          updateMany: async ({ data }: { data: { status?: NotificationStatus } }) => {
+            updates.push(data);
+            if (data.status) notificationStatus = data.status;
+            return { count: 1 };
+          }
+        },
+        walletClass: { findFirst: async () => null },
+        clinic: {
+          update: async () => {
+            throw new Error("nothing was sent, nothing to count here");
+          }
+        },
+        walletObject: { findMany: async () => members.map((memberId) => ({ memberId })) },
+        notificationDelivery: {
+          findMany: async (args: { where: { status?: NotificationDeliveryStatus } }) =>
+            args.where.status === NotificationDeliveryStatus.QUEUED
+              ? created.map((memberId) => ({ id: `d-${memberId}` }))
+              : args.where.status === undefined && "provider" in args.where
+                ? []
+                : [],
+          createMany: async ({ data }: { data: Array<{ memberId: string }> }) => {
+            created.push(...data.map((row) => row.memberId));
+          }
+        }
+      } as never,
+      {
+        addClassMessage: async () => {
+          googleSends += 1;
+          return { messageId: "x" };
+        }
+      } as never,
+      {} as never,
+      { enqueueDelivery: async (id: string) => enqueuedDeliveries.push(id) } as never
+    );
+
+    return { service, updates, created, enqueuedDeliveries, googleSends: () => googleSends };
+  };
+
+  it("skips the Google class message and still fans out the Apple deliveries", async () => {
+    const run = apple(["m-1", "m-2"]);
+
+    await run.service.processNotification("n-1");
+
+    expect(run.googleSends()).toBe(0);
+    expect(run.created).toEqual(["m-1", "m-2"]);
+    expect(run.enqueuedDeliveries).toEqual(["d-m-1", "d-m-2"]);
+    // Left PROCESSING: the deliveries finish it, and count it, as they complete.
+    expect(run.updates).toEqual([{ status: NotificationStatus.PROCESSING }]);
+  });
+
+  it("finishes straight away, without throwing, when it has no Apple recipients either", async () => {
+    const run = apple([]);
+
+    await expect(run.service.processNotification("n-1")).resolves.toBeUndefined();
+
+    expect(run.googleSends()).toBe(0);
+    expect(run.updates.at(-1)).toEqual({ status: NotificationStatus.SENT });
+  });
+});
+
+describe("counts for an Apple-only broadcast", () => {
+  it("come from its deliveries, not from the clinic's member count", async () => {
+    const service = new NotificationService(
+      {
+        notification: {
+          findUnique: async () => ({
+            id: "n-1",
+            clinicId: "clinic-1",
+            type: NotificationType.BROADCAST,
+            status: NotificationStatus.SENT,
+            providerMessageId: null
+          })
+        },
+        member: { count: async () => 100 },
+        notificationDelivery: {
+          groupBy: async () => [
+            { status: NotificationDeliveryStatus.SENT, _count: { _all: 3 } },
+            { status: NotificationDeliveryStatus.SKIPPED, _count: { _all: 1 } }
+          ]
+        }
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never
+    );
+
+    expect((await service.get("n-1", actor)).counts).toEqual({
+      total: 4,
+      sent: 3,
+      downgraded: 0,
+      failed: 0,
+      skipped: 1
     });
   });
 });
