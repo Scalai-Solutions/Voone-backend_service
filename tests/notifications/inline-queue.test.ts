@@ -112,6 +112,25 @@ describe("InlineNotificationQueue exhausted jobs", () => {
     expect(count(calls, "failExhausted")).toBe(0);
   });
 
+  it("stops retrying on an UnrecoverableError and closes the job at once", async () => {
+    const { queue, calls } = spyService({
+      delivery: async () => {
+        const error = new Error("stalled more than allowable limit");
+
+        error.name = "UnrecoverableError";
+        throw error;
+      }
+    });
+
+    await queue.enqueueDelivery("delivery-1");
+    await vi.advanceTimersByTimeAsync(WHOLE_BACKOFF_MS);
+
+    expect(count(calls, "processDelivery")).toBe(1);
+    expect(calls.filter((call) => call.startsWith("failExhausted"))).toEqual([
+      "failExhaustedDelivery:delivery-1"
+    ]);
+  });
+
   it("does not close a job on a non-final failure", async () => {
     const { queue, calls } = spyService({
       delivery: async () => {

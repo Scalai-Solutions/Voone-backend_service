@@ -856,10 +856,9 @@ export class NotificationService {
         actionUrl: delivery.notification.actionUrl ?? undefined
       });
 
-      if (notify) await this.quota.recordPush(object.externalObjectId);
-
-      await this.markDelivery(delivery.id, status, null, message.messageId);
-      await this.refreshNotificationStatus(delivery.notificationId, delivery.notification);
+      await this.finishSentDelivery(delivery, status, null, message.messageId, {
+        recordPushFor: notify ? object.externalObjectId : null
+      });
     } catch (error) {
       if (error instanceof WalletNotificationQuotaExceededError && wantsPush) {
         const message = await this.wallet.addObjectMessage(object.externalObjectId, {
@@ -869,13 +868,13 @@ export class NotificationService {
           actionUrl: delivery.notification.actionUrl ?? undefined
         });
 
-        await this.markDelivery(
-          delivery.id,
+        await this.finishSentDelivery(
+          delivery,
           NotificationDeliveryStatus.DOWNGRADED,
           "QUOTA_EXCEEDED",
-          message.messageId
+          message.messageId,
+          { recordPushFor: null }
         );
-        await this.refreshNotificationStatus(delivery.notificationId, delivery.notification);
         return;
       }
 
@@ -890,6 +889,48 @@ export class NotificationService {
       );
       await this.refreshNotificationStatus(delivery.notificationId, delivery.notification);
     }
+  }
+
+  /**
+   * Bookkeeping after a Google object message went out. Nothing here may throw to the job:
+   * a retry would post the same message to the member again. A failed push-quota record or
+   * delivery write is logged (the error name only) and the job still succeeds; a delivery
+   * that could not be marked stays QUEUED, which is the lesser harm.
+   */
+  private async finishSentDelivery(
+    delivery: { id: string; notificationId: string; notification: NonNullable<NotificationRecord> },
+    status: NotificationDeliveryStatus,
+    errorCode: string | null,
+    messageId: string,
+    push: { recordPushFor: string | null }
+  ): Promise<void> {
+    if (push.recordPushFor) {
+      try {
+        await this.quota.recordPush(push.recordPushFor);
+      } catch (error) {
+        this.logPostSendFailure("quota record failed", delivery.id, error);
+      }
+    }
+
+    try {
+      await this.markDelivery(delivery.id, status, errorCode, messageId);
+    } catch (error) {
+      this.logPostSendFailure("delivery write failed", delivery.id, error);
+      return;
+    }
+
+    try {
+      await this.refreshNotificationStatus(delivery.notificationId, delivery.notification);
+    } catch (error) {
+      this.logPostSendFailure("notification refresh failed", delivery.id, error);
+    }
+  }
+
+  private logPostSendFailure(what: string, deliveryId: string, error: unknown): void {
+    console.error(`[notifications] ${what} after the message was sent`, {
+      deliveryId,
+      error: error instanceof Error ? error.name : "UNKNOWN"
+    });
   }
 
   /**
@@ -1110,14 +1151,15 @@ export class NotificationService {
       // The Google patch comes first and its failure leaves no row behind: a transient error
       // is rethrown for a retry, and a job that exhausts its attempts must not strand a QUEUED
       // notification and delivery per attempt.
+      let pushed = false;
+
       try {
         await this.wallet.patchPoints(object.externalObjectId, {
           points: shownBalance,
           tier: member.tier ?? undefined,
           notify
         });
-
-        if (notify) await this.quota.recordPush(object.externalObjectId);
+        pushed = notify;
 
         outcome =
           shouldNotify && !notify
@@ -1138,6 +1180,19 @@ export class NotificationService {
           outcome = { status: NotificationDeliveryStatus.SKIPPED, errorCode: "NOT_FOUND" };
         } else {
           throw error;
+        }
+      }
+
+      // Its own try: the patch (and the push) already happened, so a failure recording it
+      // must not fail the job, and a retry would push the member a second time.
+      if (pushed) {
+        try {
+          await this.quota.recordPush(object.externalObjectId);
+        } catch (error) {
+          console.error("[notifications] quota record failed after the points patch", {
+            memberId: member.id,
+            error: error instanceof Error ? error.name : "UNKNOWN"
+          });
         }
       }
     }

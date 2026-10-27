@@ -25,11 +25,14 @@ interface Setup {
   patch?: (call: number) => void;
   createFails?: boolean;
   notifyOnCredit?: "NEVER" | "ALWAYS";
+  canPush?: boolean;
+  recordPushFails?: boolean;
 }
 
 const build = (setup: Setup = {}) => {
   const rows: Created[] = [];
   const patches: Array<{ notify: boolean }> = [];
+  let recordPushCalls = 0;
   const notificationWrites: unknown[] = [];
   const prisma = {
     member: {
@@ -100,7 +103,13 @@ const build = (setup: Setup = {}) => {
       setup.patch?.(patches.length);
     }
   };
-  const quota = { canPush: async () => true, recordPush: async () => undefined };
+  const quota = {
+    canPush: async () => setup.canPush ?? true,
+    recordPush: async () => {
+      recordPushCalls += 1;
+      if (setup.recordPushFails) throw new Error("redis://:secret@host:6379 down");
+    }
+  };
   const service = new NotificationService(
     prisma as never,
     wallet as never,
@@ -108,7 +117,7 @@ const build = (setup: Setup = {}) => {
     {} as never
   );
 
-  return { service, rows, patches };
+  return { service, rows, patches, recordPushCalls: () => recordPushCalls };
 };
 
 const job = { memberId: "member-1", newBalance: 120, milestoneReached: false, tierChanged: false };
@@ -239,5 +248,69 @@ describe("processPointsCredit rows", () => {
     expect(logged).toContain("member-1");
     expect(logged).not.toContain("secret");
     expect(logged).not.toContain("5432");
+  });
+
+  it("records the push once after a notify patch", async () => {
+    const { service, rows, patches, recordPushCalls } = build({ notifyOnCredit: "ALWAYS" });
+
+    await service.processPointsCredit(job);
+
+    expect(patches.map((patch) => patch.notify)).toEqual([true]);
+    expect(recordPushCalls()).toBe(1);
+    expect(rows[0].deliveries).toEqual([
+      expect.objectContaining({ status: NotificationDeliveryStatus.SENT, errorCode: null })
+    ]);
+  });
+
+  it("does not record a push on the quota-exceeded fallback", async () => {
+    const { service, patches, recordPushCalls } = build({
+      notifyOnCredit: "ALWAYS",
+      patch: (call) => {
+        if (call === 1) throw new WalletNotificationQuotaExceededError("quota");
+      }
+    });
+
+    await service.processPointsCredit(job);
+
+    expect(patches.map((patch) => patch.notify)).toEqual([true, false]);
+    expect(recordPushCalls()).toBe(0);
+  });
+
+  it("records a DOWNGRADED QUOTA_RESERVED row, with a silent patch, when reserved quota blocks the push", async () => {
+    const { service, rows, patches, recordPushCalls } = build({
+      notifyOnCredit: "ALWAYS",
+      canPush: false
+    });
+
+    await service.processPointsCredit(job);
+
+    expect(patches.map((patch) => patch.notify)).toEqual([false]);
+    expect(recordPushCalls()).toBe(0);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].deliveries).toEqual([
+      expect.objectContaining({
+        status: NotificationDeliveryStatus.DOWNGRADED,
+        errorCode: "QUOTA_RESERVED"
+      })
+    ]);
+  });
+
+  it("does not rethrow, and keeps one SENT row, when recordPush fails after a successful patch", async () => {
+    const { service, rows, patches } = build({ notifyOnCredit: "ALWAYS", recordPushFails: true });
+
+    await expect(service.processPointsCredit(job)).resolves.toBeUndefined();
+
+    // A retry would patch, and push the member, a second time.
+    expect(patches).toHaveLength(1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].deliveries).toEqual([
+      expect.objectContaining({ status: NotificationDeliveryStatus.SENT })
+    ]);
+
+    const logged = JSON.stringify(vi.mocked(console.error).mock.calls);
+
+    expect(console.error).toHaveBeenCalledTimes(1);
+    expect(logged).not.toContain("secret");
+    expect(logged).not.toContain("6379");
   });
 });
