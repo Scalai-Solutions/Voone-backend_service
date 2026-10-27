@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { CARD_TEXT_MAX_LENGTH } from "./card-text";
+
 /**
  * The loyalty card as the domain understands it, with nothing provider-specific in it.
  *
@@ -36,8 +38,8 @@ export const cardTemplateSchema = z.object({
   appLinkDescription: z.string().min(1).max(120).optional(),
   pointsLabel: z.string().min(1).max(32),
   tierLabel: z.string().min(1).max(32),
-  benefitsText: z.string().min(1).max(500).optional(),
-  infoText: z.string().min(1).max(500).optional()
+  benefitsText: z.string().min(1).max(CARD_TEXT_MAX_LENGTH).optional(),
+  infoText: z.string().min(1).max(CARD_TEXT_MAX_LENGTH).optional()
 });
 
 /**

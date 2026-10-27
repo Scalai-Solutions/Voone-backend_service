@@ -6,6 +6,7 @@ import {
   DEFAULT_WALLET_POINTS_LABEL,
   DEFAULT_WALLET_TIER_LABEL
 } from "./default-voone-template";
+import { CARD_TEXT_MAX_LENGTH, CARD_TEXT_TOO_LONG_MESSAGE } from "../../wallet/engine/card-text";
 
 const hexColorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Expected a 6-digit hex color");
 // One URL and nothing else. A pasted "image.jpg  logo  https://..." parses as a URL, reaches
@@ -22,6 +23,22 @@ const defaultedString = (defaultValue: string, min: number, max: number) =>
   z.preprocess(
     (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
     z.string().trim().min(min).max(max).default(defaultValue)
+  );
+
+/**
+ * benefitsText / infoText end up on the card, whose schema caps them at CARD_TEXT_MAX_LENGTH in
+ * the same unit zod counts here. A looser cap lets a text be saved that then makes every card of
+ * the clinic fail to assemble.
+ */
+const walletTextSchema = (defaultValue: string, min: number) =>
+  z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    z
+      .string()
+      .trim()
+      .min(min)
+      .max(CARD_TEXT_MAX_LENGTH, CARD_TEXT_TOO_LONG_MESSAGE)
+      .default(defaultValue)
   );
 
 export const clinicContextSchema = z.object({
@@ -143,8 +160,8 @@ export const createTemplateSchema = z.object({
   appLinkDescription: z.string().trim().min(1).max(120).optional().or(z.literal("")),
   pointsLabel: defaultedString(DEFAULT_WALLET_POINTS_LABEL, 2, 80),
   tierLabel: defaultedString(DEFAULT_WALLET_TIER_LABEL, 2, 80),
-  benefitsText: defaultedString(DEFAULT_WALLET_BENEFITS_TEXT, 8, 1200),
-  infoText: defaultedString(DEFAULT_WALLET_INFO_TEXT, 8, 1200),
+  benefitsText: walletTextSchema(DEFAULT_WALLET_BENEFITS_TEXT, 8),
+  infoText: walletTextSchema(DEFAULT_WALLET_INFO_TEXT, 8),
   tierRewards: tierRewardsSchema.default(defaultTierRewards),
   milestoneRewards: milestoneRewardsSchema.default({
     milestoneCount: 10,
@@ -189,8 +206,8 @@ export const createVooneTemplateSchema = z.object({
   heroImageUrl: optionalUrlSchema,
   pointsLabel: defaultedString(DEFAULT_WALLET_POINTS_LABEL, 2, 80),
   tierLabel: defaultedString(DEFAULT_WALLET_TIER_LABEL, 2, 80),
-  benefitsText: defaultedString(DEFAULT_WALLET_BENEFITS_TEXT, 0, 1200),
-  infoText: defaultedString(DEFAULT_WALLET_INFO_TEXT, 0, 1200),
+  benefitsText: walletTextSchema(DEFAULT_WALLET_BENEFITS_TEXT, 0),
+  infoText: walletTextSchema(DEFAULT_WALLET_INFO_TEXT, 0),
   buttons: z.array(vooneTemplateButtonSchema).max(10),
   textModules: z.array(vooneTemplateTextModuleSchema).max(20)
 });
