@@ -5,6 +5,7 @@ import { WalletConfigurationError } from "../common/errors/wallet.errors";
 import { LoyaltyCardAssembler } from "./engine/loyalty-card-assembler";
 import { LoyaltyCard, loyaltyCardSchema } from "./engine/loyalty-card";
 import { formatCardMessage } from "./engine/card-message";
+import { clipCardText } from "./engine/card-text";
 import { deriveRedemptionCode } from "./engine/redemption-code";
 import { milestoneProgress } from "../modules/points/milestone-engine";
 import type { Program } from "../modules/onboarding/engine.types";
@@ -183,8 +184,10 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
         appLinkDescription: template.appLinkDescription ?? undefined,
         pointsLabel: template.pointsLabel,
         tierLabel: template.tierLabel,
-        benefitsText: template.benefitsText || undefined,
-        infoText: template.infoText || undefined
+        // Clipped, not rejected: texts saved while the template schema still allowed 1200
+        // characters must not stop every card of the clinic from syncing.
+        benefitsText: template.benefitsText ? clipCardText(template.benefitsText) : undefined,
+        infoText: template.infoText ? clipCardText(template.infoText) : undefined
       }
     };
 

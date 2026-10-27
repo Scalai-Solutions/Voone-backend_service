@@ -7,6 +7,7 @@ import { run } from "../../src/modules/onboarding/engine";
 import type { CatalogItem } from "../../src/modules/onboarding/engine.types";
 import { isEngineError } from "../../src/modules/onboarding/engine.types";
 import catalogFixture from "../onboarding/reference/sapphira.catalogo.json";
+import { loyaltyCardSchema } from "../../src/wallet/engine/loyalty-card";
 import { PrismaLoyaltyCardAssembler } from "../../src/wallet/prisma-loyalty-card.assembler";
 
 const SECRET = "a-server-secret-not-a-member-attribute";
@@ -335,5 +336,51 @@ describe("PrismaLoyaltyCardAssembler for a clinic on an onboarding programme", (
     // Identical to the card built before programmes existed, whether the relation is empty
     // or absent altogether.
     expect(withEmpty).toEqual(original);
+  });
+});
+
+describe("PrismaLoyaltyCardAssembler: overlong clinic texts", () => {
+  const withTexts = (benefitsText: string, infoText: string) => ({
+    ...member,
+    clinic: { ...member.clinic, template: { ...template, benefitsText, infoText } }
+  });
+
+  it("clips a 900-character text instead of failing every card of the clinic", async () => {
+    const value = withTexts("b".repeat(900), "i".repeat(900));
+
+    const card = await assemblerFor(value).assemble(member.id);
+
+    expect(card.template.benefitsText).toBe(`${"b".repeat(499)}…`);
+    expect(card.template.infoText).toBe(`${"i".repeat(499)}…`);
+    expect(loyaltyCardSchema.safeParse(card).success).toBe(true);
+  });
+
+  it("leaves a text of exactly 500 characters unchanged", async () => {
+    const exact = "x".repeat(500);
+
+    const card = await assemblerFor(withTexts(exact, exact)).assemble(member.id);
+
+    expect(card.template.benefitsText).toBe(exact);
+    expect(card.template.infoText).toBe(exact);
+  });
+
+  it("never splits an emoji surrogate pair and still passes the card schema", async () => {
+    // The 499-unit budget would end between the two halves of an emoji.
+    const text = `${"a".repeat(498)}${"😀".repeat(200)}`;
+
+    const card = await assemblerFor(withTexts(text, text)).assemble(member.id);
+
+    expect(card.template.benefitsText).toBe(`${"a".repeat(498)}…`);
+    expect(card.template.benefitsText).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
+    expect(loyaltyCardSchema.safeParse(card).success).toBe(true);
+  });
+
+  it("clips an emoji-heavy text inside the card's own unit", async () => {
+    const text = "😀".repeat(400);
+
+    const card = await assemblerFor(withTexts(text, text)).assemble(member.id);
+
+    expect(card.template.benefitsText).toBe(`${"😀".repeat(249)}…`);
+    expect(loyaltyCardSchema.safeParse(card).success).toBe(true);
   });
 });
