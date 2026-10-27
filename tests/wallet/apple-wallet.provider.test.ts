@@ -66,6 +66,14 @@ class InMemoryDeviceRepository implements PassDeviceRepository {
     return `${passType}:${serial}`;
   }
 
+  async registeredSerials(passType: string, serials: string[]) {
+    const held = [...this.registrations.values()]
+      .filter((r) => r.passTypeIdentifier === passType)
+      .map((r) => r.serialNumber);
+
+    return new Set(serials.filter((serial) => held.includes(serial)));
+  }
+
   async saveRegistration(registration: Required<DeviceRegistration>) {
     const key = this.key(
       registration.deviceLibraryIdentifier,

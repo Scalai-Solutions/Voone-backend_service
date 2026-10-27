@@ -40,6 +40,15 @@ export interface PassDeviceRepository {
   pushTokensFor(passTypeIdentifier: string, serialNumber: string): Promise<string[]>;
 
   /**
+   * Which of these serials have at least one registered device, in a single query.
+   *
+   * For the dashboard, which must tell staff whether a card can be updated at all without
+   * a lookup per member. An Apple card changes on the phone only when a device registered
+   * for it, so a serial missing from the result is a card nobody will ever push to.
+   */
+  registeredSerials(passTypeIdentifier: string, serials: string[]): Promise<Set<string>>;
+
+  /**
    * Forget every registration holding this push token. Returns how many were removed.
    *
    * APNs answers 410 Unregistered when a device token is dead — the pass was deleted, the

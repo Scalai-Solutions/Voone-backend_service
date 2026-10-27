@@ -62,6 +62,11 @@ import {
 } from "../../wallet/engine/wallet-pass-provider.interface";
 import { deriveRedemptionCode } from "../../wallet/engine/redemption-code";
 import { PrismaLoyaltyCardAssembler } from "../../wallet/prisma-loyalty-card.assembler";
+import {
+  applePassTypeIdentifier,
+  appleUpdatesRegisteredFor
+} from "../../wallet/apple-updates-registered";
+import { PrismaPassDeviceRepository } from "../../wallet/prisma-pass-device.repository";
 
 export const membersRouter = Router();
 
@@ -124,6 +129,21 @@ const toMemberSummary = (member: Awaited<ReturnType<typeof findMemberForSummary>
   ),
   history: []
 });
+
+/**
+ * The summary staff see, with whether a phone is registered to receive this member's Apple
+ * card updates. Only the staff endpoints use it: the public pass-claim page has no use for
+ * it and has no business telling a card holder how our push channel is doing.
+ */
+const toStaffMemberSummary = async (member: Awaited<ReturnType<typeof findMemberForSummary>>) => {
+  const registered = await appleUpdatesRegisteredFor(
+    new PrismaPassDeviceRepository(prisma),
+    applePassTypeIdentifier(),
+    [member]
+  );
+
+  return { ...toMemberSummary(member), appleUpdatesRegistered: registered.get(member.id) ?? null };
+};
 
 const staffMemberSchema = z
   .object({
@@ -480,7 +500,7 @@ membersRouter.post(
     const summary = await findMemberForSummary(member.id);
 
     res.status(existing ? 200 : 201).json({
-      member: toMemberSummary(summary),
+      member: await toStaffMemberSummary(summary),
       wallet
     });
   })
@@ -560,7 +580,7 @@ membersRouter.get(
       return;
     }
 
-    res.json(toMemberSummary(member));
+    res.json(await toStaffMemberSummary(member));
   })
 );
 
@@ -616,7 +636,7 @@ membersRouter.post(
       idempotencyKey: parsed.data.idempotencyKey
     });
 
-    res.json(toMemberSummary(await findMemberForSummary(member.id)));
+    res.json(await toStaffMemberSummary(await findMemberForSummary(member.id)));
   })
 );
 

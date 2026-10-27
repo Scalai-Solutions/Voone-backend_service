@@ -26,6 +26,11 @@ import {
 } from "../../modules/clinics/clinic-provisioning.service";
 import { programmeCentreIds, toPoints } from "../../modules/onboarding/runtime/points-unit";
 import { hasOwnLogo, usesBorrowedImages } from "../../modules/templates/own-logo";
+import {
+  applePassTypeIdentifier,
+  appleUpdatesRegisteredFor
+} from "../../wallet/apple-updates-registered";
+import { PrismaPassDeviceRepository } from "../../wallet/prisma-pass-device.repository";
 
 export const adminClinicsRouter = Router();
 
@@ -229,7 +234,8 @@ const toAdminClinicSummary = (clinic: AdminClinicSummaryInput) => ({
 
 const toAdminMemberSummary = (
   member: Awaited<ReturnType<typeof listAdminMembers>>[number],
-  programmeCentres: ReadonlySet<string>
+  programmeCentres: ReadonlySet<string>,
+  appleUpdatesRegistered: boolean | null
 ) => ({
   id: member.id,
   name: member.name,
@@ -251,6 +257,9 @@ const toAdminMemberSummary = (
     }),
     emptyWalletStatus
   ),
+  // Whether a phone is registered to receive this member's Apple card updates; null when
+  // there is no SYNCED Apple card or Apple is unavailable. Additive to walletStatus.
+  appleUpdatesRegistered,
   history: []
 });
 
@@ -839,7 +848,17 @@ adminClinicsRouter.get(
       members.map((member) => member.clinicId)
     );
 
-    res.json(members.map((member) => toAdminMemberSummary(member, programmeCentres)));
+    const appleUpdates = await appleUpdatesRegisteredFor(
+      new PrismaPassDeviceRepository(prisma),
+      applePassTypeIdentifier(),
+      members
+    );
+
+    res.json(
+      members.map((member) =>
+        toAdminMemberSummary(member, programmeCentres, appleUpdates.get(member.id) ?? null)
+      )
+    );
   })
 );
 

@@ -92,6 +92,18 @@ export class PrismaPassDeviceRepository implements PassDeviceRepository {
     return rows.map((row) => row.pushToken);
   }
 
+  async registeredSerials(passTypeIdentifier: string, serials: string[]): Promise<Set<string>> {
+    if (serials.length === 0) return new Set();
+
+    const rows = await this.prisma.passDeviceRegistration.findMany({
+      where: { passTypeIdentifier, serialNumber: { in: serials } },
+      select: { serialNumber: true },
+      distinct: ["serialNumber"]
+    });
+
+    return new Set(rows.map((row) => row.serialNumber));
+  }
+
   async removeRegistrationsByPushToken(pushToken: string): Promise<number> {
     const { count } = await this.prisma.passDeviceRegistration.deleteMany({
       where: { pushToken }

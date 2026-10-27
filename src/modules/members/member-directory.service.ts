@@ -12,6 +12,11 @@ import { listTreatments } from "../treatments/treatment-catalogue.service";
 import type { CardRef } from "../../wallet/engine/wallet-pass-provider.interface";
 import { tierRewardsSchema } from "../templates/templates.schema";
 import { normaliseScale } from "../points/tier-engine";
+import {
+  appleUpdatesRegisteredFor,
+  applePassTypeIdentifier
+} from "../../wallet/apple-updates-registered";
+import { PrismaPassDeviceRepository } from "../../wallet/prisma-pass-device.repository";
 
 /** Mirrors the dashboard's own union. "unavailable" means the provider is not configured. */
 export type ProviderStatus = "added" | "not_added" | "unavailable" | "failed";
@@ -44,6 +49,14 @@ export interface MemberSummary {
   lastVisitedAt: string | null;
   tier: string;
   walletStatus: Record<"apple" | "google", ProviderStatus>;
+  /**
+   * Whether a phone is registered to be told when this member's Apple card changes.
+   *
+   * null when there is nothing to say (no SYNCED Apple card, or Apple unavailable); false
+   * when the card is synced but no device will ever be pushed to, which is why its points
+   * can lag the member's real balance. Additive: walletStatus.apple is unchanged.
+   */
+  appleUpdatesRegistered: boolean | null;
   history: Array<{ id: string; label: string; points: number; date: string }>;
 }
 
@@ -121,7 +134,9 @@ export class MemberDirectoryService {
   constructor(
     private readonly prisma: PrismaClient,
     /** Which providers the registry actually accepted, so "unavailable" is truthful. */
-    private readonly configured: () => Set<WalletProviderType>
+    private readonly configured: () => Set<WalletProviderType>,
+    /** The certificate's pass type, or null when Apple is unusable. Injectable for tests. */
+    private readonly applePassType: () => string | null = applePassTypeIdentifier
   ) {}
 
   async list(options: ListMembersOptions): Promise<MemberSummary[]> {
@@ -155,8 +170,10 @@ export class MemberDirectoryService {
       select: this.selection(LIST_HISTORY)
     });
 
+    const appleUpdates = await this.appleUpdates(members);
+
     return this.withSpendingStats(
-      members.map((member) => this.toSummary(member)),
+      members.map((member) => this.toSummary(member, appleUpdates.get(member.id) ?? null)),
       options.clinicId
     );
   }
@@ -171,7 +188,11 @@ export class MemberDirectoryService {
       throw new MemberNotFoundError(memberId);
     }
 
-    const [summary] = await this.withSpendingStats([this.toSummary(member)], member.clinicId);
+    const appleUpdates = await this.appleUpdates([member]);
+    const [summary] = await this.withSpendingStats(
+      [this.toSummary(member, appleUpdates.get(member.id) ?? null)],
+      member.clinicId
+    );
 
     return summary;
   }
@@ -329,7 +350,7 @@ export class MemberDirectoryService {
       clinic: {
         select: { template: { select: { id: true, programName: true, tierRewards: true } } }
       },
-      walletObjects: { select: { provider: true, status: true } },
+      walletObjects: { select: { provider: true, status: true, externalObjectId: true } },
       pointsLedger: {
         orderBy: { createdAt: "desc" as const },
         take: historyTake,
@@ -338,28 +359,51 @@ export class MemberDirectoryService {
     };
   }
 
-  private toSummary(member: {
-    id: string;
-    name: string;
-    code: string | null;
-    phone: string | null;
-    email: string | null;
-    birthDate: Date | null;
-    birthYear: number | null;
-    sex: string | null;
-    clinicId: string;
-    pointsBalance: number;
-    tier: string | null;
-    clinic: { template: { id: string; programName: string; tierRewards: unknown } | null };
-    walletObjects: Array<{ provider: WalletProviderType; status: WalletSyncStatus }>;
-    pointsLedger: Array<{
+  /** One registrations query for every member given; null for all when Apple is unavailable. */
+  private appleUpdates(
+    members: Array<{
       id: string;
-      points: number;
-      kind: string;
-      reason: string | null;
-      createdAt: Date;
-    }>;
-  }): MemberSummary {
+      walletObjects: Array<{
+        provider: WalletProviderType;
+        status: WalletSyncStatus;
+        externalObjectId: string;
+      }>;
+    }>
+  ): Promise<Map<string, boolean | null>> {
+    const passType = this.configured().has(WalletProviderType.APPLE) ? this.applePassType() : null;
+
+    return appleUpdatesRegisteredFor(
+      new PrismaPassDeviceRepository(this.prisma),
+      passType,
+      members
+    );
+  }
+
+  private toSummary(
+    member: {
+      id: string;
+      name: string;
+      code: string | null;
+      phone: string | null;
+      email: string | null;
+      birthDate: Date | null;
+      birthYear: number | null;
+      sex: string | null;
+      clinicId: string;
+      pointsBalance: number;
+      tier: string | null;
+      clinic: { template: { id: string; programName: string; tierRewards: unknown } | null };
+      walletObjects: Array<{ provider: WalletProviderType; status: WalletSyncStatus }>;
+      pointsLedger: Array<{
+        id: string;
+        points: number;
+        kind: string;
+        reason: string | null;
+        createdAt: Date;
+      }>;
+    },
+    appleUpdatesRegistered: boolean | null
+  ): MemberSummary {
     const configured = this.configured();
     const apple = member.walletObjects.find((w) => w.provider === WalletProviderType.APPLE);
     const google = member.walletObjects.find((w) => w.provider === WalletProviderType.GOOGLE);
@@ -390,6 +434,7 @@ export class MemberDirectoryService {
         apple: statusFor(apple, configured.has(WalletProviderType.APPLE)),
         google: statusFor(google, configured.has(WalletProviderType.GOOGLE))
       },
+      appleUpdatesRegistered,
       history: member.pointsLedger.map((row) => ({
         id: row.id,
         // reason is staff-authored and optional; the kind is the honest fallback and is
