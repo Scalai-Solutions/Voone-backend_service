@@ -1475,16 +1475,28 @@ export class NotificationService {
     const claimed = await this.prisma.notification.updateMany({
       where: {
         id: notificationId,
-        status: { notIn: [NotificationStatus.SENT, NotificationStatus.PARTIAL_FAILED] }
+        // CANCELLED is excluded too: a notification cancelled after this refresh read its
+        // snapshot must stay cancelled, never be reopened by a late delivery.
+        status: {
+          notIn: [
+            NotificationStatus.SENT,
+            NotificationStatus.PARTIAL_FAILED,
+            NotificationStatus.CANCELLED
+          ]
+        }
       },
       data: { status: nextStatus }
     });
 
     if (claimed.count === 0) {
       // Already SENT or PARTIAL_FAILED (a broadcast whose Apple deliveries later failed):
-      // the status may still move, but it was counted when it first got there.
-      await this.prisma.notification.update({
-        where: { id: notificationId },
+      // the status may still move, but it was counted when it first got there. Conditional
+      // on that, in the same statement, so a CANCELLED row (or one that is gone) is untouched.
+      await this.prisma.notification.updateMany({
+        where: {
+          id: notificationId,
+          status: { in: [NotificationStatus.SENT, NotificationStatus.PARTIAL_FAILED] }
+        },
         data: { status: nextStatus }
       });
 
