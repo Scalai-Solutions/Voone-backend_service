@@ -2,12 +2,14 @@ import { Redis } from "ioredis";
 import { Queue, type Worker } from "bullmq";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { NOTIFICATIONS_QUEUE } from "../../src/infrastructure/queue/bull-notifications.queue";
 import {
   BullWalletSyncQueue,
   WALLET_SYNC_QUEUE,
   createWalletSyncWorker,
   redisConnection
 } from "../../src/infrastructure/queue/bull-wallet-sync.queue";
+import { isSafeTestRedisUrl } from "./redis-test-url";
 import type { WalletSyncService } from "../../src/wallet/engine/wallet-sync.service";
 
 /**
@@ -17,39 +19,23 @@ import type { WalletSyncService } from "../../src/wallet/engine/wallet-sync.serv
  *
  * Opt-in: set TEST_REDIS_URL to a THROWAWAY local Redis, for example
  *   redis-server --port 6390 --save "" --appendonly no
- *   TEST_REDIS_URL=redis://127.0.0.1:6390 npx vitest run tests/queue
+ *   TEST_REDIS_URL=redis://127.0.0.1:6390/1 npx vitest run tests/queue
  *
  * The suite obliterates the wallet-sync queue (the production queue name: the code under
  * test takes no queue-name override), so it refuses to run unless ALL of these hold:
  *  - a loopback host;
  *  - an explicit port that is not Redis's default 6379, so a developer's everyday Redis
  *    is never the target by accident;
- *  - no database index 0 on the URL (index 0 is where everything else lives);
- *  - the instance holds no keys other than BullMQ's wallet-sync ones (checked before
- *    anything is deleted; a dev Redis with other data fails loudly instead of being wiped).
+ *  - an explicit, non-zero database index on the URL (index 0 is where everything else
+ *    lives; a URL without a database path is refused too);
+ *  - the instance holds no keys other than BullMQ's wallet-sync and wallet-notifications
+ *    ones (checked before anything is deleted; a dev Redis with other data fails loudly
+ *    instead of being wiped). Both queue suites may share one throwaway instance: each only
+ *    ever wipes its own queue.
  * A malformed URL skips the suite rather than throwing at import.
  */
-const isSafeTestUrl = (value: string | undefined): value is string => {
-  if (!value) return false;
-
-  try {
-    const parsed = new URL(value);
-    const loopback = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(parsed.hostname);
-    const dbIndex = parsed.pathname.replace(/^\//, "");
-
-    return (
-      ["redis:", "rediss:"].includes(parsed.protocol) &&
-      loopback &&
-      parsed.port !== "" &&
-      parsed.port !== "6379" &&
-      (dbIndex === "" || (/^\d+$/.test(dbIndex) && Number(dbIndex) !== 0))
-    );
-  } catch {
-    return false;
-  }
-};
 const candidate = process.env.TEST_REDIS_URL;
-const enabled = isSafeTestUrl(candidate);
+const enabled = isSafeTestRedisUrl(candidate);
 const url = candidate as string;
 
 const until = async (condition: () => boolean | Promise<boolean>, timeoutMs = 8_000) => {
@@ -81,7 +67,11 @@ describe.skipIf(!enabled)("BullMQ queues against a real Redis", () => {
 
     try {
       const keys = await redis.keys("*");
-      const foreign = keys.filter((key) => !key.startsWith(`bull:${WALLET_SYNC_QUEUE}:`));
+      const foreign = keys.filter(
+        (key) =>
+          !key.startsWith(`bull:${WALLET_SYNC_QUEUE}:`) &&
+          !key.startsWith(`bull:${NOTIFICATIONS_QUEUE}:`)
+      );
 
       if (foreign.length > 0) {
         throw new Error(

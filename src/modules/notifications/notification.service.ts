@@ -864,6 +864,103 @@ export class NotificationService {
   }
 
   /**
+   * Called by the worker once a delivery job has used its last attempt: the delivery is
+   * FAILED for good, never re-run (a Google message may already have been written before the
+   * job failed, and a second run would post it again).
+   *
+   * Only a still-QUEUED delivery is touched (atomically), so a job that ended some other way,
+   * or a repeat call, changes nothing. Never throws: it runs inside a worker event handler.
+   */
+  async failExhaustedDelivery(deliveryId: string): Promise<void> {
+    try {
+      const delivery = await this.prisma.notificationDelivery.findUnique({
+        where: { id: deliveryId },
+        include: { notification: true }
+      });
+
+      if (!delivery || delivery.status !== NotificationDeliveryStatus.QUEUED) return;
+
+      // Conditional on the row still being QUEUED, in the same statement: a stalled job is
+      // failed while its original processor may still be running and may write SENT between
+      // the read above and this write. Only the winner goes on. processDelivery's own writes
+      // stay unconditional: if it writes SENT after this FAILED, the truth wins.
+      const claimed = await this.prisma.notificationDelivery.updateMany({
+        where: { id: delivery.id, status: NotificationDeliveryStatus.QUEUED },
+        data: {
+          status: NotificationDeliveryStatus.FAILED,
+          errorCode: "JOB_RETRIES_EXHAUSTED"
+        }
+      });
+
+      if (claimed.count !== 1) return;
+
+      // A cancelled notification stays cancelled; the refresh would otherwise reopen it.
+      if (delivery.notification.status === NotificationStatus.CANCELLED) return;
+
+      await this.refreshNotificationStatus(delivery.notificationId, delivery.notification);
+    } catch (error) {
+      // The name only: an error message can carry connection strings or provider payloads.
+      console.error("[notifications] could not close an exhausted delivery", {
+        deliveryId,
+        error: error instanceof Error ? error.name : "UNKNOWN"
+      });
+    }
+  }
+
+  /**
+   * Called by the worker once a notification (broadcast) job has used its last attempt.
+   *
+   * A notification still QUEUED or PROCESSING is closed: PARTIAL_FAILED (counted, as
+   * refreshNotificationStatus does) when some delivery already went out, FAILED otherwise.
+   * Deliveries still in flight are not cancelled; when they finish, refreshNotificationStatus
+   * moves the status on from there. Anything else (SENT, PARTIAL_FAILED, FAILED, CANCELLED)
+   * is left alone: a failed Google class message has already marked the notification FAILED.
+   * Never throws.
+   */
+  async failExhaustedNotification(notificationId: string): Promise<void> {
+    try {
+      const notification = await this.findNotification(notificationId);
+
+      if (
+        !notification ||
+        (notification.status !== NotificationStatus.QUEUED &&
+          notification.status !== NotificationStatus.PROCESSING)
+      ) {
+        return;
+      }
+
+      const deliveries = await this.prisma.notificationDelivery.findMany({
+        where: { notificationId },
+        select: { status: true }
+      });
+      const wentOut = deliveries.some(
+        (delivery) =>
+          delivery.status === NotificationDeliveryStatus.SENT ||
+          delivery.status === NotificationDeliveryStatus.DOWNGRADED ||
+          delivery.status === NotificationDeliveryStatus.SKIPPED
+      );
+      const nextStatus = wentOut ? NotificationStatus.PARTIAL_FAILED : NotificationStatus.FAILED;
+      // Conditional, so a delivery that finished the notification in the meantime wins.
+      const claimed = await this.prisma.notification.updateMany({
+        where: {
+          id: notificationId,
+          status: { in: [NotificationStatus.QUEUED, NotificationStatus.PROCESSING] }
+        },
+        data: { status: nextStatus }
+      });
+
+      if (claimed.count > 0 && nextStatus === NotificationStatus.PARTIAL_FAILED) {
+        await this.countManualNotification(notification.clinicId, notification.type);
+      }
+    } catch (error) {
+      console.error("[notifications] could not close an exhausted notification", {
+        notificationId,
+        error: error instanceof Error ? error.name : "UNKNOWN"
+      });
+    }
+  }
+
+  /**
    * An Apple message: store it as the member's latest, refresh the card so the changed
    * field notifies, and call the delivery SENT only once that refresh succeeded.
    *
