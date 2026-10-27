@@ -1,5 +1,6 @@
 import { MIN_TENURE, P, TIERS, TIER_BENEFITS, TIER_NAMES } from "./engine.config";
 import type { Program, TierCode } from "./engine.types";
+import { itemsTitle, rewardTitle } from "./reward-title";
 
 /**
  * A programme as a centre is allowed to see it.
@@ -94,8 +95,6 @@ const COST_NOTE_PREFIX = "Algunos premios usan algo más de su presupuesto indiv
 const itemsOf = (items: Array<{ name: string }>): PresentedItem[] =>
   items.map((i) => ({ name: i.name }));
 
-const nameOf = (items: Array<{ name: string }>): string => items.map((i) => i.name).join(" y ");
-
 const pct = (share: number): string => `${Math.round(share * 100)}%`;
 
 /** Benefits a tier carries permanently, in the order a client would care about them. */
@@ -115,7 +114,7 @@ const benefitsFor = (key: TierCode, program: Program): string[] => {
 
   const gift = program.gifts[key]?.birthday;
 
-  if (gift) out.push(`Regalo de cumpleaños: ${nameOf(gift.items)}`);
+  if (gift) out.push(`Regalo de cumpleaños: ${itemsTitle(gift.items)}`);
 
   if (b.events > 0) {
     out.push(
@@ -173,10 +172,10 @@ export const presentProgram = (program: Program): PresentedProgram => {
 
       if (m.type === "premio" && chosen) {
         base.reward = {
-          name: nameOf(chosen.o.items),
+          name: rewardTitle(chosen),
           items: itemsOf(chosen.o.items),
           alternatives: chosen.alts.map((a) => ({
-            name: nameOf(a.items),
+            name: itemsTitle(a.items),
             items: itemsOf(a.items)
           }))
         };
@@ -193,7 +192,7 @@ export const presentProgram = (program: Program): PresentedProgram => {
       // Progress runs ×1.3 in Diamante, so a reward every `every` of progress is one every
       // `every / 1.3` euros actually paid, and the euros paid are what a centre reads.
       every: Math.round(program.rec.every / TIER_BENEFITS.diamante.mult),
-      name: nameOf(program.rec.o.items)
+      name: rewardTitle(program.rec)
     },
 
     referrals: program.refLad.map((r) => ({
