@@ -74,12 +74,20 @@ interface GoogleLoyaltyClassRequest {
     cardTemplateOverride: {
       cardRowTemplateInfos: GoogleCardRowTemplateInfo[];
     };
-    detailsTemplateOverride: {
+    detailsTemplateOverride?: {
       detailsItemInfos: Array<{
         item: GoogleTemplateItem;
       }>;
     };
   };
+}
+
+export interface GoogleClassBuildOptions {
+  /**
+   * Test-only: leave detailsTemplateOverride unset so Google's default details layout is used.
+   * Production callers never pass this, so default behavior is unchanged.
+   */
+  omitDetailsTemplateOverride?: boolean;
 }
 
 interface GoogleAddMessageRequest {
@@ -125,12 +133,15 @@ interface GoogleTemplateItem {
   };
 }
 
-export const createOrUpdateClass = async (input: LoyaltyClassInput): Promise<void> => {
+export const createOrUpdateClass = async (
+  input: LoyaltyClassInput,
+  options: GoogleClassBuildOptions = {}
+): Promise<void> => {
   assertIssuerScopedId(input.classId, "classId");
 
   const client = getAuthenticatedClient();
   const classPath = `/loyaltyClass/${encodeURIComponent(input.classId)}`;
-  const body = toGoogleLoyaltyClassBody(input);
+  const body = toGoogleLoyaltyClassBody(input, options);
 
   try {
     await client.request<unknown>(classPath);
@@ -248,7 +259,10 @@ export const setClassLocations = async (
   });
 };
 
-const toGoogleLoyaltyClassBody = (input: LoyaltyClassInput): GoogleLoyaltyClassRequest => ({
+const toGoogleLoyaltyClassBody = (
+  input: LoyaltyClassInput,
+  options: GoogleClassBuildOptions = {}
+): GoogleLoyaltyClassRequest => ({
   id: input.classId,
   issuerName: input.issuerName,
   reviewStatus: "UNDER_REVIEW",
@@ -299,36 +313,7 @@ const toGoogleLoyaltyClassBody = (input: LoyaltyClassInput): GoogleLoyaltyClassR
     : undefined,
   rewardsTierLabel: input.rewardsTierLabel,
   rewardsTier: input.rewardsTier,
-  classTemplateInfo: {
-    cardTemplateOverride: {
-      cardRowTemplateInfos: [
-        {
-          twoItems: {
-            startItem: toTemplateItem("object.accountName"),
-            endItem: toTemplateItem("object.textModulesData['points']")
-          }
-        },
-        {
-          threeItems: {
-            startItem: toTemplateItem("object.textModulesData['member_id']"),
-            middleItem: toTemplateItem("object.textModulesData['tier']"),
-            endItem: toTemplateItem("class.textModulesData['benefit_cta']")
-          }
-        }
-      ]
-    },
-    detailsTemplateOverride: {
-      detailsItemInfos: [
-        { item: toTemplateItem("class.textModulesData['clinic']") },
-        { item: toTemplateItem("object.textModulesData['member_id']") },
-        { item: toTemplateItem("object.textModulesData['member_since']") },
-        { item: toTemplateItem("class.textModulesData['benefits']") },
-        { item: toTemplateItem("object.accountName") },
-        { item: toTemplateItem("object.accountId") },
-        { item: toTemplateItem("class.textModulesData['info']") }
-      ]
-    }
-  }
+  classTemplateInfo: buildClassTemplateInfo(options)
 });
 
 const withDefaultCardTextModules = (
@@ -369,7 +354,67 @@ const toGoogleMessage = (message: LoyaltyMessageInput): GoogleMessage => ({
   messageType: message.notify ? "TEXT_AND_NOTIFY" : "TEXT"
 });
 
-const toTemplateItem = (fieldPath: string): GoogleTemplateItem => ({
+/**
+ * Production detailsTemplateOverride field paths, in display order.
+ * Shared with scripts so one-off class patches stay in sync with the builder.
+ */
+export const PRODUCTION_DETAILS_TEMPLATE_FIELD_PATHS = [
+  "class.textModulesData['clinic']",
+  "object.textModulesData['member_id']",
+  "object.textModulesData['member_since']",
+  "class.textModulesData['benefits']",
+  "object.accountName",
+  "object.accountId",
+  "class.textModulesData['info']"
+] as const;
+
+/**
+ * Messages items appended to the production details template so TEXT_AND_NOTIFY messages
+ * render on the pass details view (confirmed on test class tpl_test_default).
+ */
+export const MESSAGE_DETAILS_FIELD_PATHS = ["class.messages", "object.messages"] as const;
+
+/**
+ * Builds classTemplateInfo exactly as the production class body does.
+ * Shared with scripts so one-off class patches stay in sync with the builder.
+ */
+export const buildClassTemplateInfo = (
+  options: GoogleClassBuildOptions = {}
+): GoogleLoyaltyClassRequest["classTemplateInfo"] => ({
+  cardTemplateOverride: {
+    cardRowTemplateInfos: [
+      {
+        twoItems: {
+          startItem: toTemplateItem("object.accountName"),
+          endItem: toTemplateItem("object.textModulesData['points']")
+        }
+      },
+      {
+        threeItems: {
+          startItem: toTemplateItem("object.textModulesData['member_id']"),
+          middleItem: toTemplateItem("object.textModulesData['tier']"),
+          endItem: toTemplateItem("class.textModulesData['benefit_cta']")
+        }
+      }
+    ]
+  },
+  ...(options.omitDetailsTemplateOverride
+    ? {}
+    : {
+        detailsTemplateOverride: {
+          detailsItemInfos: [
+            ...PRODUCTION_DETAILS_TEMPLATE_FIELD_PATHS.map((fieldPath) => ({
+              item: toTemplateItem(fieldPath)
+            })),
+            ...MESSAGE_DETAILS_FIELD_PATHS.map((fieldPath) => ({
+              item: toTemplateItem(fieldPath)
+            }))
+          ]
+        }
+      })
+});
+
+export const toTemplateItem = (fieldPath: string): GoogleTemplateItem => ({
   firstValue: {
     fields: [
       {

@@ -14,6 +14,8 @@
     "prisma:seed": "tsx prisma/seed.ts",
     "geo:set-test": "tsx scripts/set-test-geo.ts",
     "wallet:verify-class-links": "tsx scripts/verify-google-wallet-class-links.ts",
+    "tpl:test": "tsx scripts/test-default-template.ts",
+    "class:fix-details": "tsx scripts/fix-class-details-template.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "copy:pass-assets": "node scripts/copy-pass-assets.mjs",
