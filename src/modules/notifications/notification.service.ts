@@ -1066,81 +1066,86 @@ export class NotificationService {
         walletObject.status === WalletSyncStatus.SYNCED
     );
 
-    const notification = await this.prisma.notification.create({
-      data: {
-        clinicId: member.clinicId,
-        type: job.tierChanged ? NotificationType.TIER : NotificationType.POINTS,
-        header: "Puntos actualizados",
-        body: `Tu saldo ahora es ${shownBalance}`,
-        notify: false,
-        deliveries: {
-          create: {
-            memberId: member.id,
-            provider: WalletProviderType.GOOGLE,
-            status: object ? NotificationDeliveryStatus.QUEUED : NotificationDeliveryStatus.SKIPPED,
-            errorCode: object ? undefined : "NO_GOOGLE_PASS"
-          }
-        }
-      },
-      include: { deliveries: true }
-    });
+    let outcome: { status: NotificationDeliveryStatus; errorCode: string | null };
 
     if (!object) {
-      await this.refreshNotificationStatus(notification.id, notification);
-      return;
-    }
+      outcome = { status: NotificationDeliveryStatus.SKIPPED, errorCode: "NO_GOOGLE_PASS" };
+    } else {
+      const settings = await this.settingsFor(member.clinicId);
+      const shouldNotify =
+        settings.notifyOnCredit === ClinicNotifyOnCredit.ALWAYS ||
+        (settings.notifyOnCredit === ClinicNotifyOnCredit.MILESTONE_AND_TIER &&
+          (job.milestoneReached || job.tierChanged));
+      const notify = shouldNotify && (await this.quota.canPush(object.externalObjectId));
 
-    const settings = await this.settingsFor(member.clinicId);
-    const shouldNotify =
-      settings.notifyOnCredit === ClinicNotifyOnCredit.ALWAYS ||
-      (settings.notifyOnCredit === ClinicNotifyOnCredit.MILESTONE_AND_TIER &&
-        (job.milestoneReached || job.tierChanged));
-    const notify = shouldNotify && (await this.quota.canPush(object.externalObjectId));
-
-    try {
-      await this.wallet.patchPoints(object.externalObjectId, {
-        points: shownBalance,
-        tier: member.tier ?? undefined,
-        notify
-      });
-
-      if (notify) await this.quota.recordPush(object.externalObjectId);
-
-      await this.markDelivery(
-        notification.deliveries[0].id,
-        shouldNotify && !notify
-          ? NotificationDeliveryStatus.DOWNGRADED
-          : NotificationDeliveryStatus.SENT,
-        shouldNotify && !notify ? "QUOTA_RESERVED" : null
-      );
-      await this.refreshNotificationStatus(notification.id, notification);
-    } catch (error) {
-      if (error instanceof WalletNotificationQuotaExceededError) {
+      // The Google patch comes first and its failure leaves no row behind: a transient error
+      // is rethrown for a retry, and a job that exhausts its attempts must not strand a QUEUED
+      // notification and delivery per attempt.
+      try {
         await this.wallet.patchPoints(object.externalObjectId, {
           points: shownBalance,
           tier: member.tier ?? undefined,
-          notify: false
+          notify
         });
-        await this.markDelivery(
-          notification.deliveries[0].id,
-          NotificationDeliveryStatus.DOWNGRADED,
-          "QUOTA_EXCEEDED"
-        );
-        await this.refreshNotificationStatus(notification.id, notification);
-        return;
-      }
 
-      if (error instanceof WalletNotificationNotFoundError) {
-        await this.markDelivery(
-          notification.deliveries[0].id,
-          NotificationDeliveryStatus.SKIPPED,
-          "NOT_FOUND"
-        );
-        await this.refreshNotificationStatus(notification.id, notification);
-        return;
-      }
+        if (notify) await this.quota.recordPush(object.externalObjectId);
 
-      throw error;
+        outcome =
+          shouldNotify && !notify
+            ? { status: NotificationDeliveryStatus.DOWNGRADED, errorCode: "QUOTA_RESERVED" }
+            : { status: NotificationDeliveryStatus.SENT, errorCode: null };
+      } catch (error) {
+        if (error instanceof WalletNotificationQuotaExceededError) {
+          await this.wallet.patchPoints(object.externalObjectId, {
+            points: shownBalance,
+            tier: member.tier ?? undefined,
+            notify: false
+          });
+          outcome = {
+            status: NotificationDeliveryStatus.DOWNGRADED,
+            errorCode: "QUOTA_EXCEEDED"
+          };
+        } else if (error instanceof WalletNotificationNotFoundError) {
+          outcome = { status: NotificationDeliveryStatus.SKIPPED, errorCode: "NOT_FOUND" };
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    // After the patch, recording the final outcome. A failure here is logged and swallowed:
+    // the member's card is already updated, and a retry would patch (and maybe push) again.
+    try {
+      await this.prisma.notification.create({
+        data: {
+          clinicId: member.clinicId,
+          type: job.tierChanged ? NotificationType.TIER : NotificationType.POINTS,
+          header: "Puntos actualizados",
+          body: `Tu saldo ahora es ${shownBalance}`,
+          notify: false,
+          // Every outcome here is a finished notification; the delivery carries the detail.
+          status: NotificationStatus.SENT,
+          deliveries: {
+            create: {
+              memberId: member.id,
+              provider: WalletProviderType.GOOGLE,
+              status: outcome.status,
+              errorCode: outcome.errorCode,
+              sentAt:
+                outcome.status === NotificationDeliveryStatus.SENT ||
+                outcome.status === NotificationDeliveryStatus.DOWNGRADED
+                  ? new Date()
+                  : undefined
+            }
+          }
+        }
+      });
+    } catch (error) {
+      // The name only: an error message can carry connection strings.
+      console.error("[notifications] could not record a points credit notification", {
+        memberId: member.id,
+        error: error instanceof Error ? error.name : "UNKNOWN"
+      });
     }
   }
 
