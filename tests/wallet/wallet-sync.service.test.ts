@@ -384,11 +384,11 @@ describe("InlineWalletSyncQueue", () => {
 
       await queue.enqueueMemberSync(MEMBER, 5_000);
 
-      expect(service.syncMember).not.toHaveBeenCalled();
+      expect(service.syncMemberChecked).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(4_999);
-      expect(service.syncMember).not.toHaveBeenCalled();
+      expect(service.syncMemberChecked).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
-      expect(service.syncMember).toHaveBeenCalledWith(MEMBER);
+      expect(service.syncMemberChecked).toHaveBeenCalledWith(MEMBER);
       await queue.close();
     } finally {
       vi.useRealTimers();
@@ -401,7 +401,7 @@ describe("InlineWalletSyncQueue", () => {
 
     await queue.enqueueMemberSync(MEMBER);
 
-    expect(service.syncMember).toHaveBeenCalledWith(MEMBER);
+    expect(service.syncMemberChecked).toHaveBeenCalledWith(MEMBER);
     await queue.close();
   });
 
