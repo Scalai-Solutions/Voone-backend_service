@@ -319,3 +319,56 @@ describe("generating and publishing a programme", () => {
     await expect(service.publish("some-other-clinic", draft.id)).rejects.toThrow(/No existe/);
   });
 });
+
+describe("editing texts and cloning a draft", () => {
+  it("setTexts stores the edit and refuses a programme that is no longer a draft", async () => {
+    await repo.replaceForClinic(clinic.id, asInput(fixture));
+    const draft = await service.createDraft(clinic.id, ANSWERS);
+    const edited = await service.setTexts(clinic.id, draft.id, {
+      referral: [{ index: 0, name: "Texto propio" }]
+    });
+
+    expect((edited.output as unknown as Program).refLad[0].name).toBe("Texto propio");
+
+    await service.publish(clinic.id, draft.id);
+
+    await expect(
+      service.setTexts(clinic.id, draft.id, { referral: [{ index: 0, name: "Tarde" }] })
+    ).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it("setTexts refuses an index the programme does not have with 422", async () => {
+    await repo.replaceForClinic(clinic.id, asInput(fixture));
+    const draft = await service.createDraft(clinic.id, ANSWERS);
+
+    await expect(
+      service.setTexts(clinic.id, draft.id, { referral: [{ index: 99, name: "X" }] })
+    ).rejects.toMatchObject({ statusCode: 422 });
+  });
+
+  it("cloneDraft copies the live programme verbatim, numbers it next, and allows one draft", async () => {
+    await repo.replaceForClinic(clinic.id, asInput(fixture));
+    const first = await service.createDraft(clinic.id, ANSWERS);
+
+    await service.setTexts(clinic.id, first.id, { recurring: { label: "Mi recurrente" } });
+    await service.setTierBenefits(clinic.id, first.id, "oro", ["Café"]);
+    await service.publish(clinic.id, first.id);
+
+    const live = await service.getProgram(clinic.id, first.id);
+    const clone = await service.cloneDraft(clinic.id, first.id);
+
+    expect(clone.version).toBe(2);
+    expect(clone.status).toBe(OnboardingProgramStatus.BORRADOR);
+    expect(clone.output).toEqual(live.output);
+    expect(clone.answers).toEqual(live.answers);
+    expect(clone.catalogSnapshot).toEqual(live.catalogSnapshot);
+    expect((clone.output as unknown as Program).customBenefits?.oro).toEqual(["Café"]);
+
+    await expect(service.cloneDraft(clinic.id, first.id)).rejects.toMatchObject({
+      statusCode: 409
+    });
+    await expect(service.cloneDraft("some-other-clinic", first.id)).rejects.toMatchObject({
+      statusCode: 404
+    });
+  });
+});

@@ -1,5 +1,6 @@
 import {
   OnboardingProgramStatus,
+  Prisma,
   VisitKind,
   type OnboardingProgram,
   type PrismaClient
@@ -22,6 +23,7 @@ import { isEngineError } from "./engine.types";
 import { placeMembersOnProgram } from "./runtime/placement";
 import { recalibrationAdvice, type RecalibrationAdvice } from "./runtime/rules";
 import { swapReward, swapRewardToItem } from "./swap";
+import { applyTexts, type TextEdits } from "./texts";
 
 /**
  * Generating, storing and publishing a centre's loyalty programme.
@@ -337,6 +339,116 @@ export class OnboardingService {
     const updated = await this.prisma.onboardingProgram.updateMany({
       where: { id: row.id, updatedAt: row.updatedAt },
       data: { output: next as unknown as object }
+    });
+
+    if (updated.count === 0) {
+      throw new OnboardingError(
+        "El borrador ha cambiado mientras lo editabas. Recarga la página y vuelve a intentarlo.",
+        409
+      );
+    }
+
+    return this.getProgram(clinicId, programId);
+  }
+
+  /**
+   * Starts a new draft from a programme exactly as it stands, edits and all.
+   *
+   * `createDraft` re-runs the engine, which is right when the centre changes its answers and wrong
+   * for "I want to edit this programme": the engine knows nothing of the benefits the centre wrote,
+   * the rewards it swapped or the texts it changed, so a draft made that way silently starts from
+   * the generated programme again. This copies the stored output, answers and catalogue snapshot
+   * verbatim instead, so the new draft IS the source programme and every edit made on it is a
+   * difference the admin can see.
+   *
+   * One draft at a time: a second would leave two numbered versions each claiming to be "the
+   * next one", and the admin could not tell which to publish. Cloning a programme of another
+   * clinic answers 404, the same as a programme that does not exist.
+   */
+  async cloneDraft(clinicId: string, programId: string): Promise<OnboardingProgram> {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const source = await tx.onboardingProgram.findFirst({ where: { id: programId, clinicId } });
+
+        if (!source) throw new OnboardingError("No existe ese programa para este centro.", 404);
+
+        const draft = await tx.onboardingProgram.findFirst({
+          where: { clinicId, status: OnboardingProgramStatus.BORRADOR },
+          select: { version: true }
+        });
+
+        if (draft) {
+          throw new OnboardingError(
+            `Ya hay un borrador (versión ${draft.version}). Edítalo o actívalo antes de crear otro.`,
+            409
+          );
+        }
+
+        const latest = await tx.onboardingProgram.findFirst({
+          where: { clinicId },
+          orderBy: { version: "desc" },
+          select: { version: true }
+        });
+
+        return tx.onboardingProgram.create({
+          data: {
+            clinicId,
+            version: (latest?.version ?? 0) + 1,
+            status: OnboardingProgramStatus.BORRADOR,
+            engineVersion: source.engineVersion,
+            configVersion: source.configVersion,
+            answers: source.answers as Prisma.InputJsonValue,
+            output: source.output as Prisma.InputJsonValue,
+            catalogSnapshot: source.catalogSnapshot as Prisma.InputJsonValue
+          }
+        });
+      });
+    } catch (error) {
+      // Two simultaneous clones both pass the check above; the unique index on
+      // [clinicId, version] lets one win, and the loser is told what the check would have.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new OnboardingError(
+          "Ya hay un borrador. Recarga la página y edítalo o actívalo antes de crear otro.",
+          409
+        );
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Edits the words of a DRAFT: referral names, perk names and descriptions, and the titles of
+   * rewards. Thresholds, items and the welcome progress stay as generated.
+   *
+   * Rewards already issued keep the title they were issued with (MemberReward.title is a
+   * snapshot), so an edit changes only rewards issued after the draft is published.
+   *
+   * Same rules as the other draft edits: BORRADOR only (409), and optimistic on updatedAt so two
+   * operators cannot silently overwrite each other. An index or milestone the programme does not
+   * have is 422, and nothing is stored.
+   */
+  async setTexts(
+    clinicId: string,
+    programId: string,
+    edits: TextEdits
+  ): Promise<OnboardingProgram> {
+    const row = await this.getProgram(clinicId, programId);
+
+    if (row.status !== OnboardingProgramStatus.BORRADOR) {
+      throw new OnboardingError(
+        "Solo se pueden editar los textos de un borrador. Genera un borrador nuevo para editar un programa activo.",
+        409
+      );
+    }
+
+    const result = applyTexts(row.output as unknown as Program, edits);
+
+    if (!result.ok) throw new OnboardingError(result.reason, 422);
+
+    const updated = await this.prisma.onboardingProgram.updateMany({
+      where: { id: row.id, updatedAt: row.updatedAt },
+      data: { output: result.program as unknown as object }
     });
 
     if (updated.count === 0) {
