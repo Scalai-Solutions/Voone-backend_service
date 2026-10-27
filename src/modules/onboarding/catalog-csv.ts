@@ -133,6 +133,50 @@ const parsePrice = (text: string): { value: number; range: boolean } | null => {
 /** Words a spreadsheet's first row uses for its columns, in Spanish and English. */
 const HEADER_NAMES = new Set(["nombre", "name", "tratamiento", "servicio", "concepto", "articulo"]);
 const HEADER_PRICES = new Set(["precio", "price", "importe", "tarifa", "pvp"]);
+const HEADER_PRODUCTS = new Set(["producto", "product", "retail", "esproducto"]);
+const HEADER_CATEGORIES = new Set(["categoria", "category", "familia", "grupo"]);
+
+/** sí/no in a "producto" column: a spreadsheet marks its retail rows either way. */
+const PRODUCT_YES = new Set(["si", "yes", "true", "1", "x"]);
+const PRODUCT_NO = new Set(["no", "false", "0"]);
+
+/** Where each column sits, read from a header row. */
+interface ColumnMap {
+  name: number;
+  price: number;
+  product?: number;
+  category?: number;
+}
+
+/**
+ * A header row names its columns, and recognising the names makes the import work whatever
+ * order they are in and however many extras the centre's spreadsheet carries: a name column
+ * and a price column are the only things that are required.
+ */
+const headerMapOf = (cells: string[]): ColumnMap | null => {
+  let name = -1;
+  let price = -1;
+  let product = -1;
+  let category = -1;
+
+  cells.forEach((cell, position) => {
+    const value = plain(cell);
+
+    if (name < 0 && HEADER_NAMES.has(value)) name = position;
+    else if (price < 0 && HEADER_PRICES.has(value)) price = position;
+    else if (product < 0 && HEADER_PRODUCTS.has(value)) product = position;
+    else if (category < 0 && HEADER_CATEGORIES.has(value)) category = position;
+  });
+
+  if (name < 0 || price < 0) return null;
+
+  return {
+    name,
+    price,
+    ...(product >= 0 ? { product } : {}),
+    ...(category >= 0 ? { category } : {})
+  };
+};
 
 /**
  * Whether a first row is a header.
@@ -151,9 +195,11 @@ const readKind = (cell: string): { isProduct?: boolean; categoryId?: CategoryCod
   const value = plain(cell);
 
   if (!value) return {};
-  if (RETAIL_WORDS.has(value)) return { isProduct: true };
+  if (RETAIL_WORDS.has(value) || PRODUCT_YES.has(value)) return { isProduct: true };
+  // A plain "no" is an answer, not garbage: the row is simply not a product.
+  if (PRODUCT_NO.has(value)) return {};
 
-  const code = cell.trim().toUpperCase();
+  const code = value.toUpperCase();
 
   return code in CATEGORIES ? { categoryId: code as CategoryCode } : "unknown";
 };
@@ -173,6 +219,9 @@ export const parseCatalogCsv = (text: string): CsvImport => {
   const body = text.charCodeAt(0) === BOM ? text.slice(1) : text;
   const lines = body.split(/\r\n|\r|\n/);
 
+  /** Column positions from the header, once one is recognised; positional parsing without. */
+  let columns: ColumnMap | null = null;
+
   lines.forEach((raw, index) => {
     const line = index + 1;
 
@@ -186,11 +235,25 @@ export const parseCatalogCsv = (text: string): CsvImport => {
       return;
     }
 
-    const [name, priceText, kindText = ""] = cells;
-    const price = parsePrice(priceText);
+    if (index === 0) {
+      const header = headerMapOf(cells);
 
-    // A first row whose price column is not a number is a header, not a bad row.
-    if (index === 0 && looksLikeHeader(name, priceText)) return;
+      if (header) {
+        columns = header;
+
+        return;
+      }
+
+      // A first row whose price column is not a number is a header, not a bad row.
+      if (looksLikeHeader(cells[0], cells[1])) return;
+    }
+
+    // Annotated rather than inferred: the map was set in an earlier callback run, which
+    // the flow analysis cannot see and would otherwise narrow to null.
+    const map: ColumnMap | null = columns;
+    const name = map ? cells[map.name] : cells[0];
+    const priceText = map ? cells[map.price] : cells[1];
+    const price = parsePrice(priceText);
 
     if (!name) {
       skipped.push({ line, reason: "Falta el nombre.", raw });
@@ -207,15 +270,34 @@ export const parseCatalogCsv = (text: string): CsvImport => {
       return;
     }
 
-    const kind = readKind(kindText);
+    // With a header, the product and category columns are wherever the header put them;
+    // without one, the third cell is either, as it always was.
+    const kindCells = map
+      ? [
+          map.product !== undefined ? cells[map.product] : undefined,
+          map.category !== undefined ? cells[map.category] : undefined
+        ]
+      : [cells[2]];
 
-    if (kind === "unknown") {
-      skipped.push({
-        line,
-        reason: `La tercera columna no es "producto" ni una categoría conocida: ${kindText.trim()}.`,
-        raw
-      });
-      return;
+    const kind: { isProduct?: boolean; categoryId?: CategoryCode } = {};
+
+    for (const cell of kindCells) {
+      if (cell === undefined) continue;
+
+      const read = readKind(cell);
+
+      if (read === "unknown") {
+        skipped.push({
+          line,
+          reason: `Una columna no es "producto" (sí/no) ni una categoría conocida: ${cell.trim()}.`,
+          raw
+        });
+
+        return;
+      }
+
+      if (read.isProduct) kind.isProduct = true;
+      if (read.categoryId) kind.categoryId = read.categoryId;
     }
 
     if (price.range) {

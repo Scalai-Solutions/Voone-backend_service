@@ -181,7 +181,7 @@ describe("parseCatalogCsv the optional third column", () => {
     const { items, skipped } = parseCatalogCsv("Facial;60;xyz");
 
     expect(items).toEqual([]);
-    expect(skipped[0].reason).toContain("tercera columna");
+    expect(skipped[0].reason).toContain("ni una categoría conocida");
   });
 
   it("is optional", () => {
