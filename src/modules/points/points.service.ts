@@ -114,6 +114,21 @@ export class PointsService {
     return this.ledger.balanceFor(memberId);
   }
 
+  /**
+   * Ask for this member's wallets to catch up, with no points movement behind it.
+   *
+   * For the moments a card changes without the ledger changing: a reward was issued after the credit
+   * had already enqueued its sync, or a reward was redeemed. Never throws: the member is at reception
+   * and a wallet outage must not fail the visit or the redemption that asked.
+   */
+  async requestCardSync(memberId: string): Promise<void> {
+    try {
+      await this.wallets.enqueueMemberSync(memberId);
+    } catch (cause) {
+      console.error(`[wallet] could not queue a card sync for member ${memberId}:`, cause);
+    }
+  }
+
   async credit(request: CreditRequest): Promise<PointsOutcome> {
     assertPositive(request.points);
 

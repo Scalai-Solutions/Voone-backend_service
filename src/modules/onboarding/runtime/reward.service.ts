@@ -50,10 +50,19 @@ const asDetail = (detail: unknown): { perk?: string; pool?: Array<{ id: string }
     ? (detail as { perk?: string; pool?: Array<{ id: string }> })
     : {};
 
+/**
+ * What the service needs to refresh a member's wallet card after a redemption. `PointsService`
+ * satisfies it. Optional so a deployment without a wallet still redeems.
+ */
+export interface CardSyncPort {
+  requestCardSync(memberId: string): Promise<void>;
+}
+
 export class RewardService {
   constructor(
     private readonly prisma: PrismaClient,
-    private readonly now: () => Date = () => new Date()
+    private readonly now: () => Date = () => new Date(),
+    private readonly cardSync?: CardSyncPort
   ) {}
 
   /** A member's rewards, available ones first. Expired ones stay listed: they were promised. */
@@ -152,6 +161,14 @@ export class RewardService {
     });
 
     if (updated.count === 0) throw new OnboardingError("Este premio ya se canjeó.", 409);
+
+    // The card lists what can still be redeemed, so it is stale now. Never allowed to fail the
+    // redemption, which is already recorded.
+    try {
+      await this.cardSync?.requestCardSync(reward.memberId);
+    } catch (cause) {
+      console.error(`[wallet] could not queue a card sync for member ${reward.memberId}:`, cause);
+    }
 
     const fresh = await this.prisma.memberReward.findUniqueOrThrow({ where: { id: reward.id } });
 

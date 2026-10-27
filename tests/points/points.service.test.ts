@@ -118,6 +118,25 @@ describe("PointsService", () => {
   const redeem = (points: number, idempotencyKey: string) =>
     service.redeem({ memberId: MEMBER, clinicId: CLINIC, points, idempotencyKey });
 
+  describe("asking for a card sync on its own", () => {
+    it("enqueues a sync for the member", async () => {
+      await service.requestCardSync(MEMBER);
+
+      expect(synced).toEqual([MEMBER]);
+    });
+
+    it("never throws, even when the queue does", async () => {
+      const failing = new PointsService(ledger, cache, {
+        enqueueMemberSync: async () => {
+          throw new Error("redis down");
+        },
+        close: async () => {}
+      });
+
+      await expect(failing.requestCardSync(MEMBER)).resolves.toBeUndefined();
+    });
+  });
+
   describe("crediting", () => {
     it("records the movement and reports both balances", async () => {
       const outcome = await credit(600, "visit-1");
