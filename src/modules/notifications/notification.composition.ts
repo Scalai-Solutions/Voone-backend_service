@@ -9,9 +9,15 @@ import {
   createNotificationWorker
 } from "../../infrastructure/queue/bull-notifications.queue";
 import { WalletPassEngine } from "../../wallet/engine/wallet-pass.engine";
-import { buildWalletRegistry } from "../../wallet/wallet.composition";
+import { WalletSyncAppleCardRefresher } from "../../wallet/apple-card-refresher";
+import {
+  buildWalletRegistry,
+  buildWalletSyncService,
+  isWalletSyncConfigured
+} from "../../wallet/wallet.composition";
 import { InMemoryNotificationQuotaRedis, NotificationQuotaService } from "./quota.service";
 import {
+  AppleCardRefresher,
   NotificationJobQueue,
   NotificationService,
   PointsCreditNotificationJob
@@ -92,6 +98,18 @@ class InlineNotificationQueue implements NotificationJobQueue {
   }
 }
 
+/**
+ * Refreshes an Apple card in-process, inside the delivery job that asked for it: each
+ * delivery is its own job, so a broadcast is paced by the notification queue's concurrency.
+ *
+ * Null without CARD_REDEMPTION_SECRET: no card can be assembled, and the delivery is then
+ * marked FAILED rather than the service refusing to start.
+ */
+const buildAppleCardRefresher = (prisma: PrismaClient): AppleCardRefresher | null =>
+  isWalletSyncConfigured()
+    ? new WalletSyncAppleCardRefresher(buildWalletSyncService(prisma))
+    : null;
+
 export const buildNotificationService = (prisma: PrismaClient): NotificationService => {
   if (config.WALLET_SYNC_MODE !== "queue") {
     const queue = new InlineNotificationQueue();
@@ -99,7 +117,8 @@ export const buildNotificationService = (prisma: PrismaClient): NotificationServ
       prisma,
       new WalletPassEngine(buildWalletRegistry(prisma)),
       new NotificationQuotaService(new InMemoryNotificationQuotaRedis()),
-      queue
+      queue,
+      buildAppleCardRefresher(prisma)
     );
 
     queue.bind(service);
@@ -114,7 +133,8 @@ export const buildNotificationService = (prisma: PrismaClient): NotificationServ
     prisma,
     new WalletPassEngine(buildWalletRegistry(prisma)),
     new NotificationQuotaService(quotaRedis),
-    new BullNotificationQueue(config.REDIS_URL)
+    new BullNotificationQueue(config.REDIS_URL),
+    buildAppleCardRefresher(prisma)
   );
 };
 

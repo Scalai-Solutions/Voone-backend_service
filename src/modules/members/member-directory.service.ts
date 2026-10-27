@@ -275,8 +275,10 @@ export class MemberDirectoryService {
 
     // The member's bonos go too: they hold treatment names, which is exactly the data
     // erasure must remove. The visits that consumed them survive with amounts only.
-    const [, , , updated] = await this.prisma.$transaction([
+    const [, , , , updated] = await this.prisma.$transaction([
       this.prisma.memberBono.deleteMany({ where: { memberId: member.id } }),
+      // The member row is overwritten, not deleted, so this table's cascade never fires.
+      this.prisma.memberWalletMessage.deleteMany({ where: { memberId: member.id } }),
       this.prisma.passClaim.deleteMany({ where: { memberId: member.id } }),
       this.prisma.walletObject.deleteMany({ where: { memberId: member.id } }),
       this.prisma.member.updateMany({
