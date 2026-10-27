@@ -419,7 +419,8 @@ describe("which deliveries each kind of message creates", () => {
       {
         notification: {
           findUnique: async () => notification,
-          update: async () => undefined
+          update: async () => undefined,
+          updateMany: async () => ({ count: 1 })
         },
         walletClass: { findFirst: async () => ({ externalClassId: "class-1" }) },
         clinic: { update: async () => undefined },

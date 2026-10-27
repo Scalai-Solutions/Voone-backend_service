@@ -662,10 +662,23 @@ export class NotificationService {
 
     const walletClass = await this.findGoogleClass(notification.clinicId);
 
-    await this.prisma.notification.update({
-      where: { id: notification.id },
+    // Atomic claim: a clinic may cancel (or a stalled job's other processor may finish) between
+    // the read above and this write. FAILED stays claimable so a retry can run again.
+    const claimed = await this.prisma.notification.updateMany({
+      where: {
+        id: notification.id,
+        status: {
+          notIn: [
+            NotificationStatus.CANCELLED,
+            NotificationStatus.SENT,
+            NotificationStatus.PARTIAL_FAILED
+          ]
+        }
+      },
       data: { status: NotificationStatus.PROCESSING }
     });
+
+    if (claimed.count === 0) return;
 
     if (!walletClass) {
       // Apple-only clinic: there is no class-level Google message to send. The per-member Apple
@@ -674,8 +687,8 @@ export class NotificationService {
 
       if (total === 0) {
         // Nobody to send to: done, and nothing real was sent, so nothing is counted.
-        await this.prisma.notification.update({
-          where: { id: notification.id },
+        await this.prisma.notification.updateMany({
+          where: { id: notification.id, status: { notIn: [NotificationStatus.CANCELLED] } },
           data: { status: NotificationStatus.SENT }
         });
       } else if (queued === 0) {
@@ -694,10 +707,26 @@ export class NotificationService {
         actionUrl: notification.actionUrl ?? undefined
       });
 
-      await this.prisma.notification.update({
-        where: { id: notification.id },
+      const finished = await this.prisma.notification.updateMany({
+        where: { id: notification.id, status: { notIn: [NotificationStatus.CANCELLED] } },
         data: { status: NotificationStatus.SENT, providerMessageId: message.messageId }
       });
+
+      if (finished.count === 0) {
+        // Cancelled while the class message was being written. The clinic's delete ran before
+        // the message id existed, so it could not remove the message: do it here. The status
+        // stays CANCELLED, nothing is counted and no Apple deliveries are created.
+        await this.prisma.notification.updateMany({
+          where: { id: notification.id },
+          data: { providerMessageId: message.messageId }
+        });
+        await this.bestEffortRemove(
+          { kind: "class", id: walletClass.externalClassId },
+          message.messageId
+        );
+        return;
+      }
+
       await this.countManualNotification(notification.clinicId, notification.type);
 
       console.info("[notifications] broadcast sent", {
@@ -705,8 +734,8 @@ export class NotificationService {
         clinicId: notification.clinicId
       });
     } catch (error) {
-      await this.prisma.notification.update({
-        where: { id: notification.id },
+      await this.prisma.notification.updateMany({
+        where: { id: notification.id, status: { notIn: [NotificationStatus.CANCELLED] } },
         data: { status: NotificationStatus.FAILED }
       });
       throw error;
