@@ -140,6 +140,13 @@ interface ClassBody {
   linksModuleData: { uris: Array<{ id: string }> };
   appLinkData: { displayText: { defaultValue: { value: string } } };
   textModulesData: Array<{ header: string }>;
+  classTemplateInfo: {
+    detailsTemplateOverride?: {
+      detailsItemInfos: Array<{
+        item: { firstValue: { fields: Array<{ fieldPath: string }> } };
+      }>;
+    };
+  };
 }
 
 describe("the Spanish, neutral words on a Google card", () => {
@@ -227,5 +234,52 @@ describe("the Spanish, neutral words on a Google card", () => {
     expect(body.textModulesData.find((module) => module.id === "member_id")?.header).toBe(
       "N.º de miembro"
     );
+  });
+});
+
+describe("the details template on the Google class", () => {
+  const provisionClassBody = async (
+    options?: Parameters<typeof createOrUpdateClass>[1]
+  ): Promise<ClassBody> => {
+    state.googleBodies.length = 0;
+
+    await createOrUpdateClass(
+      {
+        issuerName: "Centro Prueba",
+        classId: "issuer-1.class",
+        programName: "Club Prueba",
+        hexBackgroundColor: "#30221f",
+        homepageUrl: "https://voone.app"
+      },
+      options
+    );
+
+    return state.googleBodies[0] as unknown as ClassBody;
+  };
+
+  it("ends with the messages items so TEXT_AND_NOTIFY messages render on the details view", async () => {
+    const body = await provisionClassBody();
+
+    expect(
+      body.classTemplateInfo.detailsTemplateOverride?.detailsItemInfos.map(
+        (item) => item.item.firstValue.fields[0].fieldPath
+      )
+    ).toEqual([
+      "class.textModulesData['clinic']",
+      "object.textModulesData['member_id']",
+      "object.textModulesData['member_since']",
+      "class.textModulesData['benefits']",
+      "object.accountName",
+      "object.accountId",
+      "class.textModulesData['info']",
+      "class.messages",
+      "object.messages"
+    ]);
+  });
+
+  it("still omits the details override for the default-template test class", async () => {
+    const body = await provisionClassBody({ omitDetailsTemplateOverride: true });
+
+    expect(body.classTemplateInfo.detailsTemplateOverride).toBeUndefined();
   });
 });
