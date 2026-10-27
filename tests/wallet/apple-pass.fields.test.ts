@@ -124,6 +124,42 @@ describe("buildStoreCardFields", () => {
     );
   });
 
+  describe("last message", () => {
+    const withMessage = { ...aureaGoldPass, message: { text: "27 oct · Título: cuerpo" } };
+
+    it("adds a back field whose change notifies the member with the message itself", () => {
+      const field = buildStoreCardFields(withMessage).backFields.find(
+        (f) => f.key === "lastMessage"
+      );
+
+      expect(field).toEqual({
+        key: "lastMessage",
+        label: "ÚLTIMO MENSAJE",
+        value: "27 oct · Título: cuerpo",
+        changeMessage: "%@"
+      });
+    });
+
+    it("is absent when the member has no message", () => {
+      expect(allKeys(buildStoreCardFields(aureaGoldPass))).not.toContain("lastMessage");
+    });
+
+    it("keeps every key unique", () => {
+      const keys = allKeys(buildStoreCardFields(withMessage));
+
+      expect(new Set(keys).size).toBe(keys.length);
+    });
+
+    it("changes the field value when the same text is sent on a different day", () => {
+      const value = (text: string) =>
+        buildStoreCardFields({ ...aureaGoldPass, message: { text } }).backFields.find(
+          (f) => f.key === "lastMessage"
+        )?.value;
+
+      expect(value("27 oct · H: B")).not.toBe(value("28 oct · H: B"));
+    });
+  });
+
   it("adds tappable booking and website links only when the template has them", () => {
     const withLinks = {
       ...aureaGoldPass,

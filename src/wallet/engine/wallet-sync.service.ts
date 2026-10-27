@@ -30,8 +30,18 @@ export class WalletSyncService {
     private readonly assembler: LoyaltyCardAssembler
   ) {}
 
-  async syncMember(memberId: string): Promise<SyncOutcome[]> {
-    const providers = this.registry.enabled();
+  /**
+   * `options.providers` narrows the push to some wallets (a clinic message to an Apple card has
+   * no business re-patching the Google object); the card is still assembled once.
+   */
+  async syncMember(
+    memberId: string,
+    options: { providers?: WalletProviderType[] } = {}
+  ): Promise<SyncOutcome[]> {
+    const wanted = options.providers;
+    const providers = this.registry
+      .enabled()
+      .filter((provider) => !wanted || wanted.includes(provider.provider));
 
     if (providers.length === 0) {
       return [];

@@ -88,6 +88,71 @@ describe("PrismaLoyaltyCardAssembler", () => {
     expect(card.member.memberSince).toBeUndefined();
   });
 
+  describe("last clinic message", () => {
+    const stored = {
+      header: "Título",
+      body: "cuerpo",
+      sentAt: new Date("2026-10-27T10:00:00Z")
+    };
+
+    it("carries the member's stored message as `<d MMM> · <header>: <body>`", async () => {
+      const card = await assemblerFor({ ...member, walletMessage: stored }).assemble(member.id);
+
+      expect(card.message).toEqual({ text: "27 oct · Título: cuerpo" });
+    });
+
+    it("dates it in Europe/Madrid, so a message sent just before midnight UTC lands on the next day", async () => {
+      const card = await assemblerFor({
+        ...member,
+        walletMessage: { ...stored, sentAt: new Date("2026-10-26T23:30:00Z") }
+      }).assemble(member.id);
+
+      expect(card.message?.text).toBe("27 oct · Título: cuerpo");
+    });
+
+    it.each([
+      ["emoji that fit under the cap", "😀".repeat(100)],
+      ["emoji that are truncated", "😀".repeat(150)],
+      ["emoji cut mid-pair", `${"x".repeat(286)}😀😀`]
+    ])("passes the real card schema with %s", async (_label, body) => {
+      const card = await assemblerFor({
+        ...member,
+        walletMessage: { ...stored, header: "H", body }
+      }).assemble(member.id);
+
+      expect(card.message?.text.length).toBeLessThanOrEqual(300);
+      expect(card.message?.text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    });
+
+    it("has no message when none was ever sent", async () => {
+      expect((await assemblerFor(member).assemble(member.id)).message).toBeUndefined();
+      expect(
+        (await assemblerFor({ ...member, walletMessage: null }).assemble(member.id)).message
+      ).toBeUndefined();
+    });
+
+    it("gives the same text on two assemblies, because the date comes from the stored sentAt", async () => {
+      const assembler = assemblerFor({ ...member, walletMessage: stored });
+      const first = await assembler.assemble(member.id);
+      const second = await assembler.assemble(member.id);
+
+      expect(second.message).toEqual(first.message);
+    });
+
+    it("reads the message in the same query as the member", async () => {
+      const findUnique = vi.fn(async () => ({ ...member, walletMessage: stored }));
+      const prisma = { member: { findUnique } } as unknown as PrismaClient;
+
+      await new PrismaLoyaltyCardAssembler(prisma, SECRET).assemble(member.id);
+
+      expect(findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: expect.objectContaining({ walletMessage: true })
+        })
+      );
+    });
+  });
+
   it("refuses a member that does not exist", async () => {
     await expect(assemblerFor(null).assemble("nobody")).rejects.toBeInstanceOf(MemberNotFoundError);
   });

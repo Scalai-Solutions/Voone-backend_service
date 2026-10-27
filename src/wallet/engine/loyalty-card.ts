@@ -115,6 +115,12 @@ export const loyaltyCardSchema = z
       })
       .optional(),
 
+    /**
+     * The clinic's latest message to this member, already formatted for display. Only the
+     * Apple card renders it (Google has its own message API and ignores this).
+     */
+    message: z.object({ text: z.string().min(1).max(300) }).optional(),
+
     template: cardTemplateSchema
   })
   .refine((data) => data.redemptionCode !== data.serialNumber, {

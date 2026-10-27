@@ -143,6 +143,19 @@ export const buildStoreCardFields = (data: LoyaltyCard): StoreCardFields => {
     );
   }
 
+  // The clinic's latest message. Apple has no free-form push, so the message rides in a field
+  // whose changeMessage shows the new value on the lock screen; the push that follows is the
+  // ordinary pass update. The text carries its own send date, which is what makes the same
+  // words sent on a later day a new value.
+  if (data.message) {
+    backFields.push({
+      key: "lastMessage",
+      label: PASS_LABELS.lastMessage,
+      value: data.message.text,
+      changeMessage: PASS_LABELS.messageChangeMessage
+    });
+  }
+
   // Readable fallbacks for reception when the barcode will not scan.
   backFields.push({
     key: "redemptionCode",

@@ -70,6 +70,22 @@ describe("WalletSyncService", () => {
     apple = new StubProvider(WalletProviderType.APPLE);
   });
 
+  it("syncs only the providers it is asked to, leaving the others untouched", async () => {
+    registry.register(google);
+    registry.register(apple);
+    const service = new WalletSyncService(
+      registry,
+      repoWith([WalletProviderType.GOOGLE, WalletProviderType.APPLE]),
+      assembler
+    );
+
+    const outcomes = await service.syncMember(MEMBER, { providers: [WalletProviderType.APPLE] });
+
+    expect(outcomes).toEqual([{ provider: WalletProviderType.APPLE, result: "synced" }]);
+    expect(apple.syncCard).toHaveBeenCalledTimes(1);
+    expect(google.syncCard).not.toHaveBeenCalled();
+  });
+
   it("assembles the card once and gives both providers the same one", async () => {
     registry.register(google);
     registry.register(apple);

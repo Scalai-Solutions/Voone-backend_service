@@ -64,7 +64,8 @@ describe("NotificationService", () => {
               deliveries: [{ id: "delivery-1" }]
             };
           },
-          update: async () => undefined
+          update: async () => undefined,
+          updateMany: async () => ({ count: 1 })
         },
         notificationDelivery: {
           update: async () => undefined,
@@ -120,7 +121,7 @@ describe("NotificationService", () => {
         },
         findMany: async () => [{ status: deliveryStatus }]
       },
-      notification: { update: async () => undefined }
+      notification: { update: async () => undefined, updateMany: async () => ({ count: 1 }) }
     };
     const service = new NotificationService(
       prisma as never,
@@ -182,7 +183,7 @@ describe("NotificationService", () => {
     expect(queried).toBe(true);
   });
 
-  it("marks Apple notification deliveries as an explicit placeholder", async () => {
+  it("skips an Apple delivery for a member with no synced Apple pass", async () => {
     let deliveryStatus: NotificationDeliveryStatus = NotificationDeliveryStatus.QUEUED;
     let errorCode: string | null | undefined;
     const service = new NotificationService(
@@ -203,7 +204,7 @@ describe("NotificationService", () => {
           },
           findMany: async () => [{ status: deliveryStatus }]
         },
-        notification: { update: async () => undefined }
+        notification: { update: async () => undefined, updateMany: async () => ({ count: 1 }) }
       } as never,
       { addObjectMessage: async () => ({ messageId: "should-not-run" }) } as never,
       { canMarketingPush: async () => true, recordPush: async () => undefined } as never,
@@ -213,7 +214,7 @@ describe("NotificationService", () => {
     await service.processDelivery("delivery-apple");
 
     expect(deliveryStatus).toBe(NotificationDeliveryStatus.SKIPPED);
-    expect(errorCode).toBe("APPLE_NOTIFICATION_PLACEHOLDER");
+    expect(errorCode).toBe("NO_APPLE_PASS");
   });
 
   it("creates birthday notifications for members with synced wallet passes", async () => {
