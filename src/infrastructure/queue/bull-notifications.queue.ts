@@ -39,15 +39,38 @@ export class BullNotificationQueue implements NotificationJobQueue {
   }
 
   async enqueueDelivery(deliveryId: string, delayMs = 0): Promise<void> {
-    await this.queue.add(
-      "delivery",
-      { kind: "delivery", deliveryId },
-      { jobId: `delivery-${deliveryId}`, delay: delayMs }
-    );
+    const jobId = `delivery-${deliveryId}`;
+
+    // BullMQ ignores an add whose id exists in ANY state, and this queue keeps finished
+    // jobs (an hour) and failed ones (seven days). Callers only enqueue a delivery that is
+    // still QUEUED, so a FINISHED job under this id means the delivery was never settled:
+    // typically a transient wallet outage that spent all five attempts. Left in place it
+    // would swallow the re-enqueue by the birthday and bono crons and by the broadcast
+    // fan-out, stranding the delivery. A waiting, delayed or active job is kept, which is
+    // the deduplication this id exists for.
+    await this.clearFinishedJob(jobId);
+    await this.queue.add("delivery", { kind: "delivery", deliveryId }, { jobId, delay: delayMs });
   }
 
   async enqueuePointsCredit(job: PointsCreditNotificationJob): Promise<void> {
     await this.queue.add("points-credit", { kind: "points-credit", ...job });
+  }
+
+  private async clearFinishedJob(jobId: string): Promise<void> {
+    const existing = await this.queue.getJob(jobId);
+
+    if (!existing) return;
+
+    const state = await existing.getState();
+
+    if (state !== "failed" && state !== "completed") return;
+
+    try {
+      await existing.remove();
+    } catch {
+      // Gone already (retention removed it) or picked up in between: either way the add
+      // below does the right thing, so this is not worth failing the enqueue for.
+    }
   }
 
   async close(): Promise<void> {

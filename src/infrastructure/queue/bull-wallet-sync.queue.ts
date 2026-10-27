@@ -31,9 +31,20 @@ export const redisConnection = (url: string): ConnectionOptions => ({
 /**
  * The durable queue.
  *
- * Jobs are keyed by member, so a member whose points change five times in a burst is
- * synced once rather than five times — the wallet only ever shows the latest state, so
- * collapsing them is correct and not merely an optimisation.
+ * Every change enqueues its own job. The job carries only the member id and the sync
+ * rebuilds the whole card from the database when the job RUNS, so a job is "bring this
+ * member up to date as of now": N changes in a burst cost up to N idempotent syncs, and
+ * each of them runs after the change that requested it.
+ *
+ * Do NOT give these jobs an id derived from the member (`member-<id>`), and do not turn
+ * on BullMQ `deduplication`, to "collapse a burst":
+ *  - BullMQ ignores an add whose job id already exists in ANY state. This queue keeps
+ *    completed jobs for an hour and failed jobs for seven days, so after a member's first
+ *    sync every later change was silently dropped for that long (a visit credited three
+ *    times left the Apple card on the first balance forever, and no push ever fired).
+ *  - Deduplication in simple mode also drops an add made while a job is active, and that
+ *    job may already have read the member's state, so the new change would be lost.
+ * Retention is therefore harmless here: a finished job can never block a later one.
  */
 export class BullWalletSyncQueue implements WalletSyncQueue {
   private readonly queue: Queue<WalletSyncJob>;
@@ -56,13 +67,10 @@ export class BullWalletSyncQueue implements WalletSyncQueue {
 
   async enqueueMemberSync(memberId: string): Promise<void> {
     try {
-      await this.queue.add(
-        WALLET_SYNC_QUEUE,
-        { memberId },
-        // Deduplicates a burst into one job. A job already running is not replaced —
-        // the next change enqueues again, so nothing is dropped.
-        { jobId: `member-${memberId}` }
-      );
+      // No jobId on purpose, so BullMQ generates a unique one and this add can never be
+      // ignored because an earlier job for the member still exists (see the class
+      // comment). Every change gets a sync that runs after it.
+      await this.queue.add(WALLET_SYNC_QUEUE, { memberId });
     } catch (cause) {
       // Enqueueing must never fail the caller: Redis being unreachable is an operational
       // problem, not a reason to reject a visit at reception.
