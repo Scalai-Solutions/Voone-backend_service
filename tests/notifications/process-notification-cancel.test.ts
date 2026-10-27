@@ -15,6 +15,14 @@ interface World {
   /** The clinic cancels while the Apple recipients are being looked up (Apple-only clinic). */
   cancelDuringFanOut?: boolean;
   sendFails?: boolean;
+  /** The first send fails, later ones work (a transient error, then the retry). */
+  sendFailsOnce?: boolean;
+  /** The first write of SENT rejects (database hiccup right after the message went out). */
+  statusWriteFailsOnce?: boolean;
+  /** Every write of the provider message id on its own rejects. */
+  idWriteFails?: boolean;
+  /** The monthly counter write rejects. */
+  countFails?: boolean;
 }
 
 type Where = { status?: { notIn?: NotificationStatus[]; in?: NotificationStatus[] } };
@@ -26,7 +34,9 @@ const build = (world: World = {}) => {
     sent: [] as string[],
     removed: [] as Array<{ target: unknown; messageId: string }>,
     increments: 0,
-    fanOutLookups: 0
+    fanOutLookups: 0,
+    sendAttempts: 0,
+    statusWriteFailed: false
   };
   const prisma = {
     notification: {
@@ -39,7 +49,7 @@ const build = (world: World = {}) => {
           body: "There",
           actionUrl: null,
           notify: false,
-          providerMessageId: null,
+          providerMessageId: state.providerMessageId,
           status: state.status
         };
 
@@ -56,6 +66,17 @@ const build = (world: World = {}) => {
         where: Where;
         data: { status?: NotificationStatus; providerMessageId?: string };
       }) => {
+        if (world.idWriteFails && data.providerMessageId && !data.status) {
+          throw new Error("postgres://user:secret@host:5432 down");
+        }
+        if (
+          world.statusWriteFailsOnce &&
+          data.status === NotificationStatus.SENT &&
+          !state.statusWriteFailed
+        ) {
+          state.statusWriteFailed = true;
+          throw new Error("postgres://user:secret@host:5432 down");
+        }
         if (where.status?.notIn?.includes(state.status)) return { count: 0 };
         if (where.status?.in && !where.status.in.includes(state.status)) return { count: 0 };
         if (data.status) state.status = data.status;
@@ -80,14 +101,19 @@ const build = (world: World = {}) => {
     notificationDelivery: { findMany: async () => [] },
     clinic: {
       update: async () => {
+        if (world.countFails) throw new Error("postgres://user:secret@host:5432 down");
+
         state.increments += 1;
       }
     }
   };
   const wallet = {
     addClassMessage: async () => {
+      state.sendAttempts += 1;
       if (world.cancelDuringSend) state.status = NotificationStatus.CANCELLED;
-      if (world.sendFails) throw new Error("google down");
+      if (world.sendFails || (world.sendFailsOnce && state.sendAttempts === 1)) {
+        throw new Error("google down");
+      }
 
       state.sent.push("message-1");
       return { messageId: "message-1" };
@@ -109,6 +135,7 @@ const build = (world: World = {}) => {
 
 beforeEach(() => {
   vi.spyOn(console, "info").mockImplementation(() => undefined);
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
 });
 
@@ -204,5 +231,76 @@ describe("processNotification and a cancelled broadcast", () => {
 
     await expect(service.processNotification("notification-1")).rejects.toThrow("google down");
     expect(state.status).toBe(NotificationStatus.CANCELLED);
+  });
+
+  it("does not send again on the retry after the SENT write failed once the message was out", async () => {
+    const { service, state } = build({ statusWriteFailsOnce: true });
+
+    await expect(service.processNotification("notification-1")).resolves.toBeUndefined();
+
+    expect(state.sendAttempts).toBe(1);
+    expect(state.providerMessageId).toBe("message-1");
+    expect(state.status).toBe(NotificationStatus.PROCESSING);
+
+    // The queue would only retry if the first run threw; a retry must still not resend.
+    await service.processNotification("notification-1");
+
+    expect(state.sendAttempts).toBe(1);
+    expect(state.status).toBe(NotificationStatus.SENT);
+    // Counted by the first run; the retry cannot know and must not count again.
+    expect(state.increments).toBe(1);
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("secret");
+  });
+
+  it("does not mark the broadcast FAILED, rethrow or resend when the counter write fails after the send", async () => {
+    const { service, state } = build({ countFails: true });
+
+    await expect(service.processNotification("notification-1")).resolves.toBeUndefined();
+
+    expect(state.status).toBe(NotificationStatus.SENT);
+    expect(state.providerMessageId).toBe("message-1");
+
+    await service.processNotification("notification-1");
+
+    expect(state.sendAttempts).toBe(1);
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("secret");
+  });
+
+  it("finalises a broadcast that has a provider message id but never reached SENT, without sending or counting", async () => {
+    const { service, state } = build({ status: NotificationStatus.FAILED });
+
+    state.providerMessageId = "message-0";
+
+    await service.processNotification("notification-1");
+
+    expect(state.sendAttempts).toBe(0);
+    expect(state.status).toBe(NotificationStatus.SENT);
+    expect(state.increments).toBe(0);
+  });
+
+  it("retries normally after a pre-send failure: FAILED, then one message and SENT", async () => {
+    const { service, state } = build({ sendFailsOnce: true });
+
+    await expect(service.processNotification("notification-1")).rejects.toThrow("google down");
+    expect(state.status).toBe(NotificationStatus.FAILED);
+    expect(state.providerMessageId).toBeNull();
+
+    await service.processNotification("notification-1");
+
+    expect(state.sendAttempts).toBe(2);
+    expect(state.status).toBe(NotificationStatus.SENT);
+    expect(state.increments).toBe(1);
+  });
+
+  it("still removes the class message when the id write fails after a cancel during the send", async () => {
+    const { service, state } = build({ cancelDuringSend: true, idWriteFails: true });
+
+    await expect(service.processNotification("notification-1")).resolves.toBeUndefined();
+
+    expect(state.status).toBe(NotificationStatus.CANCELLED);
+    expect(state.removed).toEqual([
+      { target: { kind: "class", id: "class-1" }, messageId: "message-1" }
+    ]);
+    expect(state.increments).toBe(0);
   });
 });

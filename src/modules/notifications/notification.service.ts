@@ -660,6 +660,32 @@ export class NotificationService {
 
     if (notification.type !== NotificationType.BROADCAST) return;
 
+    if (notification.providerMessageId) {
+      // The class message already went out (its id is stored first, right after the send), but
+      // the run died before the status moved to SENT: finalise it, never send it again. Not
+      // counted here: whether the first run counted it is not knowable, so under-count rather
+      // than double count.
+      await this.prisma.notification.updateMany({
+        where: {
+          id: notification.id,
+          status: {
+            notIn: [
+              NotificationStatus.CANCELLED,
+              NotificationStatus.SENT,
+              NotificationStatus.PARTIAL_FAILED
+            ]
+          }
+        },
+        data: { status: NotificationStatus.SENT }
+      });
+      console.warn("[notifications] broadcast already sent; finalised without resending", {
+        notificationId: notification.id
+      });
+      await this.fanOutAppleBroadcast(notification);
+
+      return;
+    }
+
     const walletClass = await this.findGoogleClass(notification.clinicId);
 
     // Atomic claim: a clinic may cancel (or a stalled job's other processor may finish) between
@@ -699,39 +725,16 @@ export class NotificationService {
       return;
     }
 
+    let message: { messageId: string };
+
+    // Only the send is in this try: a failure here means nothing went out, so FAILED (and a
+    // retry that sends again) is right. Everything after the send is outside it.
     try {
-      const message = await this.wallet.addClassMessage(walletClass.externalClassId, {
+      message = await this.wallet.addClassMessage(walletClass.externalClassId, {
         header: notification.header,
         body: this.bodyWithAction(notification.body, notification.actionUrl),
         notify: notification.notify,
         actionUrl: notification.actionUrl ?? undefined
-      });
-
-      const finished = await this.prisma.notification.updateMany({
-        where: { id: notification.id, status: { notIn: [NotificationStatus.CANCELLED] } },
-        data: { status: NotificationStatus.SENT, providerMessageId: message.messageId }
-      });
-
-      if (finished.count === 0) {
-        // Cancelled while the class message was being written. The clinic's delete ran before
-        // the message id existed, so it could not remove the message: do it here. The status
-        // stays CANCELLED, nothing is counted and no Apple deliveries are created.
-        await this.prisma.notification.updateMany({
-          where: { id: notification.id },
-          data: { providerMessageId: message.messageId }
-        });
-        await this.bestEffortRemove(
-          { kind: "class", id: walletClass.externalClassId },
-          message.messageId
-        );
-        return;
-      }
-
-      await this.countManualNotification(notification.clinicId, notification.type);
-
-      console.info("[notifications] broadcast sent", {
-        notificationId: notification.id,
-        clinicId: notification.clinicId
       });
     } catch (error) {
       await this.prisma.notification.updateMany({
@@ -741,9 +744,74 @@ export class NotificationService {
       throw error;
     }
 
+    // The class message is out. From here nothing may throw to the job: a retry would send it
+    // to every Google member again. The message id goes first, on its own, because it is what
+    // a retry uses to know the message already went out. Failures are logged by error name.
+    await this.afterClassSend(notification.id, "provider message id write failed", () =>
+      this.prisma.notification.updateMany({
+        where: { id: notification.id },
+        data: { providerMessageId: message.messageId }
+      })
+    );
+
+    let cancelled = false;
+
+    try {
+      const finished = await this.prisma.notification.updateMany({
+        where: { id: notification.id, status: { notIn: [NotificationStatus.CANCELLED] } },
+        data: { status: NotificationStatus.SENT }
+      });
+
+      cancelled = finished.count === 0;
+    } catch (error) {
+      // Stays PROCESSING; a retry sees the message id, finalises it and does not resend.
+      this.logPostClassSendFailure("status write failed", notification.id, error);
+    }
+
+    if (cancelled) {
+      // Cancelled while the class message was being written. The clinic's delete ran before
+      // the message id existed, so it could not remove the message: do it here. The status
+      // stays CANCELLED, nothing is counted and no Apple deliveries are created.
+      await this.bestEffortRemove(
+        { kind: "class", id: walletClass.externalClassId },
+        message.messageId
+      );
+      return;
+    }
+
+    // A failed count is an under-count rather than a duplicate: a retry cannot tell whether it
+    // was counted, so it never counts.
+    await this.afterClassSend(notification.id, "counter write failed", () =>
+      this.countManualNotification(notification.clinicId, notification.type)
+    );
+
+    console.info("[notifications] broadcast sent", {
+      notificationId: notification.id,
+      clinicId: notification.clinicId
+    });
+
     // Outside the try on purpose: the Google message is already out, so a failure here must
     // not mark the broadcast FAILED and must not repeat it on retry.
     await this.fanOutAppleBroadcast(notification);
+  }
+
+  private async afterClassSend(
+    notificationId: string,
+    what: string,
+    write: () => Promise<unknown>
+  ): Promise<void> {
+    try {
+      await write();
+    } catch (error) {
+      this.logPostClassSendFailure(what, notificationId, error);
+    }
+  }
+
+  private logPostClassSendFailure(what: string, notificationId: string, error: unknown): void {
+    console.error(`[notifications] ${what} after the class message was sent`, {
+      notificationId,
+      error: error instanceof Error ? error.name : "UNKNOWN"
+    });
   }
 
   /**
