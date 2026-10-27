@@ -193,7 +193,9 @@ describe("Google card: redeemable rewards", () => {
     await provider().syncCard(ref, { ...rewardsPass, rewards: undefined });
 
     expect(moduleOf("rewards")?.body).toBe("kept");
-    expect(google.calls.at(-1)?.body).not.toHaveProperty("secondaryLoyaltyPoints");
+    expect(google.calls.filter((c) => c.method === "PATCH").at(-1)?.body).not.toHaveProperty(
+      "secondaryLoyaltyPoints"
+    );
   });
 
   it("the points-credit patch does not drop the rewards module", async () => {

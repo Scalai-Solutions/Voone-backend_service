@@ -79,7 +79,9 @@ export interface LoyaltyObjectInput {
 }
 
 export type LoyaltyObjectPatch = Partial<
-  Pick<LoyaltyObjectInput, "loyaltyPointsBalance" | "tier" | "state" | "rewards" | "tierBenefits">
+  Pick<LoyaltyObjectInput, "loyaltyPointsBalance" | "tier" | "state" | "rewards">
 > & {
+  /** The module's text; `null` REMOVES a stale module (a card with no tier benefits). */
+  tierBenefits?: LoyaltyTierBenefitsInput | null;
   notify?: boolean;
 };

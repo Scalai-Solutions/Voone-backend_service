@@ -125,16 +125,15 @@ export class GoogleWalletProvider extends BaseWalletProvider {
 
     // The rewards and the tier benefits go in a patch of their own, after the one that matters: a
     // Google rejection of these newer fields must never stop the balance and tier updating. Both
-    // are undefined for a clinic with no programme, which leaves them alone.
+    // rewards are undefined for a clinic with no programme, which leaves them alone. A card with no
+    // tier benefits (no live programme, or a tier with none) removes a stale module from the object.
     const rewards = this.toRewards(card);
     const tierBenefits = this.toTierBenefits(card);
-
-    if (!rewards && !tierBenefits) return;
 
     try {
       await patchObject(ref.externalId, {
         ...(rewards ? { rewards } : {}),
-        ...(tierBenefits ? { tierBenefits } : {})
+        tierBenefits: tierBenefits ?? null
       });
     } catch (error) {
       console.error("[wallet] Google card rewards and tier benefits were not updated", {
@@ -258,7 +257,7 @@ export class GoogleWalletProvider extends BaseWalletProvider {
           body: DEFAULT_WALLET_BENEFIT_CTA
         },
         // A clinic whose live programme owns the benefits shows them per member instead (the
-        // object's tier-benefits module), so its hand-typed text is not shown to everybody.
+        // object's tierbenefits module), so its hand-typed text is not shown to everybody.
         ...(template.benefitsText && !program.tierBenefitsFromProgramme
           ? [
               {

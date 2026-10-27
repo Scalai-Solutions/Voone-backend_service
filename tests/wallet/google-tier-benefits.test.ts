@@ -13,8 +13,10 @@ type Stored = Record<string, unknown> & {
 const google = vi.hoisted(() => ({
   objects: new Map<string, Record<string, unknown>>(),
   calls: [] as Array<{ path: string; method: string; body?: Record<string, unknown> }>,
-  /** Google refusing any write that carries the tier-benefits module. */
-  rejectTierBenefits: false
+  /** Google refusing any write that carries the tierbenefits module. */
+  rejectTierBenefits: false,
+  /** Google refusing the second, best-effort patch (the one without the balance). */
+  rejectBestEffort: false
 }));
 
 // Google's object store with its PATCH semantics: top-level fields REPLACE what is stored.
@@ -32,11 +34,19 @@ vi.mock("../../src/wallet/providers/google/client", async (importOriginal) => {
     if (
       google.rejectTierBenefits &&
       method !== "GET" &&
-      JSON.stringify(options?.body).includes("tier-benefits")
+      JSON.stringify(options?.body).includes("tierbenefits")
     ) {
       throw new original.GoogleWalletApiError("bad module", 400, "Bad Request", {
         member: "private-data"
       });
+    }
+
+    if (
+      google.rejectBestEffort &&
+      method === "PATCH" &&
+      !("loyaltyPoints" in (options?.body ?? {}))
+    ) {
+      throw new original.GoogleWalletApiError("bad patch", 500, "Server Error");
     }
 
     if (method === "POST") {
@@ -95,14 +105,15 @@ beforeEach(() => {
   google.objects.clear();
   google.calls.length = 0;
   google.rejectTierBenefits = false;
+  google.rejectBestEffort = false;
 });
 
 describe("Google card: the member's tier benefits", () => {
-  it("creates the object with the tier-benefits module, the same words as the Apple field", async () => {
+  it("creates the object with the tierbenefits module, the same words as the Apple field", async () => {
     await issue(withTier);
 
-    expect(moduleOf("tier-benefits")).toEqual({
-      id: "tier-benefits",
+    expect(moduleOf("tierbenefits")).toEqual({
+      id: "tierbenefits",
       header: "Beneficios de tu nivel",
       body: TEXT
     });
@@ -111,7 +122,7 @@ describe("Google card: the member's tier benefits", () => {
   it("adds no such module for a clinic with no programme", async () => {
     await issue({ ...rewardsPass, tierBenefits: undefined });
 
-    expect(moduleOf("tier-benefits")).toBeUndefined();
+    expect(moduleOf("tierbenefits")).toBeUndefined();
   });
 
   it("a sync adds the module and keeps every other module", async () => {
@@ -130,8 +141,8 @@ describe("Google card: the member's tier benefits", () => {
 
     const after = stored().textModulesData ?? [];
 
-    expect(after.map((m) => m.id).sort()).toEqual([...before, "tier-benefits"].sort());
-    expect(after.find((m) => m.id === "tier-benefits")?.body).toBe(TEXT);
+    expect(after.map((m) => m.id).sort()).toEqual([...before, "tierbenefits"].sort());
+    expect(after.find((m) => m.id === "tierbenefits")?.body).toBe(TEXT);
     expect(after.find((m) => m.id === "benefits")?.body).toBe("Ventajas.");
     expect(after.find((m) => m.id === "info")?.body).toBe("Info.");
     expect(after.find((m) => m.id === "rewards")?.body).toContain("🎁 Limpieza facial");
@@ -147,7 +158,7 @@ describe("Google card: the member's tier benefits", () => {
       tierBenefits: { tier: "Oro", lines: ["Happy Hour"] }
     });
 
-    expect(moduleOf("tier-benefits")?.body).toBe("Oro\n• Happy Hour");
+    expect(moduleOf("tierbenefits")?.body).toBe("Oro\n• Happy Hour");
     expect(moduleOf("tier")?.body).toBe("Oro");
   });
 
@@ -160,9 +171,9 @@ describe("Google card: the member's tier benefits", () => {
     const patches = google.calls.filter((c) => c.method === "PATCH");
 
     expect(patches).toHaveLength(2);
-    expect(JSON.stringify(patches[0].body)).not.toContain("tier-benefits");
+    expect(JSON.stringify(patches[0].body)).not.toContain("tierbenefits");
     expect(patches[0].body).toHaveProperty("loyaltyPoints");
-    expect(JSON.stringify(patches[1].body)).toContain("tier-benefits");
+    expect(JSON.stringify(patches[1].body)).toContain("tierbenefits");
   });
 
   it("sends a patch of its own for a programme clinic that has no rewards parts", async () => {
@@ -171,7 +182,7 @@ describe("Google card: the member's tier benefits", () => {
 
     await provider().syncCard(ref, { ...withTier, rewards: undefined });
 
-    expect(moduleOf("tier-benefits")?.body).toBe(TEXT);
+    expect(moduleOf("tierbenefits")?.body).toBe(TEXT);
   });
 
   it("still updates the balance, and succeeds, when Google rejects the module", async () => {
@@ -197,7 +208,7 @@ describe("Google card: the member's tier benefits", () => {
     await expect(issue(withTier)).resolves.toBeDefined();
 
     expect(stored()).toBeDefined();
-    expect(moduleOf("tier-benefits")).toBeUndefined();
+    expect(moduleOf("tierbenefits")).toBeUndefined();
     expect(moduleOf("points")).toBeDefined();
     error.mockRestore();
   });
@@ -207,6 +218,64 @@ describe("Google card: the member's tier benefits", () => {
 
     await patchObject(OBJECT_ID, { loyaltyPointsBalance: 2000, notify: true });
 
-    expect(moduleOf("tier-benefits")?.body).toBe(TEXT);
+    expect(moduleOf("tierbenefits")?.body).toBe(TEXT);
+  });
+});
+
+describe("Google card: a stale tier benefits module", () => {
+  it("is removed by a sync whose card has no tier benefits, keeping every other module", async () => {
+    await issue(withTier);
+
+    await provider().syncCard(ref, { ...withTier, tierBenefits: undefined, points: 1900 });
+
+    const ids = (stored().textModulesData ?? []).map((m) => m.id);
+
+    expect(ids).not.toContain("tierbenefits");
+    expect(ids).toEqual(expect.arrayContaining(["points", "member_id", "tier", "rewards"]));
+    expect(moduleOf("points")?.body).toBe("1900");
+  });
+
+  it("is removed for a clinic that no longer has a live programme (no rewards either)", async () => {
+    await issue(withTier);
+
+    await provider().syncCard(ref, { ...withTier, tierBenefits: undefined, rewards: undefined });
+
+    expect(moduleOf("tierbenefits")).toBeUndefined();
+    expect(moduleOf("rewards")?.body).toContain("🎁 Limpieza facial");
+  });
+
+  it("is removed in the best-effort patch, after the balance patch", async () => {
+    await issue(withTier);
+    google.calls.length = 0;
+
+    await provider().syncCard(ref, { ...withTier, tierBenefits: undefined });
+
+    const patches = google.calls.filter((c) => c.method === "PATCH");
+
+    expect(JSON.stringify(patches[1].body)).not.toContain("tierbenefits");
+    expect(patches[0].body).toHaveProperty("loyaltyPoints");
+  });
+
+  it("costs a clinic with no programme and no such module no extra write", async () => {
+    await issue({ ...rewardsPass, rewards: undefined, tierBenefits: undefined });
+    google.calls.length = 0;
+
+    await provider().syncCard(ref, { ...rewardsPass, rewards: undefined, tierBenefits: undefined });
+
+    expect(google.calls.filter((c) => c.method === "PATCH")).toHaveLength(1);
+  });
+
+  it("does not stop the balance patch if the removal fails", async () => {
+    await issue(withTier);
+    google.rejectBestEffort = true;
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(
+      provider().syncCard(ref, { ...withTier, tierBenefits: undefined, points: 1900 })
+    ).resolves.toBeUndefined();
+
+    expect(moduleOf("points")?.body).toBe("1900");
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
   });
 });

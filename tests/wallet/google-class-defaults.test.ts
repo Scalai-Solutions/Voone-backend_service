@@ -234,7 +234,7 @@ describe("the Spanish, neutral words on a Google card", () => {
     };
 
     expect(JSON.stringify(body.classTemplateInfo.detailsTemplateOverride)).toContain(
-      "object.textModulesData['tier-benefits']"
+      "object.textModulesData['tierbenefits']"
     );
   });
 

@@ -365,7 +365,7 @@ export const PRODUCTION_DETAILS_TEMPLATE_FIELD_PATHS = [
   "object.textModulesData['rewards']",
   // Per member: the benefits of their current tier, for a clinic whose programme owns them.
   // Absent from the object of any other clinic, where the item simply does not render.
-  "object.textModulesData['tier-benefits']",
+  "object.textModulesData['tierbenefits']",
   "class.textModulesData['benefits']",
   "object.accountName",
   "object.accountId",

@@ -13,7 +13,7 @@ export const REWARDS_MODULE_ID = "rewards";
 export const REWARDS_MODULE_HEADER = "Recompensas disponibles";
 export const REWARDS_COUNT_LABEL = "Regalos";
 /** The per-member module the class details point at for a clinic whose programme owns the benefits. */
-export const TIER_BENEFITS_MODULE_ID = "tier-benefits";
+export const TIER_BENEFITS_MODULE_ID = "tierbenefits";
 export const TIER_BENEFITS_MODULE_HEADER = "Beneficios de tu nivel";
 
 interface GoogleSecondaryLoyaltyPoints {
@@ -167,7 +167,7 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
     const existingHeaderFor = (id: string, fallback: string): string =>
       existingTextModules.find((module) => module.id === id)?.header ?? fallback;
 
-    body.textModulesData = upsertTextModules(existingTextModules, [
+    const merged = upsertTextModules(existingTextModules, [
       ...(patch.loyaltyPointsBalance !== undefined
         ? [
             {
@@ -183,7 +183,7 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
       ...(patch.rewards !== undefined
         ? [{ id: REWARDS_MODULE_ID, header: REWARDS_MODULE_HEADER, body: patch.rewards.text }]
         : []),
-      ...(patch.tierBenefits !== undefined
+      ...(patch.tierBenefits
         ? [
             {
               id: TIER_BENEFITS_MODULE_ID,
@@ -193,6 +193,20 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
           ]
         : [])
     ]);
+    // The merge keeps modules it does not know, so a stale tier benefits module is dropped by name.
+    const next =
+      patch.tierBenefits === null
+        ? merged.filter((module) => module.id !== TIER_BENEFITS_MODULE_ID)
+        : merged;
+    const onlyRemoval =
+      patch.loyaltyPointsBalance === undefined &&
+      patch.tier === undefined &&
+      patch.rewards === undefined;
+
+    // A removal with nothing to remove writes nothing: most clinics have no such module.
+    if (!onlyRemoval || next.length !== existingTextModules.length) {
+      body.textModulesData = next;
+    }
   }
 
   if (patch.rewards !== undefined) {
