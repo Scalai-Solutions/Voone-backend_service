@@ -116,7 +116,9 @@ export interface BirthdayCronHandle {
 
 export const startBirthdayNotificationCron = (
   notifications: NotificationService,
-  cronSchedule: BirthdayCronSchedule = defaultSchedule()
+  cronSchedule: BirthdayCronSchedule = defaultSchedule(),
+  /** Other work that rides the same daily tick. Failures are logged and never stop the cron. */
+  alsoDaily?: () => Promise<unknown>
 ): BirthdayCronHandle => {
   let timer: NodeJS.Timeout | null = null;
   let stopped = false;
@@ -153,6 +155,16 @@ export const startBirthdayNotificationCron = (
       } catch (error) {
         console.error("[notifications] bono reminder cron failed", {
           error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+
+    if (alsoDaily) {
+      try {
+        await alsoDaily();
+      } catch (error) {
+        console.error("[notifications] daily wallet task failed", {
+          error: error instanceof Error ? error.name : "unknown"
         });
       }
     }

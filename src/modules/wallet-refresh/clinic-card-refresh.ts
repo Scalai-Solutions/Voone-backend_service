@@ -16,13 +16,31 @@ const PAUSE_MS = 250;
 
 let queue: WalletSyncQueue | null | undefined;
 
-const walletQueue = (): WalletSyncQueue | null => {
+/** The one queue this process's refreshes share, built on first use. */
+export const walletQueue = (): WalletSyncQueue | null => {
   if (queue === undefined) queue = buildWalletSyncQueue(prisma);
 
   return queue;
 };
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * One sync per member, in batches with a pause: inline mode starts every sync at once, and
+ * signing a pass is CPU-bound on the same process that serves reception.
+ */
+export const enqueueInBatches = async (
+  syncQueue: WalletSyncQueue,
+  memberIds: string[]
+): Promise<void> => {
+  for (let index = 0; index < memberIds.length; index += BATCH) {
+    await Promise.all(
+      memberIds.slice(index, index + BATCH).map((memberId) => syncQueue.enqueueMemberSync(memberId))
+    );
+
+    if (index + BATCH < memberIds.length) await pause(PAUSE_MS);
+  }
+};
 
 const refreshClinicGoogleClasses = async (clinicId: string): Promise<void> => {
   await refreshGoogleClasses({ clinicId, apply: true });
@@ -56,15 +74,10 @@ export const refreshClinicCards = async (
       select: { id: true }
     });
 
-    // In batches with a pause: inline mode starts every sync at once, and signing a pass is
-    // CPU-bound on the same process that serves reception.
-    for (let index = 0; index < members.length; index += BATCH) {
-      await Promise.all(
-        members.slice(index, index + BATCH).map((member) => syncQueue.enqueueMemberSync(member.id))
-      );
-
-      if (index + BATCH < members.length) await pause(PAUSE_MS);
-    }
+    await enqueueInBatches(
+      syncQueue,
+      members.map((member) => member.id)
+    );
 
     return members.length;
   } catch (error) {
