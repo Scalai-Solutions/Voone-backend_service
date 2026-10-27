@@ -17,6 +17,12 @@ const google = vi.hoisted(() => ({
   rejectRewards: false
 }));
 
+// Issuing a card builds a save link, which signs with the service account key. CI has no key (and
+// a test must never sign with a real one), so the link is a fixed stand-in.
+vi.mock("../../src/wallet/providers/google/jwt", () => ({
+  buildSaveLink: (objectId: string) => `https://pay.google.com/gp/v/save/test-${objectId}`
+}));
+
 // A small stand-in for Google's object store with Google's PATCH semantics: top-level fields in
 // the body REPLACE what is stored, so an array patched with one element leaves one element.
 vi.mock("../../src/wallet/providers/google/client", async (importOriginal) => {
