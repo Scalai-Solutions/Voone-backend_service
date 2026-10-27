@@ -55,6 +55,13 @@ export class BullNotificationQueue implements NotificationJobQueue {
   }
 }
 
+/**
+ * True when BullMQ will not run this job again: its last attempt is used (attemptsMade
+ * already counts the failure that raised the event), or the error opted out of retries.
+ */
+const isFinalFailure = (job: Job<NotificationQueueJob>, error: Error): boolean =>
+  error.name === "UnrecoverableError" || job.attemptsMade >= (job.opts.attempts ?? 1);
+
 export const createNotificationWorker = (
   redisUrl: string,
   service: NotificationService,
@@ -80,6 +87,26 @@ export const createNotificationWorker = (
 
   worker.on("failed", (job, error) => {
     console.error(`[notifications] job ${job?.id ?? "?"} failed:`, error.message);
+
+    if (!job || !isFinalFailure(job, error)) return;
+
+    // Terminal on purpose, never a re-enqueue: a Google message may have been written before
+    // the job failed, and running it again could post a duplicate. The service methods are
+    // written never to reject; the catch is a second line so this handler cannot raise an
+    // unhandled rejection either way.
+    const close =
+      job.data.kind === "delivery"
+        ? service.failExhaustedDelivery(job.data.deliveryId)
+        : job.data.kind === "notification"
+          ? service.failExhaustedNotification(job.data.notificationId)
+          : null;
+
+    void close?.catch((closeError: unknown) => {
+      console.error("[notifications] could not close an exhausted job", {
+        jobId: job.id,
+        error: closeError instanceof Error ? closeError.name : "UNKNOWN"
+      });
+    });
   });
   worker.on("error", createRepeatingErrorLogger("[notifications] worker error:"));
 

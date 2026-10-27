@@ -2,6 +2,7 @@ import { Redis } from "ioredis";
 import { Queue, type Worker } from "bullmq";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { NOTIFICATIONS_QUEUE } from "../../src/infrastructure/queue/bull-notifications.queue";
 import {
   BullWalletSyncQueue,
   WALLET_SYNC_QUEUE,
@@ -25,8 +26,10 @@ import type { WalletSyncService } from "../../src/wallet/engine/wallet-sync.serv
  *  - an explicit port that is not Redis's default 6379, so a developer's everyday Redis
  *    is never the target by accident;
  *  - no database index 0 on the URL (index 0 is where everything else lives);
- *  - the instance holds no keys other than BullMQ's wallet-sync ones (checked before
- *    anything is deleted; a dev Redis with other data fails loudly instead of being wiped).
+ *  - the instance holds no keys other than BullMQ's wallet-sync and wallet-notifications
+ *    ones (checked before anything is deleted; a dev Redis with other data fails loudly
+ *    instead of being wiped). Both queue suites may share one throwaway instance: each only
+ *    ever wipes its own queue.
  * A malformed URL skips the suite rather than throwing at import.
  */
 const isSafeTestUrl = (value: string | undefined): value is string => {
@@ -81,7 +84,11 @@ describe.skipIf(!enabled)("BullMQ queues against a real Redis", () => {
 
     try {
       const keys = await redis.keys("*");
-      const foreign = keys.filter((key) => !key.startsWith(`bull:${WALLET_SYNC_QUEUE}:`));
+      const foreign = keys.filter(
+        (key) =>
+          !key.startsWith(`bull:${WALLET_SYNC_QUEUE}:`) &&
+          !key.startsWith(`bull:${NOTIFICATIONS_QUEUE}:`)
+      );
 
       if (foreign.length > 0) {
         throw new Error(
