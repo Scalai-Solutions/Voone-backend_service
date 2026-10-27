@@ -102,10 +102,13 @@ const buildWorld = (world: World = {}) => {
         where,
         data
       }: {
-        where: { status?: { notIn: NotificationStatus[] } };
+        where: { status?: { notIn?: NotificationStatus[]; in?: NotificationStatus[] } };
         data: { status?: NotificationStatus };
       }) => {
-        if (where.status?.notIn.includes(state.notificationStatus)) return { count: 0 };
+        if (where.status?.notIn?.includes(state.notificationStatus)) return { count: 0 };
+        if (where.status?.in && !where.status.in.includes(state.notificationStatus)) {
+          return { count: 0 };
+        }
         if (data.status) state.notificationStatus = data.status;
         return { count: 1 };
       }
@@ -416,7 +419,8 @@ describe("which deliveries each kind of message creates", () => {
       {
         notification: {
           findUnique: async () => notification,
-          update: async () => undefined
+          update: async () => undefined,
+          updateMany: async () => ({ count: 1 })
         },
         walletClass: { findFirst: async () => ({ externalClassId: "class-1" }) },
         clinic: { update: async () => undefined },
@@ -689,11 +693,14 @@ describe("two deliveries of one notification finishing together", () => {
           where,
           data
         }: {
-          where: { status: { notIn: NotificationStatus[] } };
+          where: { status: { notIn?: NotificationStatus[]; in?: NotificationStatus[] } };
           data: { status: NotificationStatus };
         }) => {
           await tick();
-          if (where.status.notIn.includes(notificationStatus)) return { count: 0 };
+          if (where.status.notIn?.includes(notificationStatus)) return { count: 0 };
+          if (where.status.in && !where.status.in.includes(notificationStatus)) {
+            return { count: 0 };
+          }
           notificationStatus = data.status;
           return { count: 1 };
         }

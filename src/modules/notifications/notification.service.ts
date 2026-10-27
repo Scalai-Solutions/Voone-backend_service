@@ -660,12 +660,51 @@ export class NotificationService {
 
     if (notification.type !== NotificationType.BROADCAST) return;
 
+    if (notification.providerMessageId) {
+      // The class message already went out (its id is stored first, right after the send), but
+      // the run died before the status moved to SENT: finalise it, never send it again. Not
+      // counted here: whether the first run counted it is not knowable, so under-count rather
+      // than double count.
+      await this.prisma.notification.updateMany({
+        where: {
+          id: notification.id,
+          status: {
+            notIn: [
+              NotificationStatus.CANCELLED,
+              NotificationStatus.SENT,
+              NotificationStatus.PARTIAL_FAILED
+            ]
+          }
+        },
+        data: { status: NotificationStatus.SENT }
+      });
+      console.warn("[notifications] broadcast already sent; finalised without resending", {
+        notificationId: notification.id
+      });
+      await this.fanOutAppleBroadcast(notification);
+
+      return;
+    }
+
     const walletClass = await this.findGoogleClass(notification.clinicId);
 
-    await this.prisma.notification.update({
-      where: { id: notification.id },
+    // Atomic claim: a clinic may cancel (or a stalled job's other processor may finish) between
+    // the read above and this write. FAILED stays claimable so a retry can run again.
+    const claimed = await this.prisma.notification.updateMany({
+      where: {
+        id: notification.id,
+        status: {
+          notIn: [
+            NotificationStatus.CANCELLED,
+            NotificationStatus.SENT,
+            NotificationStatus.PARTIAL_FAILED
+          ]
+        }
+      },
       data: { status: NotificationStatus.PROCESSING }
     });
+
+    if (claimed.count === 0) return;
 
     if (!walletClass) {
       // Apple-only clinic: there is no class-level Google message to send. The per-member Apple
@@ -674,8 +713,8 @@ export class NotificationService {
 
       if (total === 0) {
         // Nobody to send to: done, and nothing real was sent, so nothing is counted.
-        await this.prisma.notification.update({
-          where: { id: notification.id },
+        await this.prisma.notification.updateMany({
+          where: { id: notification.id, status: { notIn: [NotificationStatus.CANCELLED] } },
           data: { status: NotificationStatus.SENT }
         });
       } else if (queued === 0) {
@@ -686,35 +725,93 @@ export class NotificationService {
       return;
     }
 
+    let message: { messageId: string };
+
+    // Only the send is in this try: a failure here means nothing went out, so FAILED (and a
+    // retry that sends again) is right. Everything after the send is outside it.
     try {
-      const message = await this.wallet.addClassMessage(walletClass.externalClassId, {
+      message = await this.wallet.addClassMessage(walletClass.externalClassId, {
         header: notification.header,
         body: this.bodyWithAction(notification.body, notification.actionUrl),
         notify: notification.notify,
         actionUrl: notification.actionUrl ?? undefined
       });
-
-      await this.prisma.notification.update({
-        where: { id: notification.id },
-        data: { status: NotificationStatus.SENT, providerMessageId: message.messageId }
-      });
-      await this.countManualNotification(notification.clinicId, notification.type);
-
-      console.info("[notifications] broadcast sent", {
-        notificationId: notification.id,
-        clinicId: notification.clinicId
-      });
     } catch (error) {
-      await this.prisma.notification.update({
-        where: { id: notification.id },
+      await this.prisma.notification.updateMany({
+        where: { id: notification.id, status: { notIn: [NotificationStatus.CANCELLED] } },
         data: { status: NotificationStatus.FAILED }
       });
       throw error;
     }
 
+    // The class message is out. From here nothing may throw to the job: a retry would send it
+    // to every Google member again. The message id goes first, on its own, because it is what
+    // a retry uses to know the message already went out. Failures are logged by error name.
+    await this.afterClassSend(notification.id, "provider message id write failed", () =>
+      this.prisma.notification.updateMany({
+        where: { id: notification.id },
+        data: { providerMessageId: message.messageId }
+      })
+    );
+
+    let cancelled = false;
+
+    try {
+      const finished = await this.prisma.notification.updateMany({
+        where: { id: notification.id, status: { notIn: [NotificationStatus.CANCELLED] } },
+        data: { status: NotificationStatus.SENT }
+      });
+
+      cancelled = finished.count === 0;
+    } catch (error) {
+      // Stays PROCESSING; a retry sees the message id, finalises it and does not resend.
+      this.logPostClassSendFailure("status write failed", notification.id, error);
+    }
+
+    if (cancelled) {
+      // Cancelled while the class message was being written. The clinic's delete ran before
+      // the message id existed, so it could not remove the message: do it here. The status
+      // stays CANCELLED, nothing is counted and no Apple deliveries are created.
+      await this.bestEffortRemove(
+        { kind: "class", id: walletClass.externalClassId },
+        message.messageId
+      );
+      return;
+    }
+
+    // A failed count is an under-count rather than a duplicate: a retry cannot tell whether it
+    // was counted, so it never counts.
+    await this.afterClassSend(notification.id, "counter write failed", () =>
+      this.countManualNotification(notification.clinicId, notification.type)
+    );
+
+    console.info("[notifications] broadcast sent", {
+      notificationId: notification.id,
+      clinicId: notification.clinicId
+    });
+
     // Outside the try on purpose: the Google message is already out, so a failure here must
     // not mark the broadcast FAILED and must not repeat it on retry.
     await this.fanOutAppleBroadcast(notification);
+  }
+
+  private async afterClassSend(
+    notificationId: string,
+    what: string,
+    write: () => Promise<unknown>
+  ): Promise<void> {
+    try {
+      await write();
+    } catch (error) {
+      this.logPostClassSendFailure(what, notificationId, error);
+    }
+  }
+
+  private logPostClassSendFailure(what: string, notificationId: string, error: unknown): void {
+    console.error(`[notifications] ${what} after the class message was sent`, {
+      notificationId,
+      error: error instanceof Error ? error.name : "UNKNOWN"
+    });
   }
 
   /**
@@ -827,10 +924,9 @@ export class NotificationService {
         actionUrl: delivery.notification.actionUrl ?? undefined
       });
 
-      if (notify) await this.quota.recordPush(object.externalObjectId);
-
-      await this.markDelivery(delivery.id, status, null, message.messageId);
-      await this.refreshNotificationStatus(delivery.notificationId, delivery.notification);
+      await this.finishSentDelivery(delivery, status, null, message.messageId, {
+        recordPushFor: notify ? object.externalObjectId : null
+      });
     } catch (error) {
       if (error instanceof WalletNotificationQuotaExceededError && wantsPush) {
         const message = await this.wallet.addObjectMessage(object.externalObjectId, {
@@ -840,13 +936,13 @@ export class NotificationService {
           actionUrl: delivery.notification.actionUrl ?? undefined
         });
 
-        await this.markDelivery(
-          delivery.id,
+        await this.finishSentDelivery(
+          delivery,
           NotificationDeliveryStatus.DOWNGRADED,
           "QUOTA_EXCEEDED",
-          message.messageId
+          message.messageId,
+          { recordPushFor: null }
         );
-        await this.refreshNotificationStatus(delivery.notificationId, delivery.notification);
         return;
       }
 
@@ -861,6 +957,48 @@ export class NotificationService {
       );
       await this.refreshNotificationStatus(delivery.notificationId, delivery.notification);
     }
+  }
+
+  /**
+   * Bookkeeping after a Google object message went out. Nothing here may throw to the job:
+   * a retry would post the same message to the member again. A failed push-quota record or
+   * delivery write is logged (the error name only) and the job still succeeds; a delivery
+   * that could not be marked stays QUEUED, which is the lesser harm.
+   */
+  private async finishSentDelivery(
+    delivery: { id: string; notificationId: string; notification: NonNullable<NotificationRecord> },
+    status: NotificationDeliveryStatus,
+    errorCode: string | null,
+    messageId: string,
+    push: { recordPushFor: string | null }
+  ): Promise<void> {
+    if (push.recordPushFor) {
+      try {
+        await this.quota.recordPush(push.recordPushFor);
+      } catch (error) {
+        this.logPostSendFailure("quota record failed", delivery.id, error);
+      }
+    }
+
+    try {
+      await this.markDelivery(delivery.id, status, errorCode, messageId);
+    } catch (error) {
+      this.logPostSendFailure("delivery write failed", delivery.id, error);
+      return;
+    }
+
+    try {
+      await this.refreshNotificationStatus(delivery.notificationId, delivery.notification);
+    } catch (error) {
+      this.logPostSendFailure("notification refresh failed", delivery.id, error);
+    }
+  }
+
+  private logPostSendFailure(what: string, deliveryId: string, error: unknown): void {
+    console.error(`[notifications] ${what} after the message was sent`, {
+      deliveryId,
+      error: error instanceof Error ? error.name : "UNKNOWN"
+    });
   }
 
   /**
@@ -1066,81 +1204,100 @@ export class NotificationService {
         walletObject.status === WalletSyncStatus.SYNCED
     );
 
-    const notification = await this.prisma.notification.create({
-      data: {
-        clinicId: member.clinicId,
-        type: job.tierChanged ? NotificationType.TIER : NotificationType.POINTS,
-        header: "Puntos actualizados",
-        body: `Tu saldo ahora es ${shownBalance}`,
-        notify: false,
-        deliveries: {
-          create: {
-            memberId: member.id,
-            provider: WalletProviderType.GOOGLE,
-            status: object ? NotificationDeliveryStatus.QUEUED : NotificationDeliveryStatus.SKIPPED,
-            errorCode: object ? undefined : "NO_GOOGLE_PASS"
-          }
-        }
-      },
-      include: { deliveries: true }
-    });
+    let outcome: { status: NotificationDeliveryStatus; errorCode: string | null };
 
     if (!object) {
-      await this.refreshNotificationStatus(notification.id, notification);
-      return;
-    }
+      outcome = { status: NotificationDeliveryStatus.SKIPPED, errorCode: "NO_GOOGLE_PASS" };
+    } else {
+      const settings = await this.settingsFor(member.clinicId);
+      const shouldNotify =
+        settings.notifyOnCredit === ClinicNotifyOnCredit.ALWAYS ||
+        (settings.notifyOnCredit === ClinicNotifyOnCredit.MILESTONE_AND_TIER &&
+          (job.milestoneReached || job.tierChanged));
+      const notify = shouldNotify && (await this.quota.canPush(object.externalObjectId));
 
-    const settings = await this.settingsFor(member.clinicId);
-    const shouldNotify =
-      settings.notifyOnCredit === ClinicNotifyOnCredit.ALWAYS ||
-      (settings.notifyOnCredit === ClinicNotifyOnCredit.MILESTONE_AND_TIER &&
-        (job.milestoneReached || job.tierChanged));
-    const notify = shouldNotify && (await this.quota.canPush(object.externalObjectId));
+      // The Google patch comes first and its failure leaves no row behind: a transient error
+      // is rethrown for a retry, and a job that exhausts its attempts must not strand a QUEUED
+      // notification and delivery per attempt.
+      let pushed = false;
 
-    try {
-      await this.wallet.patchPoints(object.externalObjectId, {
-        points: shownBalance,
-        tier: member.tier ?? undefined,
-        notify
-      });
-
-      if (notify) await this.quota.recordPush(object.externalObjectId);
-
-      await this.markDelivery(
-        notification.deliveries[0].id,
-        shouldNotify && !notify
-          ? NotificationDeliveryStatus.DOWNGRADED
-          : NotificationDeliveryStatus.SENT,
-        shouldNotify && !notify ? "QUOTA_RESERVED" : null
-      );
-      await this.refreshNotificationStatus(notification.id, notification);
-    } catch (error) {
-      if (error instanceof WalletNotificationQuotaExceededError) {
+      try {
         await this.wallet.patchPoints(object.externalObjectId, {
           points: shownBalance,
           tier: member.tier ?? undefined,
-          notify: false
+          notify
         });
-        await this.markDelivery(
-          notification.deliveries[0].id,
-          NotificationDeliveryStatus.DOWNGRADED,
-          "QUOTA_EXCEEDED"
-        );
-        await this.refreshNotificationStatus(notification.id, notification);
-        return;
+        pushed = notify;
+
+        outcome =
+          shouldNotify && !notify
+            ? { status: NotificationDeliveryStatus.DOWNGRADED, errorCode: "QUOTA_RESERVED" }
+            : { status: NotificationDeliveryStatus.SENT, errorCode: null };
+      } catch (error) {
+        if (error instanceof WalletNotificationQuotaExceededError) {
+          await this.wallet.patchPoints(object.externalObjectId, {
+            points: shownBalance,
+            tier: member.tier ?? undefined,
+            notify: false
+          });
+          outcome = {
+            status: NotificationDeliveryStatus.DOWNGRADED,
+            errorCode: "QUOTA_EXCEEDED"
+          };
+        } else if (error instanceof WalletNotificationNotFoundError) {
+          outcome = { status: NotificationDeliveryStatus.SKIPPED, errorCode: "NOT_FOUND" };
+        } else {
+          throw error;
+        }
       }
 
-      if (error instanceof WalletNotificationNotFoundError) {
-        await this.markDelivery(
-          notification.deliveries[0].id,
-          NotificationDeliveryStatus.SKIPPED,
-          "NOT_FOUND"
-        );
-        await this.refreshNotificationStatus(notification.id, notification);
-        return;
+      // Its own try: the patch (and the push) already happened, so a failure recording it
+      // must not fail the job, and a retry would push the member a second time.
+      if (pushed) {
+        try {
+          await this.quota.recordPush(object.externalObjectId);
+        } catch (error) {
+          console.error("[notifications] quota record failed after the points patch", {
+            memberId: member.id,
+            error: error instanceof Error ? error.name : "UNKNOWN"
+          });
+        }
       }
+    }
 
-      throw error;
+    // After the patch, recording the final outcome. A failure here is logged and swallowed:
+    // the member's card is already updated, and a retry would patch (and maybe push) again.
+    try {
+      await this.prisma.notification.create({
+        data: {
+          clinicId: member.clinicId,
+          type: job.tierChanged ? NotificationType.TIER : NotificationType.POINTS,
+          header: "Puntos actualizados",
+          body: `Tu saldo ahora es ${shownBalance}`,
+          notify: false,
+          // Every outcome here is a finished notification; the delivery carries the detail.
+          status: NotificationStatus.SENT,
+          deliveries: {
+            create: {
+              memberId: member.id,
+              provider: WalletProviderType.GOOGLE,
+              status: outcome.status,
+              errorCode: outcome.errorCode,
+              sentAt:
+                outcome.status === NotificationDeliveryStatus.SENT ||
+                outcome.status === NotificationDeliveryStatus.DOWNGRADED
+                  ? new Date()
+                  : undefined
+            }
+          }
+        }
+      });
+    } catch (error) {
+      // The name only: an error message can carry connection strings.
+      console.error("[notifications] could not record a points credit notification", {
+        memberId: member.id,
+        error: error instanceof Error ? error.name : "UNKNOWN"
+      });
     }
   }
 
@@ -1470,16 +1627,28 @@ export class NotificationService {
     const claimed = await this.prisma.notification.updateMany({
       where: {
         id: notificationId,
-        status: { notIn: [NotificationStatus.SENT, NotificationStatus.PARTIAL_FAILED] }
+        // CANCELLED is excluded too: a notification cancelled after this refresh read its
+        // snapshot must stay cancelled, never be reopened by a late delivery.
+        status: {
+          notIn: [
+            NotificationStatus.SENT,
+            NotificationStatus.PARTIAL_FAILED,
+            NotificationStatus.CANCELLED
+          ]
+        }
       },
       data: { status: nextStatus }
     });
 
     if (claimed.count === 0) {
       // Already SENT or PARTIAL_FAILED (a broadcast whose Apple deliveries later failed):
-      // the status may still move, but it was counted when it first got there.
-      await this.prisma.notification.update({
-        where: { id: notificationId },
+      // the status may still move, but it was counted when it first got there. Conditional
+      // on that, in the same statement, so a CANCELLED row (or one that is gone) is untouched.
+      await this.prisma.notification.updateMany({
+        where: {
+          id: notificationId,
+          status: { in: [NotificationStatus.SENT, NotificationStatus.PARTIAL_FAILED] }
+        },
         data: { status: nextStatus }
       });
 

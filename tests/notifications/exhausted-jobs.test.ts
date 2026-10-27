@@ -19,6 +19,11 @@ interface World {
    * handler's read and its write: the row turns SENT right after the read returns.
    */
   sentAfterRead?: "delivery" | "notification";
+  /**
+   * The clinic cancels the notification after the refresh has read its deliveries and before
+   * it writes the status.
+   */
+  cancelledAfterList?: boolean;
 }
 
 /** An in-memory stand-in for the tables the exhaustion handlers touch. */
@@ -82,10 +87,14 @@ const buildWorld = (world: World = {}) => {
       findMany: async () => {
         if (world.failOn === "deliveryList") throw new Error("connection to db:5432 lost");
 
-        return [
+        const rows = [
           { status: state.deliveryStatus },
           ...(world.others ?? []).map((status) => ({ status }))
         ];
+
+        if (world.cancelledAfterList) state.notificationStatus = NotificationStatus.CANCELLED;
+
+        return rows;
       }
     },
     notification: {
@@ -204,6 +213,48 @@ describe("failExhaustedDelivery", () => {
     expect(state.notificationStatus).toBe(NotificationStatus.CANCELLED);
   });
 
+  it("does not reopen a notification cancelled between the refresh's read and its write (first arrival)", async () => {
+    const { service, state } = buildWorld({
+      notificationStatus: NotificationStatus.PROCESSING,
+      others: [NotificationDeliveryStatus.SENT],
+      cancelledAfterList: true
+    });
+
+    await service.failExhaustedDelivery("delivery-1");
+
+    expect(state.deliveryStatus).toBe(NotificationDeliveryStatus.FAILED);
+    expect(state.notificationStatus).toBe(NotificationStatus.CANCELLED);
+    expect(state.clinicIncrements).toBe(0);
+  });
+
+  it.each([NotificationStatus.SENT, NotificationStatus.PARTIAL_FAILED])(
+    "does not reopen a %s notification cancelled between the refresh's read and its write (later arrival)",
+    async (notificationStatus) => {
+      const { service, state } = buildWorld({
+        notificationStatus,
+        others: [NotificationDeliveryStatus.SENT],
+        cancelledAfterList: true
+      });
+
+      await service.failExhaustedDelivery("delivery-1");
+
+      expect(state.notificationStatus).toBe(NotificationStatus.CANCELLED);
+      expect(state.clinicIncrements).toBe(0);
+    }
+  );
+
+  it("still moves a SENT notification to PARTIAL_FAILED, uncounted, when a later delivery fails", async () => {
+    const { service, state } = buildWorld({
+      notificationStatus: NotificationStatus.SENT,
+      others: [NotificationDeliveryStatus.SENT]
+    });
+
+    await service.failExhaustedDelivery("delivery-1");
+
+    expect(state.notificationStatus).toBe(NotificationStatus.PARTIAL_FAILED);
+    expect(state.clinicIncrements).toBe(0);
+  });
+
   it("leaves a delivery that turned SENT between the read and the write SENT, and does not refresh the notification", async () => {
     const { service, state } = buildWorld({ sentAfterRead: "delivery" });
 
@@ -300,5 +351,77 @@ describe("failExhaustedNotification", () => {
     await expect(service.failExhaustedNotification("notification-1")).resolves.toBeUndefined();
     expect(console.error).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("5432");
+  });
+});
+
+describe("processDelivery and a cancelled notification", () => {
+  it("does not reopen a notification cancelled between its read and the status refresh", async () => {
+    let notificationStatus: NotificationStatus = NotificationStatus.PROCESSING;
+    let deliveryStatus: NotificationDeliveryStatus = NotificationDeliveryStatus.QUEUED;
+    let increments = 0;
+    const prisma = {
+      notificationDelivery: {
+        findUnique: async () => ({
+          id: "delivery-1",
+          notificationId: "notification-1",
+          provider: "GOOGLE",
+          status: deliveryStatus,
+          notification: {
+            id: "notification-1",
+            clinicId: "clinic-1",
+            type: NotificationType.SINGLE,
+            status: NotificationStatus.PROCESSING
+          },
+          // No synced Google object: the delivery is SKIPPED and the refresh runs.
+          member: { walletObjects: [] }
+        }),
+        update: async ({ data }: { data: { status: NotificationDeliveryStatus } }) => {
+          deliveryStatus = data.status;
+        },
+        findMany: async () => {
+          const rows = [{ status: deliveryStatus }];
+
+          notificationStatus = NotificationStatus.CANCELLED;
+          return rows;
+        }
+      },
+      notification: {
+        update: async ({ data }: { data: { status: NotificationStatus } }) => {
+          notificationStatus = data.status;
+        },
+        updateMany: async ({
+          where,
+          data
+        }: {
+          where: { status?: { notIn?: NotificationStatus[]; in?: NotificationStatus[] } };
+          data: { status: NotificationStatus };
+        }) => {
+          if (where.status?.notIn?.includes(notificationStatus)) return { count: 0 };
+          if (where.status?.in && !where.status.in.includes(notificationStatus)) {
+            return { count: 0 };
+          }
+          notificationStatus = data.status;
+          return { count: 1 };
+        }
+      },
+      clinic: {
+        update: async () => {
+          increments += 1;
+        }
+      }
+    };
+    const service = new NotificationService(
+      prisma as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      null
+    );
+
+    await service.processDelivery("delivery-1");
+
+    expect(deliveryStatus).toBe(NotificationDeliveryStatus.SKIPPED);
+    expect(notificationStatus).toBe(NotificationStatus.CANCELLED);
+    expect(increments).toBe(0);
   });
 });
