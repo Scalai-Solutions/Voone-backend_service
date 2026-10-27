@@ -15,6 +15,7 @@ import {
   buildWalletSyncService,
   isWalletSyncConfigured
 } from "../../wallet/wallet.composition";
+import { closeExhaustedJob, isFinalFailure, type ClosableJob } from "./exhausted-job";
 import { InMemoryNotificationQuotaRedis, NotificationQuotaService } from "./quota.service";
 import {
   AppleCardRefresher,
@@ -23,7 +24,7 @@ import {
   PointsCreditNotificationJob
 } from "./notification.service";
 
-class InlineNotificationQueue implements NotificationJobQueue {
+export class InlineNotificationQueue implements NotificationJobQueue {
   private readonly attempts = 5;
 
   private service: NotificationService | null = null;
@@ -33,37 +34,55 @@ class InlineNotificationQueue implements NotificationJobQueue {
   }
 
   async enqueueNotification(notificationId: string, delayMs = 0): Promise<void> {
-    this.runLater(delayMs, `notification-${notificationId}`, () =>
-      this.requiredService().processNotification(notificationId)
+    this.runLater(
+      delayMs,
+      `notification-${notificationId}`,
+      () => this.requiredService().processNotification(notificationId),
+      { kind: "notification", notificationId }
     );
   }
 
   async enqueueDelivery(deliveryId: string, delayMs = 0): Promise<void> {
-    this.runLater(delayMs, `delivery-${deliveryId}`, () =>
-      this.requiredService().processDelivery(deliveryId)
+    this.runLater(
+      delayMs,
+      `delivery-${deliveryId}`,
+      () => this.requiredService().processDelivery(deliveryId),
+      { kind: "delivery", deliveryId }
     );
   }
 
   async enqueuePointsCredit(job: PointsCreditNotificationJob): Promise<void> {
-    this.runLater(0, `points-credit-${job.memberId}`, () =>
-      this.requiredService().processPointsCredit(job)
+    this.runLater(
+      0,
+      `points-credit-${job.memberId}`,
+      () => this.requiredService().processPointsCredit(job),
+      { kind: "points-credit" }
     );
   }
 
-  private runLater(delayMs: number, label: string, run: () => Promise<void>): void {
+  private runLater(
+    delayMs: number,
+    label: string,
+    run: () => Promise<void>,
+    job: ClosableJob
+  ): void {
     if (delayMs <= 0) {
-      void this.runWithRetry(label, run);
+      void this.runWithRetry(label, run, job);
       return;
     }
 
     const timer = setTimeout(() => {
-      void this.runWithRetry(label, run);
+      void this.runWithRetry(label, run, job);
     }, delayMs);
 
     timer.unref?.();
   }
 
-  private async runWithRetry(label: string, run: () => Promise<void>): Promise<void> {
+  private async runWithRetry(
+    label: string,
+    run: () => Promise<void>,
+    job: ClosableJob
+  ): Promise<void> {
     for (let attempt = 1; attempt <= this.attempts; attempt += 1) {
       try {
         await run();
@@ -71,8 +90,15 @@ class InlineNotificationQueue implements NotificationJobQueue {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
 
-        if (attempt >= this.attempts) {
+        if (
+          isFinalFailure(
+            attempt,
+            this.attempts,
+            error instanceof Error ? error : new Error(message)
+          )
+        ) {
           console.error("[notifications] inline job failed", { label, attempt, error: message });
+          await this.closeExhausted(label, job);
           return;
         }
 
@@ -86,6 +112,20 @@ class InlineNotificationQueue implements NotificationJobQueue {
         });
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
+    }
+  }
+
+  /** The inline counterpart of the BullMQ `failed` handler: same close, never throws. */
+  private async closeExhausted(label: string, job: ClosableJob): Promise<void> {
+    if (job.kind === "points-credit") return;
+
+    try {
+      await closeExhaustedJob(this.requiredService(), job);
+    } catch (error) {
+      console.error("[notifications] could not close an exhausted inline job", {
+        label,
+        error: error instanceof Error ? error.name : "UNKNOWN"
+      });
     }
   }
 

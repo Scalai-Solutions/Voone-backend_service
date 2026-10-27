@@ -1,6 +1,7 @@
 import { Queue, Worker, type Job } from "bullmq";
 
 import { createRepeatingErrorLogger } from "../../common/logger/repeating-error-logger";
+import { closeExhaustedJob, isFinalFailure } from "../../modules/notifications/exhausted-job";
 import type {
   NotificationJobQueue,
   NotificationService,
@@ -55,18 +56,6 @@ export class BullNotificationQueue implements NotificationJobQueue {
   }
 }
 
-/**
- * True when BullMQ will not run this job again: its last attempt is used (attemptsMade
- * already counts the failure that raised the event), or the error is an UnrecoverableError.
- *
- * The UnrecoverableError clause is ESSENTIAL, do not remove it: a job that stalled more
- * than maxStalledCount times is failed by BullMQ with an UnrecoverableError ("job stalled
- * more than allowable limit") while attemptsMade is still below attempts, and the event
- * does carry the job. Without the clause such a delivery would stay QUEUED forever.
- */
-const isFinalFailure = (job: Job<NotificationQueueJob>, error: Error): boolean =>
-  error.name === "UnrecoverableError" || job.attemptsMade >= (job.opts.attempts ?? 1);
-
 export const createNotificationWorker = (
   redisUrl: string,
   service: NotificationService,
@@ -93,18 +82,11 @@ export const createNotificationWorker = (
   worker.on("failed", (job, error) => {
     console.error(`[notifications] job ${job?.id ?? "?"} failed:`, error.message);
 
-    if (!job || !isFinalFailure(job, error)) return;
+    if (!job || !isFinalFailure(job.attemptsMade, job.opts.attempts ?? 1, error)) return;
 
-    // Terminal on purpose, never a re-enqueue: a Google message may have been written before
-    // the job failed, and running it again could post a duplicate. The service methods are
-    // written never to reject; the catch is a second line so this handler cannot raise an
-    // unhandled rejection either way.
-    const close =
-      job.data.kind === "delivery"
-        ? service.failExhaustedDelivery(job.data.deliveryId)
-        : job.data.kind === "notification"
-          ? service.failExhaustedNotification(job.data.notificationId)
-          : null;
+    // Terminal on purpose, never a re-enqueue (see closeExhaustedJob). The catch is a second
+    // line so this handler cannot raise an unhandled rejection either way.
+    const close = closeExhaustedJob(service, job.data);
 
     void close?.catch((closeError: unknown) => {
       console.error("[notifications] could not close an exhausted job", {
