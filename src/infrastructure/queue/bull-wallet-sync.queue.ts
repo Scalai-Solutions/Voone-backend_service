@@ -110,6 +110,9 @@ export const createWalletSyncProcessor =
     const { outcomes, stale } = await service.syncMemberChecked(memberId);
     const failed = outcomes.filter((outcome) => outcome.result === "failed");
 
+    // Staleness is deliberately not acted on when a provider failed: the retry runs the whole
+    // sync again from a fresh read of the database, so it cannot push a stale card, and it
+    // makes its own freshness check. Nothing is lost by dropping the signal here.
     // Rethrowing is what earns a retry. Reported as one failure even when both
     // providers fell over, because the job is "make this member current" and it is
     // retried whole.

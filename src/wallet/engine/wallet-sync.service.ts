@@ -1,5 +1,6 @@
 import { WalletProviderType } from "@prisma/client";
 
+import { MemberNotFoundError } from "../../common/errors/membership.errors";
 import { cardFingerprint } from "./card-fingerprint";
 import type { LoyaltyCard } from "./loyalty-card";
 import { LoyaltyCardAssembler } from "./loyalty-card-assembler";
@@ -60,7 +61,8 @@ export class WalletSyncService {
    * until the next change. After pushing, the card is therefore read once more: if it
    * differs from what was pushed, the caller must run another sync. That is correct under
    * any concurrency, because whichever sync pushed an out-of-date card is the one that
-   * sees the difference. It costs one extra read, and none when nothing was pushed.
+   * sees the difference. It costs one extra read, and none when nothing was pushed to a
+   * wallet that can go stale (Apple's pass is rebuilt from the database on fetch).
    *
    * A failed re-read never fails the sync (the pushes already happened): it is logged and
    * reported as not stale.
@@ -103,7 +105,14 @@ export class WalletSyncService {
         : { provider: providers[index].provider, result: "failed", cause: outcome.reason }
     );
 
-    if (outcomes.every((outcome) => outcome.result === "no-card")) {
+    // Nothing to re-check when nothing was pushed, or when only Apple was: its pass is
+    // rebuilt from the database whenever a phone fetches it, so the order two syncs
+    // pushed in cannot leave an Apple card stale.
+    const pushedAnywhereButApple = outcomes.some(
+      (outcome) => outcome.result !== "no-card" && outcome.provider !== WalletProviderType.APPLE
+    );
+
+    if (!pushedAnywhereButApple) {
       return { outcomes, stale: false };
     }
 
@@ -116,6 +125,9 @@ export class WalletSyncService {
 
       return cardFingerprint(current) !== cardFingerprint(pushed);
     } catch (cause) {
+      // A member erased mid-sync has no card to be stale about: not worth an error line.
+      if (cause instanceof MemberNotFoundError) return false;
+
       console.error(`[wallet] could not re-check the card of member ${memberId}:`, cause);
 
       return false;

@@ -53,10 +53,11 @@ export class InlineWalletSyncQueue implements WalletSyncQueue {
           if (outcome.result === "failed") this.onError(memberId, outcome.cause);
         }
 
-        // A failed provider is not followed up: there is no retry here, but the failure is
-        // reported and the next change re-syncs. A stale card gets one more sync, chained
-        // up to the cap, so two overlapping syncs still converge on the latest card.
-        const next = failed.length === 0 ? nextRecheckDepth(memberId, stale, depth) : null;
+        // A stale card always gets one more sync, chained up to the cap, so two overlapping
+        // syncs converge on the latest card. That holds even when a provider failed: there
+        // is no retry here, so the follow-up is also the failed provider's second attempt,
+        // and Google may be sitting on the older balance despite Apple having failed.
+        const next = nextRecheckDepth(memberId, stale, depth);
 
         if (next !== null) this.start(memberId, next);
       })

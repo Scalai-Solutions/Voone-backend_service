@@ -225,6 +225,28 @@ describe("PrismaLoyaltyCardAssembler for a clinic on an onboarding programme", (
     clinic: { ...member.clinic, onboardingPrograms: [{ output: programOutput }] }
   });
 
+  it("reads the newest ACTIVO programme, so two of them can never make the card alternate", async () => {
+    const findUnique = vi.fn(async () => onProgramme(15));
+    const prisma = { member: { findUnique } } as unknown as PrismaClient;
+
+    await new PrismaLoyaltyCardAssembler(prisma, "x".repeat(32)).assemble(member.id);
+
+    expect(findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          clinic: expect.objectContaining({
+            include: expect.objectContaining({
+              onboardingPrograms: expect.objectContaining({
+                orderBy: { version: "desc" },
+                take: 1
+              })
+            })
+          })
+        })
+      })
+    );
+  });
+
   it("tells the member how many POINTS to their next reward (ten per euro)", async () => {
     const card = await assemblerFor(onProgramme(15)).assemble(member.id);
 
