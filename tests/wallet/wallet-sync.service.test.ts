@@ -1,6 +1,7 @@
 import { WalletProviderType } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { MemberNotFoundError } from "../../src/common/errors/membership.errors";
 import type { LoyaltyCard } from "../../src/wallet/engine/loyalty-card";
 import type { LoyaltyCardAssembler } from "../../src/wallet/engine/loyalty-card-assembler";
 import type {
@@ -98,8 +99,11 @@ describe("WalletSyncService", () => {
     await service.syncMember(MEMBER);
 
     // Two assemblies straddling a ledger write would put different points on the same
-    // person's Apple and Google cards.
-    expect(assemble).toHaveBeenCalledTimes(1);
+    // person's Apple and Google cards. The second call is the freshness re-check AFTER
+    // the pushes (see syncMemberChecked), never a card handed to a provider.
+    expect(assemble).toHaveBeenCalledTimes(2);
+    expect(google.syncCard).toHaveBeenCalledTimes(1);
+    expect(apple.syncCard).toHaveBeenCalledTimes(1);
     expect(google.syncCard.mock.calls[0][1]).toBe(apple.syncCard.mock.calls[0][1]);
   });
 
@@ -176,9 +180,177 @@ describe("WalletSyncService", () => {
   });
 });
 
+describe("WalletSyncService.syncMemberChecked", () => {
+  const at = (points: number): LoyaltyCard => ({ ...aureaGoldPass, points });
+  let registry: WalletProviderRegistry;
+  let google: StubProvider;
+  let apple: StubProvider;
+
+  beforeEach(() => {
+    registry = new WalletProviderRegistry();
+    google = new StubProvider(WalletProviderType.GOOGLE);
+    apple = new StubProvider(WalletProviderType.APPLE);
+    registry.register(google);
+    registry.register(apple);
+  });
+
+  const ALL = [WalletProviderType.GOOGLE, WalletProviderType.APPLE];
+  const serviceWith = (assemble: ReturnType<typeof vi.fn>, held = ALL) =>
+    new WalletSyncService(registry, repoWith(held), {
+      assemble
+    } as unknown as LoyaltyCardAssembler);
+
+  it("is not stale when the card is unchanged, at the price of exactly one extra read", async () => {
+    const assemble = vi.fn(async () => at(1250));
+
+    const result = await serviceWith(assemble).syncMemberChecked(MEMBER);
+
+    expect(result.stale).toBe(false);
+    expect(result.outcomes).toEqual([
+      { provider: WalletProviderType.GOOGLE, result: "synced" },
+      { provider: WalletProviderType.APPLE, result: "synced" }
+    ]);
+    expect(assemble).toHaveBeenCalledTimes(2);
+  });
+
+  it("is stale when the card changed while the sync was pushing the old one", async () => {
+    const assemble = vi.fn(async () => at(1250));
+    assemble.mockResolvedValueOnce(at(1250)).mockResolvedValueOnce(at(1750));
+
+    const result = await serviceWith(assemble).syncMemberChecked(MEMBER);
+
+    expect(result.stale).toBe(true);
+    // What was pushed is still the card read first; the follow-up is the caller's job.
+    expect(google.syncCard.mock.calls[0][1].points).toBe(1250);
+    expect(result.outcomes.map((o) => o.result)).toEqual(["synced", "synced"]);
+  });
+
+  it("does not re-assemble when no provider pushed anything", async () => {
+    const assemble = vi.fn(async () => at(1250));
+
+    const result = await serviceWith(assemble, []).syncMemberChecked(MEMBER);
+
+    expect(result.stale).toBe(false);
+    expect(result.outcomes.every((o) => o.result === "no-card")).toBe(true);
+    expect(assemble).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not even assemble when no provider is enabled", async () => {
+    const assemble = vi.fn(async () => at(1250));
+    const empty = new WalletSyncService(new WalletProviderRegistry(), repoWith([]), {
+      assemble
+    } as unknown as LoyaltyCardAssembler);
+
+    expect(await empty.syncMemberChecked(MEMBER)).toEqual({ outcomes: [], stale: false });
+    expect(assemble).not.toHaveBeenCalled();
+  });
+
+  it("treats a failing re-assembly as not stale and keeps the outcomes", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const assemble = vi.fn(async () => at(1250));
+    assemble.mockResolvedValueOnce(at(1250)).mockRejectedValueOnce(new Error("db blip"));
+
+    const result = await serviceWith(assemble).syncMemberChecked(MEMBER);
+
+    expect(result.stale).toBe(false);
+    expect(result.outcomes.map((o) => o.result)).toEqual(["synced", "synced"]);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(String(error.mock.calls[0]?.[0])).toContain(MEMBER);
+  });
+
+  it("skips the re-read for an Apple-only sync: Apple builds its pass from the database on fetch", async () => {
+    const assemble = vi.fn(async () => at(1250));
+    assemble.mockResolvedValueOnce(at(1250)).mockResolvedValueOnce(at(1750));
+
+    const result = await serviceWith(assemble).syncMemberChecked(MEMBER, {
+      providers: [WalletProviderType.APPLE]
+    });
+
+    expect(assemble).toHaveBeenCalledTimes(1);
+    expect(result.stale).toBe(false);
+    expect(result.outcomes).toEqual([{ provider: WalletProviderType.APPLE, result: "synced" }]);
+  });
+
+  it("skips the re-read when Apple is the only provider that actually pushed", async () => {
+    const assemble = vi.fn(async () => at(1250));
+
+    // The member holds no Google card, so only Apple pushed.
+    const result = await serviceWith(assemble, [WalletProviderType.APPLE]).syncMemberChecked(
+      MEMBER
+    );
+
+    expect(assemble).toHaveBeenCalledTimes(1);
+    expect(result.stale).toBe(false);
+  });
+
+  it("still re-reads when Google pushed alongside Apple", async () => {
+    const assemble = vi.fn(async () => at(1250));
+
+    await serviceWith(assemble).syncMemberChecked(MEMBER);
+
+    expect(assemble).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats a member erased mid-sync as not stale, without logging an error", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const assemble = vi.fn(async () => at(1250));
+    assemble.mockResolvedValueOnce(at(1250)).mockRejectedValueOnce(new MemberNotFoundError(MEMBER));
+
+    const result = await serviceWith(assemble).syncMemberChecked(MEMBER);
+
+    expect(result.stale).toBe(false);
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it("keeps a failed provider's outcome intact when the card also changed", async () => {
+    apple.syncCard.mockRejectedValueOnce(new Error("APNs unreachable"));
+    const assemble = vi.fn(async () => at(1250));
+    assemble.mockResolvedValueOnce(at(1250)).mockResolvedValueOnce(at(1750));
+
+    const result = await serviceWith(assemble).syncMemberChecked(MEMBER);
+
+    expect(result.outcomes.find((o) => o.provider === WalletProviderType.APPLE)?.result).toBe(
+      "failed"
+    );
+    expect(result.stale).toBe(true);
+  });
+
+  it("syncMember still returns just the outcomes, without the extra read changing them", async () => {
+    const assemble = vi.fn(async () => at(1250));
+
+    const outcomes = await serviceWith(assemble).syncMember(MEMBER);
+
+    expect(outcomes).toEqual([
+      { provider: WalletProviderType.GOOGLE, result: "synced" },
+      { provider: WalletProviderType.APPLE, result: "synced" }
+    ]);
+  });
+
+  it("compares by content, so a different key order is not a change", async () => {
+    const reordered = (card: LoyaltyCard): LoyaltyCard => {
+      const entries = Object.entries(card).reverse();
+      return Object.fromEntries(entries) as LoyaltyCard;
+    };
+    const assemble = vi.fn(async () => at(1250));
+    assemble.mockResolvedValueOnce(at(1250)).mockResolvedValueOnce(reordered(at(1250)));
+
+    expect((await serviceWith(assemble).syncMemberChecked(MEMBER)).stale).toBe(false);
+  });
+});
+
 describe("InlineWalletSyncQueue", () => {
   const serviceThat = (impl: () => Promise<SyncOutcome[]>) =>
-    ({ syncMember: vi.fn(impl) }) as unknown as WalletSyncService;
+    ({
+      syncMemberChecked: vi.fn(async () => ({ outcomes: await impl(), stale: false }))
+    }) as unknown as WalletSyncService;
+
+  const staleService = (staleFor: (call: number) => boolean) => {
+    const syncMemberChecked = vi.fn(async () => ({
+      outcomes: [] as SyncOutcome[],
+      stale: staleFor(syncMemberChecked.mock.calls.length)
+    }));
+    return { syncMemberChecked, service: { syncMemberChecked } as unknown as WalletSyncService };
+  };
 
   it("returns before the sync finishes, so reception is never made to wait", async () => {
     let release: (() => void) | undefined;
@@ -251,5 +423,103 @@ describe("InlineWalletSyncQueue", () => {
 
     await queue.close();
     expect(finished).toBe(true);
+  });
+  it("runs one follow-up sync when the card changed under the first, still without blocking", async () => {
+    const { syncMemberChecked, service } = staleService((call) => call === 1);
+    const queue = new InlineWalletSyncQueue(service);
+
+    await queue.enqueueMemberSync(MEMBER);
+    await queue.close();
+
+    expect(syncMemberChecked).toHaveBeenCalledTimes(2);
+    expect(syncMemberChecked.mock.calls.map((call) => (call as unknown[])[0])).toEqual([
+      MEMBER,
+      MEMBER
+    ]);
+  });
+
+  it("runs nothing more when the first sync was not stale", async () => {
+    const { syncMemberChecked, service } = staleService(() => false);
+    const queue = new InlineWalletSyncQueue(service);
+
+    await queue.enqueueMemberSync(MEMBER);
+    await queue.close();
+
+    expect(syncMemberChecked).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops after 3 re-syncs of a card that never settles, and warns once", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { syncMemberChecked, service } = staleService(() => true);
+    const queue = new InlineWalletSyncQueue(service);
+
+    await queue.enqueueMemberSync(MEMBER);
+    await queue.close();
+
+    // The original sync plus three re-checks.
+    expect(syncMemberChecked).toHaveBeenCalledTimes(4);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      `[wallet] sync for member ${MEMBER} still changing after 3 re-checks`
+    );
+  });
+
+  it("still chains a follow-up when the card went stale AND a provider failed, since inline has no retry", async () => {
+    const onError = vi.fn();
+    const syncMemberChecked = vi.fn(async () => ({
+      outcomes: [
+        { provider: WalletProviderType.GOOGLE, result: "synced" },
+        { provider: WalletProviderType.APPLE, result: "failed", cause: new Error("nope") }
+      ] as SyncOutcome[],
+      stale: syncMemberChecked.mock.calls.length === 1
+    }));
+    const queue = new InlineWalletSyncQueue(
+      { syncMemberChecked } as unknown as WalletSyncService,
+      onError
+    );
+
+    await queue.enqueueMemberSync(MEMBER);
+    await queue.close();
+
+    // The follow-up re-pushes the latest card to Google and gives Apple a second attempt.
+    expect(syncMemberChecked).toHaveBeenCalledTimes(2);
+    expect(onError).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not chain a follow-up from a sync that threw", async () => {
+    const onError = vi.fn();
+    const syncMemberChecked = vi.fn(async () => {
+      throw new Error("everything is on fire");
+    });
+    const queue = new InlineWalletSyncQueue(
+      { syncMemberChecked } as unknown as WalletSyncService,
+      onError
+    );
+
+    await queue.enqueueMemberSync(MEMBER);
+    await queue.close();
+
+    expect(syncMemberChecked).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledOnce();
+  });
+
+  it("bounds the chain even when every sync is stale and a provider keeps failing", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const syncMemberChecked = vi.fn(async () => ({
+      outcomes: [
+        { provider: WalletProviderType.APPLE, result: "failed", cause: new Error("nope") }
+      ] as SyncOutcome[],
+      stale: true
+    }));
+    const queue = new InlineWalletSyncQueue(
+      { syncMemberChecked } as unknown as WalletSyncService,
+      vi.fn()
+    );
+
+    await queue.enqueueMemberSync(MEMBER);
+    await queue.close();
+
+    expect(syncMemberChecked).toHaveBeenCalledTimes(4);
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 });

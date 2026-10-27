@@ -1,3 +1,4 @@
+import { nextRecheckDepth } from "./wallet-recheck";
 import { WalletSyncService } from "./wallet-sync.service";
 
 /**
@@ -39,12 +40,26 @@ export class InlineWalletSyncQueue implements WalletSyncQueue {
   ) {}
 
   async enqueueMemberSync(memberId: string): Promise<void> {
+    this.start(memberId, 0);
+  }
+
+  private start(memberId: string, depth: number): void {
     const task = this.service
-      .syncMember(memberId)
-      .then((outcomes) => {
-        for (const outcome of outcomes) {
+      .syncMemberChecked(memberId)
+      .then(({ outcomes, stale }) => {
+        const failed = outcomes.filter((outcome) => outcome.result === "failed");
+
+        for (const outcome of failed) {
           if (outcome.result === "failed") this.onError(memberId, outcome.cause);
         }
+
+        // A stale card always gets one more sync, chained up to the cap, so two overlapping
+        // syncs converge on the latest card. That holds even when a provider failed: there
+        // is no retry here, so the follow-up is also the failed provider's second attempt,
+        // and Google may be sitting on the older balance despite Apple having failed.
+        const next = nextRecheckDepth(memberId, stale, depth);
+
+        if (next !== null) this.start(memberId, next);
       })
       .catch((cause: unknown) => this.onError(memberId, cause))
       .finally(() => {
@@ -54,9 +69,11 @@ export class InlineWalletSyncQueue implements WalletSyncQueue {
     this.inFlight.add(task);
   }
 
-  /** Lets a test — or a graceful shutdown — wait for work already started. */
+  /** Lets a test — or a graceful shutdown — wait for work already started, follow-ups included. */
   async close(): Promise<void> {
-    await Promise.allSettled([...this.inFlight]);
+    while (this.inFlight.size > 0) {
+      await Promise.allSettled([...this.inFlight]);
+    }
   }
 }
 

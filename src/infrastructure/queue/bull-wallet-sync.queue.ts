@@ -1,12 +1,18 @@
-import { Queue, Worker, type ConnectionOptions, type Job } from "bullmq";
+import { Queue, Worker, type ConnectionOptions } from "bullmq";
 
+import { nextRecheckDepth } from "../../wallet/engine/wallet-recheck";
 import { WalletSyncQueue } from "../../wallet/engine/wallet-sync.queue";
-import { WalletSyncService } from "../../wallet/engine/wallet-sync.service";
+import { SyncOutcome, WalletSyncService } from "../../wallet/engine/wallet-sync.service";
 
 export const WALLET_SYNC_QUEUE = "wallet-sync";
 
 export interface WalletSyncJob {
   memberId: string;
+  /**
+   * Set on a follow-up sync only: how many re-checks led here (1, 2, 3). Absent on a job a
+   * change enqueued. It bounds the chain of syncs that chase a card which keeps changing.
+   */
+  recheck?: number;
 }
 
 /**
@@ -65,12 +71,13 @@ export class BullWalletSyncQueue implements WalletSyncQueue {
     });
   }
 
-  async enqueueMemberSync(memberId: string): Promise<void> {
+  async enqueueMemberSync(memberId: string, recheck?: number): Promise<void> {
     try {
       // No jobId on purpose, so BullMQ generates a unique one and this add can never be
       // ignored because an earlier job for the member still exists (see the class
-      // comment). Every change gets a sync that runs after it.
-      await this.queue.add(WALLET_SYNC_QUEUE, { memberId });
+      // comment). Every change gets a sync that runs after it. `recheck` is set only by
+      // the worker, for a follow-up sync (see createWalletSyncProcessor).
+      await this.queue.add(WALLET_SYNC_QUEUE, recheck ? { memberId, recheck } : { memberId });
     } catch (cause) {
       // Enqueueing must never fail the caller: Redis being unreachable is an operational
       // problem, not a reason to reject a visit at reception.
@@ -84,32 +91,73 @@ export class BullWalletSyncQueue implements WalletSyncQueue {
 }
 
 /**
+ * What a worker does with one job. Split from the Worker so the whole behaviour, the
+ * follow-up included, can be exercised without BullMQ.
+ *
+ * `enqueueFollowUp` must add the job the same way as a change does (no id derived from the
+ * member). It is called at most once, and only for a sync that SUCCEEDED but found the
+ * card changed while it was pushing: with two syncs of one member running at once the one
+ * holding the older card can push last, and the follow-up re-reads the database and puts
+ * the latest card right. A failed provider throws instead, and its retry re-reads anyway.
+ */
+export const createWalletSyncProcessor =
+  (
+    service: Pick<WalletSyncService, "syncMemberChecked">,
+    enqueueFollowUp: (memberId: string, recheck: number) => Promise<void>
+  ) =>
+  async (job: { data: WalletSyncJob }): Promise<SyncOutcome[]> => {
+    const { memberId, recheck = 0 } = job.data;
+    const { outcomes, stale } = await service.syncMemberChecked(memberId);
+    const failed = outcomes.filter((outcome) => outcome.result === "failed");
+
+    // Staleness is deliberately not acted on when a provider failed: the retry runs the whole
+    // sync again from a fresh read of the database, so it cannot push a stale card, and it
+    // makes its own freshness check. Nothing is lost by dropping the signal here.
+    // Rethrowing is what earns a retry. Reported as one failure even when both
+    // providers fell over, because the job is "make this member current" and it is
+    // retried whole.
+    if (failed.length > 0) {
+      throw new Error(
+        `wallet sync failed for ${memberId}: ${failed.map((outcome) => outcome.provider).join(", ")}`
+      );
+    }
+
+    const next = nextRecheckDepth(memberId, stale, recheck);
+
+    if (next !== null) {
+      // Never fails the job: the pushes above succeeded, and a follow-up that cannot be
+      // added is only a missed convergence, which the next change repairs.
+      try {
+        await enqueueFollowUp(memberId, next);
+      } catch (cause) {
+        console.error(`[wallet] could not enqueue follow-up sync for member ${memberId}:`, cause);
+      }
+    }
+
+    return outcomes;
+  };
+
+/**
  * The worker side. Separate from the queue so the API process can enqueue without also
- * becoming a consumer.
+ * becoming a consumer. It does hold a queue of its own, solely to add follow-up syncs.
  */
 export const createWalletSyncWorker = (
   redisUrl: string,
   service: WalletSyncService,
   concurrency = 5
-): Worker<WalletSyncJob> =>
-  new Worker<WalletSyncJob>(
+): Worker<WalletSyncJob> => {
+  const followUps = new BullWalletSyncQueue(redisUrl);
+  const worker = new Worker<WalletSyncJob>(
     WALLET_SYNC_QUEUE,
-    async (job: Job<WalletSyncJob>) => {
-      const outcomes = await service.syncMember(job.data.memberId);
-      const failed = outcomes.filter((outcome) => outcome.result === "failed");
-
-      // Rethrowing is what earns a retry. Reported as one failure even when both
-      // providers fell over, because the job is "make this member current" and it is
-      // retried whole.
-      if (failed.length > 0) {
-        throw new Error(
-          `wallet sync failed for ${job.data.memberId}: ${failed
-            .map((outcome) => outcome.provider)
-            .join(", ")}`
-        );
-      }
-
-      return outcomes;
-    },
+    createWalletSyncProcessor(service, (memberId, recheck) =>
+      followUps.enqueueMemberSync(memberId, recheck)
+    ),
     { connection: redisConnection(redisUrl), concurrency }
   );
+
+  worker.on("closed", () => {
+    void followUps.close();
+  });
+
+  return worker;
+};

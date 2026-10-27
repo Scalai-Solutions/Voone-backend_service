@@ -117,6 +117,10 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
             // sync and device fetch, so a second query here would be paid thousands of times.
             onboardingPrograms: {
               where: { status: OnboardingProgramStatus.ACTIVO },
+              // Newest first, so the card is deterministic even if two ACTIVO programmes
+              // ever exist (without an order the database may return either, and the
+              // freshness re-check would see the card alternate between them).
+              orderBy: { version: "desc" },
               take: 1,
               select: { output: true }
             }
