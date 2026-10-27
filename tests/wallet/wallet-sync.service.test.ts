@@ -376,6 +376,35 @@ describe("InlineWalletSyncQueue", () => {
     await queue.close();
   });
 
+  it("with a delay, starts the sync only after it, and still returns at once", async () => {
+    vi.useFakeTimers();
+    try {
+      const service = serviceThat(async () => []);
+      const queue = new InlineWalletSyncQueue(service);
+
+      await queue.enqueueMemberSync(MEMBER, 5_000);
+
+      expect(service.syncMember).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(service.syncMember).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(service.syncMember).toHaveBeenCalledWith(MEMBER);
+      await queue.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("without a delay, starts the sync immediately", async () => {
+    const service = serviceThat(async () => []);
+    const queue = new InlineWalletSyncQueue(service);
+
+    await queue.enqueueMemberSync(MEMBER);
+
+    expect(service.syncMember).toHaveBeenCalledWith(MEMBER);
+    await queue.close();
+  });
+
   it("swallows a thrown sync, because a wallet outage is not a failed visit", async () => {
     const onError = vi.fn();
     const queue = new InlineWalletSyncQueue(

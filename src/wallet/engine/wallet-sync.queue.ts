@@ -8,6 +8,15 @@ import { WalletSyncService } from "./wallet-sync.service";
  * on a wallet API. That matters at the till: signing a .pkpass and calling two vendors
  * takes seconds, and the member is standing at reception.
  */
+/**
+ * How long the syncs that follow a reward being issued or redeemed are held back.
+ *
+ * The visit's credit enqueues its own sync first, and on Google two syncs of one member can
+ * overlap: the slower, earlier one could PATCH after the fresh one and leave the card a step
+ * behind. A few seconds is far longer than a sync takes and invisible to the member.
+ */
+export const POST_CHANGE_SYNC_DELAY_MS = 5_000;
+
 export interface WalletSyncQueue {
   /**
    * Ask for this member's wallets to be brought up to date.
@@ -15,8 +24,10 @@ export interface WalletSyncQueue {
    * Never rejects. A queue that throws into the scan flow would make a wallet outage look
    * like a failed payment, which is precisely the coupling this exists to prevent —
    * failures are recorded against the WalletObject row and retried, not raised here.
+   *
+   * `delayMs` holds the sync back; omitted or 0 runs it as soon as it can, as it always has.
    */
-  enqueueMemberSync(memberId: string): Promise<void>;
+  enqueueMemberSync(memberId: string, delayMs?: number): Promise<void>;
 
   close(): Promise<void>;
 }
@@ -39,13 +50,17 @@ export class InlineWalletSyncQueue implements WalletSyncQueue {
     private readonly onError: (memberId: string, cause: unknown) => void = defaultOnError
   ) {}
 
-  async enqueueMemberSync(memberId: string): Promise<void> {
-    this.start(memberId, 0);
+  async enqueueMemberSync(memberId: string, delayMs = 0): Promise<void> {
+    this.start(memberId, 0, delayMs);
   }
 
-  private start(memberId: string, depth: number): void {
-    const task = this.service
-      .syncMemberChecked(memberId)
+  private start(memberId: string, depth: number, delayMs = 0): void {
+    const ready =
+      delayMs > 0
+        ? new Promise<void>((resolve) => setTimeout(resolve, delayMs))
+        : Promise.resolve();
+    const task = ready
+      .then(() => this.service.syncMemberChecked(memberId))
       .then(({ outcomes, stale }) => {
         const failed = outcomes.filter((outcome) => outcome.result === "failed");
 

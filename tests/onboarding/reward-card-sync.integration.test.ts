@@ -39,6 +39,7 @@ const ANSWERS: Answers = {
 
 interface Call {
   memberId: string;
+  delayMs: number | undefined;
   rewardRows: number;
   redeemedRows: number;
 }
@@ -48,11 +49,12 @@ let failAfter = Infinity;
 
 /** Records what the member's rewards looked like when the sync was asked for. */
 const queue: WalletSyncQueue = {
-  enqueueMemberSync: async (memberId) => {
+  enqueueMemberSync: async (memberId, delayMs) => {
     if (calls.length >= failAfter) throw new Error("queue down");
 
     calls.push({
       memberId,
+      delayMs,
       rewardRows: await db.memberReward.count({ where: { memberId } }),
       redeemedRows: await db.memberReward.count({ where: { memberId, redeemedAt: { not: null } } })
     });
@@ -164,9 +166,11 @@ describe("asking for the card to catch up after a visit", () => {
     expect(out.issued.length).toBeGreaterThan(0);
     expect(calls).toHaveLength(2);
     // The credit's own sync, before any reward row exists: this is the race.
-    expect(calls[0]).toMatchObject({ memberId: m.id, rewardRows: 0 });
+    // The credit's sync is immediate: it carries the balance.
+    expect(calls[0]).toMatchObject({ memberId: m.id, rewardRows: 0, delayMs: undefined });
     // The sync that can actually show the new reward.
-    expect(calls[1]).toMatchObject({ memberId: m.id });
+    // Held back a few seconds so it cannot be overtaken by the credit's own, slower, sync.
+    expect(calls[1]).toMatchObject({ memberId: m.id, delayMs: 5_000 });
     expect(calls[1].rewardRows).toBe(out.issued.length);
   });
 
@@ -194,6 +198,7 @@ describe("asking for the card to catch up after a visit", () => {
 
     expect(forReferrer).toHaveLength(1);
     expect(forReferrer[0].rewardRows).toBe(1);
+    expect(forReferrer[0].delayMs).toBe(5_000);
   });
 
   it("completes the visit when the second sync request fails", async () => {
@@ -245,7 +250,7 @@ describe("asking for the card to catch up after a redemption", () => {
     await rewards.redeem({ clinicId: clinic.id, rewardId: reward.id, visitId: v.visitId });
 
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({ memberId: m.id, redeemedRows: 1 });
+    expect(calls[0]).toMatchObject({ memberId: m.id, redeemedRows: 1, delayMs: 5_000 });
   });
 
   it("does not ask when the redemption is refused", async () => {

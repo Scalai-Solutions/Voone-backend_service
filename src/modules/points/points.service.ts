@@ -121,9 +121,9 @@ export class PointsService {
    * had already enqueued its sync, or a reward was redeemed. Never throws: the member is at reception
    * and a wallet outage must not fail the visit or the redemption that asked.
    */
-  async requestCardSync(memberId: string): Promise<void> {
+  async requestCardSync(memberId: string, delayMs?: number): Promise<void> {
     try {
-      await this.wallets.enqueueMemberSync(memberId);
+      await this.wallets.enqueueMemberSync(memberId, delayMs);
     } catch (cause) {
       console.error(`[wallet] could not queue a card sync for member ${memberId}:`, cause);
     }

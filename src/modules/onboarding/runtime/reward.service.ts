@@ -1,5 +1,6 @@
 import { MemberRewardKind, type MemberReward, type PrismaClient } from "@prisma/client";
 
+import { POST_CHANGE_SYNC_DELAY_MS } from "../../../wallet/engine/wallet-sync.queue";
 import { OnboardingError } from "../onboarding.service";
 import { checkRedemption, isDoublePointsPerk, isInSurprisePool } from "./rules";
 
@@ -55,7 +56,7 @@ const asDetail = (detail: unknown): { perk?: string; pool?: Array<{ id: string }
  * satisfies it. Optional so a deployment without a wallet still redeems.
  */
 export interface CardSyncPort {
-  requestCardSync(memberId: string): Promise<void>;
+  requestCardSync(memberId: string, delayMs?: number): Promise<void>;
 }
 
 export class RewardService {
@@ -165,7 +166,7 @@ export class RewardService {
     // The card lists what can still be redeemed, so it is stale now. Never allowed to fail the
     // redemption, which is already recorded.
     try {
-      await this.cardSync?.requestCardSync(reward.memberId);
+      await this.cardSync?.requestCardSync(reward.memberId, POST_CHANGE_SYNC_DELAY_MS);
     } catch (cause) {
       console.error(`[wallet] could not queue a card sync for member ${reward.memberId}:`, cause);
     }

@@ -92,15 +92,18 @@ describe("PointsService", () => {
   let ledger: Ledger;
   let cache: Cache;
   let synced: string[];
+  let delays: Array<number | undefined>;
   let service: PointsService;
 
   beforeEach(() => {
     ledger = new Ledger();
     cache = new Cache();
     synced = [];
+    delays = [];
     service = new PointsService(ledger, cache, {
-      enqueueMemberSync: async (memberId: string) => {
+      enqueueMemberSync: async (memberId: string, delayMs?: number) => {
         synced.push(memberId);
+        delays.push(delayMs);
       },
       close: async () => {}
     });
@@ -123,6 +126,14 @@ describe("PointsService", () => {
       await service.requestCardSync(MEMBER);
 
       expect(synced).toEqual([MEMBER]);
+    });
+
+    it("passes a delay to the queue, and a credit asks for none", async () => {
+      await service.requestCardSync(MEMBER, 5_000);
+      await credit(600, "visit-1");
+
+      expect(delays[0]).toBe(5_000);
+      expect(delays.slice(1).every((d) => d === undefined)).toBe(true);
     });
 
     it("never throws, even when the queue does", async () => {

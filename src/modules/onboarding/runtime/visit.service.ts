@@ -8,6 +8,7 @@ import {
   type PrismaClient
 } from "@prisma/client";
 
+import { POST_CHANGE_SYNC_DELAY_MS } from "../../../wallet/engine/wallet-sync.queue";
 import { toPoints } from "./points-unit";
 import type { PointsService } from "../../points/points.service";
 import { toCents } from "../catalog.repository";
@@ -254,7 +255,7 @@ export class VisitService {
   /** Never throws: a wallet outage must not fail a visit that is already recorded. */
   private async requestCardSync(memberId: string): Promise<void> {
     try {
-      await this.points.requestCardSync(memberId);
+      await this.points.requestCardSync(memberId, POST_CHANGE_SYNC_DELAY_MS);
     } catch (cause) {
       console.error(`[wallet] could not queue a card sync for member ${memberId}:`, cause);
     }

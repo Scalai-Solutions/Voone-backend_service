@@ -121,6 +121,23 @@ describe("BullWalletSyncQueue.enqueueMemberSync", () => {
     expect(error).toHaveBeenCalledTimes(1);
     expect(String(error.mock.calls[0]?.[0])).toContain("member-1");
   });
+
+  it("adds no delay by default, so every existing caller behaves as before", async () => {
+    const queue = new BullWalletSyncQueue("redis://localhost:6379");
+
+    await queue.enqueueMemberSync("member-1");
+    await queue.enqueueMemberSync("member-1", 0);
+
+    for (const call of fake.adds) expect(call.opts?.delay).toBeUndefined();
+  });
+
+  it("passes a delay on to BullMQ when one is asked for", async () => {
+    const queue = new BullWalletSyncQueue("redis://localhost:6379");
+
+    await queue.enqueueMemberSync("member-1", 5_000);
+
+    expect(fake.adds[0]?.opts).toEqual({ delay: 5_000 });
+  });
 });
 
 describe("createWalletSyncWorker follow-up", () => {
