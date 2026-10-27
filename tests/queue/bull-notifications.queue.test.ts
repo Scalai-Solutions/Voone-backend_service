@@ -118,6 +118,35 @@ describe("createNotificationWorker failed event", () => {
     expect(calls).toEqual([{ method: "failExhaustedDelivery", id: "d-3" }]);
   });
 
+  it("treats a stalled job as final: BullMQ fails it with an UnrecoverableError while attempts remain", async () => {
+    const { service, calls } = serviceSpy();
+    createNotificationWorker("redis://localhost:6379", service);
+    // What BullMQ 6 emits once a job has stalled more than maxStalledCount times: the job
+    // is present, attemptsMade is still below attempts, and the error is an UnrecoverableError.
+    const stalled = new Error("job stalled more than allowable limit");
+    stalled.name = "UnrecoverableError";
+
+    await emitFailed(failedJob({ kind: "delivery", deliveryId: "d-4" }, 0), stalled);
+    await emitFailed(failedJob({ kind: "notification", notificationId: "n-4" }, 0), stalled);
+
+    expect(calls).toEqual([
+      { method: "failExhaustedDelivery", id: "d-4" },
+      { method: "failExhaustedNotification", id: "n-4" }
+    ]);
+  });
+
+  it("does not close a job that failed with an ordinary error while attempts remain", async () => {
+    const { service, calls } = serviceSpy();
+    createNotificationWorker("redis://localhost:6379", service);
+
+    await emitFailed(
+      failedJob({ kind: "delivery", deliveryId: "d-5" }, 0),
+      new Error("job stalled more than allowable limit")
+    );
+
+    expect(calls).toEqual([]);
+  });
+
   it("fails a notification, not a delivery, when a notification job is exhausted", async () => {
     const { service, calls } = serviceSpy();
     createNotificationWorker("redis://localhost:6379", service);
@@ -137,7 +166,7 @@ describe("createNotificationWorker failed event", () => {
     expect(calls).toEqual([]);
   });
 
-  it("ignores a failed event that carries no job (a stalled job that was already removed)", async () => {
+  it("ignores a failed event that carries no job (BullMQ types the job as optional)", async () => {
     const { service, calls } = serviceSpy();
     createNotificationWorker("redis://localhost:6379", service);
 

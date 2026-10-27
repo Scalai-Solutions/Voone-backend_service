@@ -14,6 +14,11 @@ interface World {
   providerMessageId?: string | null;
   /** Make the named table operation reject. */
   failOn?: "deliveryFind" | "deliveryUpdate" | "deliveryList";
+  /**
+   * The original processor (a stalled job's may still be running) finishes between the
+   * handler's read and its write: the row turns SENT right after the read returns.
+   */
+  sentAfterRead?: "delivery" | "notification";
 }
 
 /** An in-memory stand-in for the tables the exhaustion handlers touch. */
@@ -37,12 +42,35 @@ const buildWorld = (world: World = {}) => {
       findUnique: async () => {
         if (world.failOn === "deliveryFind") throw new Error("connection to db:5432 lost");
 
-        return {
+        const snapshot = {
           id: "delivery-1",
           notificationId: "notification-1",
           status: state.deliveryStatus,
           notification: notificationRecord()
         };
+
+        if (world.sentAfterRead === "delivery") {
+          state.deliveryStatus = NotificationDeliveryStatus.SENT;
+          state.notificationStatus = NotificationStatus.SENT;
+        }
+
+        return snapshot;
+      },
+      // Models the conditional write atomically: check and set in one synchronous step.
+      updateMany: async ({
+        where,
+        data
+      }: {
+        where: { id: string; status: DeliveryStatus };
+        data: { status: DeliveryStatus; errorCode?: string | null };
+      }) => {
+        if (world.failOn === "deliveryUpdate") throw new Error("postgres://user:secret@host down");
+        if (state.deliveryStatus !== where.status) return { count: 0 };
+
+        state.deliveryWrites += 1;
+        state.deliveryStatus = data.status;
+        state.errorCode = data.errorCode;
+        return { count: 1 };
       },
       update: async ({ data }: { data: { status: DeliveryStatus; errorCode?: string | null } }) => {
         if (world.failOn === "deliveryUpdate") throw new Error("postgres://user:secret@host down");
@@ -61,7 +89,15 @@ const buildWorld = (world: World = {}) => {
       }
     },
     notification: {
-      findUnique: async () => notificationRecord(),
+      findUnique: async () => {
+        const snapshot = notificationRecord();
+
+        if (world.sentAfterRead === "notification") {
+          state.notificationStatus = NotificationStatus.SENT;
+        }
+
+        return snapshot;
+      },
       update: async ({ data }: { data: { status?: NotificationStatus } }) => {
         if (data.status) state.notificationStatus = data.status;
       },
@@ -168,6 +204,18 @@ describe("failExhaustedDelivery", () => {
     expect(state.notificationStatus).toBe(NotificationStatus.CANCELLED);
   });
 
+  it("leaves a delivery that turned SENT between the read and the write SENT, and does not refresh the notification", async () => {
+    const { service, state } = buildWorld({ sentAfterRead: "delivery" });
+
+    await service.failExhaustedDelivery("delivery-1");
+
+    expect(state.deliveryStatus).toBe(NotificationDeliveryStatus.SENT);
+    expect(state.errorCode).toBeUndefined();
+    expect(state.deliveryWrites).toBe(0);
+    // A refresh from the stale snapshot would have moved it to FAILED.
+    expect(state.notificationStatus).toBe(NotificationStatus.SENT);
+  });
+
   it("swallows a database error and logs without the error message", async () => {
     for (const failOn of ["deliveryFind", "deliveryUpdate"] as const) {
       const { service } = buildWorld({ failOn });
@@ -229,6 +277,20 @@ describe("failExhaustedNotification", () => {
     await service.failExhaustedNotification("notification-1");
 
     expect(state.notificationStatus).toBe(notificationStatus);
+    expect(state.clinicIncrements).toBe(0);
+  });
+
+  it("does not overwrite a notification that turned SENT between the read and the write", async () => {
+    const { service, state } = buildWorld({
+      notificationStatus: NotificationStatus.PROCESSING,
+      type: NotificationType.BROADCAST,
+      deliveryStatus: NotificationDeliveryStatus.FAILED,
+      sentAfterRead: "notification"
+    });
+
+    await service.failExhaustedNotification("notification-1");
+
+    expect(state.notificationStatus).toBe(NotificationStatus.SENT);
     expect(state.clinicIncrements).toBe(0);
   });
 

@@ -57,7 +57,12 @@ export class BullNotificationQueue implements NotificationJobQueue {
 
 /**
  * True when BullMQ will not run this job again: its last attempt is used (attemptsMade
- * already counts the failure that raised the event), or the error opted out of retries.
+ * already counts the failure that raised the event), or the error is an UnrecoverableError.
+ *
+ * The UnrecoverableError clause is ESSENTIAL, do not remove it: a job that stalled more
+ * than maxStalledCount times is failed by BullMQ with an UnrecoverableError ("job stalled
+ * more than allowable limit") while attemptsMade is still below attempts, and the event
+ * does carry the job. Without the clause such a delivery would stay QUEUED forever.
  */
 const isFinalFailure = (job: Job<NotificationQueueJob>, error: Error): boolean =>
   error.name === "UnrecoverableError" || job.attemptsMade >= (job.opts.attempts ?? 1);

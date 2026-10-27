@@ -19,6 +19,7 @@ import {
   redisConnection
 } from "../../src/infrastructure/queue/bull-wallet-sync.queue";
 import { NotificationService } from "../../src/modules/notifications/notification.service";
+import { isSafeTestRedisUrl } from "./redis-test-url";
 
 /**
  * Against a REAL Redis: the end of a delivery job's life (every attempt used, the job
@@ -27,11 +28,12 @@ import { NotificationService } from "../../src/modules/notifications/notificatio
  * Opt-in, with the same guards as bull-queues.redis.test.ts: set TEST_REDIS_URL to a
  * THROWAWAY local Redis, for example
  *   redis-server --port 6392 --save "" --appendonly no
- *   TEST_REDIS_URL=redis://127.0.0.1:6392 npx vitest run tests/queue
+ *   TEST_REDIS_URL=redis://127.0.0.1:6392/1 npx vitest run tests/queue
  *
  * The suite obliterates the wallet-notifications queue (the production queue name), so it
  * refuses to run unless ALL of these hold: a loopback host; an explicit port that is not
- * Redis's default 6379; no database index 0; and no keys on the instance other than the
+ * Redis's default 6379; an explicit, non-zero database index (see ./redis-test-url.ts, shared
+ * with the wallet-sync suite); and no keys on the instance other than the
  * wallet-notifications and wallet-sync queues' (checked before anything is deleted; the
  * two queue suites may share one throwaway instance). A malformed URL skips the suite.
  *
@@ -39,27 +41,8 @@ import { NotificationService } from "../../src/modules/notifications/notificatio
  * wallet-sync suite does, so production's retry policy (5 attempts, 2 s exponential) stays
  * untouched and the test does not wait it out.
  */
-const isSafeTestUrl = (value: string | undefined): value is string => {
-  if (!value) return false;
-
-  try {
-    const parsed = new URL(value);
-    const loopback = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(parsed.hostname);
-    const dbIndex = parsed.pathname.replace(/^\//, "");
-
-    return (
-      ["redis:", "rediss:"].includes(parsed.protocol) &&
-      loopback &&
-      parsed.port !== "" &&
-      parsed.port !== "6379" &&
-      (dbIndex === "" || (/^\d+$/.test(dbIndex) && Number(dbIndex) !== 0))
-    );
-  } catch {
-    return false;
-  }
-};
 const candidate = process.env.TEST_REDIS_URL;
-const enabled = isSafeTestUrl(candidate);
+const enabled = isSafeTestRedisUrl(candidate);
 const url = candidate as string;
 
 const until = async (condition: () => boolean | Promise<boolean>, timeoutMs = 8_000) => {
@@ -117,6 +100,19 @@ const buildWorld = (addObjectMessage: () => Promise<{ messageId: string }>) => {
       }) => {
         state.deliveryStatus = data.status;
         state.errorCode = data.errorCode;
+      },
+      updateMany: async ({
+        where,
+        data
+      }: {
+        where: { status: NotificationDeliveryStatus };
+        data: { status: NotificationDeliveryStatus; errorCode?: string };
+      }) => {
+        if (state.deliveryStatus !== where.status) return { count: 0 };
+
+        state.deliveryStatus = data.status;
+        state.errorCode = data.errorCode;
+        return { count: 1 };
       },
       findMany: async () => [{ status: state.deliveryStatus }]
     },

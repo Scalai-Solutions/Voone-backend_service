@@ -868,8 +868,8 @@ export class NotificationService {
    * FAILED for good, never re-run (a Google message may already have been written before the
    * job failed, and a second run would post it again).
    *
-   * Only a still-QUEUED delivery is touched, so a job that ended some other way (or a repeat
-   * call) changes nothing. Never throws: it runs inside a worker event handler.
+   * Only a still-QUEUED delivery is touched (atomically), so a job that ended some other way,
+   * or a repeat call, changes nothing. Never throws: it runs inside a worker event handler.
    */
   async failExhaustedDelivery(deliveryId: string): Promise<void> {
     try {
@@ -880,11 +880,19 @@ export class NotificationService {
 
       if (!delivery || delivery.status !== NotificationDeliveryStatus.QUEUED) return;
 
-      await this.markDelivery(
-        delivery.id,
-        NotificationDeliveryStatus.FAILED,
-        "JOB_RETRIES_EXHAUSTED"
-      );
+      // Conditional on the row still being QUEUED, in the same statement: a stalled job is
+      // failed while its original processor may still be running and may write SENT between
+      // the read above and this write. Only the winner goes on. processDelivery's own writes
+      // stay unconditional: if it writes SENT after this FAILED, the truth wins.
+      const claimed = await this.prisma.notificationDelivery.updateMany({
+        where: { id: delivery.id, status: NotificationDeliveryStatus.QUEUED },
+        data: {
+          status: NotificationDeliveryStatus.FAILED,
+          errorCode: "JOB_RETRIES_EXHAUSTED"
+        }
+      });
+
+      if (claimed.count !== 1) return;
 
       // A cancelled notification stays cancelled; the refresh would otherwise reopen it.
       if (delivery.notification.status === NotificationStatus.CANCELLED) return;
