@@ -34,12 +34,40 @@ const MONTHS_ES_REWARDS = [
   "dic"
 ] as const;
 
+/**
+ * `text` cut to at most `max` UTF-16 units without splitting a surrogate pair, with an ellipsis
+ * when something was cut. The card schema counts UTF-16 units, so that is the unit used; a cut
+ * never leaves half an emoji.
+ */
+export const clipText = (text: string, max: number, ellipsis = false): string => {
+  if (text.length <= max) return text;
+
+  const room = ellipsis ? max - 1 : max;
+  let out = "";
+
+  for (const character of text) {
+    if (out.length + character.length > room) break;
+    out += character;
+  }
+
+  return ellipsis ? `${out.trimEnd()}…` : out;
+};
+
+/** The longest reward title printed on a line of the back field or the Google module. */
+export const REWARD_LINE_TITLE_MAX = 60;
+
 export const availableRewardCount = (card: Pick<LoyaltyCard, "rewards">): number =>
   card.rewards?.available.length ?? 0;
 
-/** Undefined for a card with no `rewards` (a clinic with no programme): nothing to say. */
+/**
+ * Undefined for a card with no `rewards` (a clinic with no programme): nothing to say.
+ *
+ * `maxLength` bounds the whole text for a surface with a limit (Google's module): lines are
+ * dropped from the end, and counted in "… y N más", until it fits.
+ */
 export const availableRewardsText = (
-  card: Pick<LoyaltyCard, "rewards" | "reward">
+  card: Pick<LoyaltyCard, "rewards" | "reward">,
+  maxLength?: number
 ): string | undefined => {
   if (!card.rewards) return undefined;
 
@@ -48,19 +76,28 @@ export const availableRewardsText = (
   if (available.length === 0) {
     const next = card.reward?.description.trim().replace(/\.+$/, "");
 
-    return [next ? `${NONE_YET} ${next}.` : NONE_YET, REDEEM_INSTRUCTION].join("\n");
+    // Nothing to present yet, so no redemption instruction.
+    return next ? `${NONE_YET} ${next}.` : NONE_YET;
   }
 
-  const lines = available
-    .slice(0, REWARD_LINES_SHOWN)
-    .map(
-      (reward) =>
-        `🎁 ${reward.title} · hasta ${formatMadridDayMonth(new Date(reward.expiresAt), MONTHS_ES_REWARDS)}`
-    );
+  const build = (shown: number): string => {
+    const lines = available
+      .slice(0, shown)
+      .map(
+        (reward) =>
+          `🎁 ${clipText(reward.title, REWARD_LINE_TITLE_MAX, true)} · hasta ${formatMadridDayMonth(new Date(reward.expiresAt), MONTHS_ES_REWARDS)}`
+      );
 
-  if (available.length > REWARD_LINES_SHOWN) {
-    lines.push(`… y ${available.length - REWARD_LINES_SHOWN} más`);
+    if (available.length > shown) lines.push(`… y ${available.length - shown} más`);
+
+    return [...lines, REDEEM_INSTRUCTION].join("\n");
+  };
+
+  for (let shown = Math.min(available.length, REWARD_LINES_SHOWN); shown >= 1; shown -= 1) {
+    const text = build(shown);
+
+    if (maxLength === undefined || text.length <= maxLength) return text;
   }
 
-  return [...lines, REDEEM_INSTRUCTION].join("\n");
+  return clipText(build(1), maxLength ?? Number.MAX_SAFE_INTEGER);
 };

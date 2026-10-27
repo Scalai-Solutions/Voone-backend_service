@@ -6,12 +6,13 @@ import { LoyaltyCardAssembler } from "./engine/loyalty-card-assembler";
 import { LoyaltyCard, loyaltyCardSchema } from "./engine/loyalty-card";
 import { formatCardMessage } from "./engine/card-message";
 import { clipCardText } from "./engine/card-text";
+import { clipText } from "./engine/rewards-text";
 import { deriveRedemptionCode } from "./engine/redemption-code";
 import { milestoneProgress } from "../modules/points/milestone-engine";
 import type { Program } from "../modules/onboarding/engine.types";
 import { programView } from "../modules/onboarding/runtime/program-view";
 import { toPoints } from "../modules/onboarding/runtime/points-unit";
-import { nextRewardFor } from "../modules/onboarding/runtime/rules";
+import { isDoublePointsPerk, nextRewardFor } from "../modules/onboarding/runtime/rules";
 import { tierRewardsSchema } from "../modules/templates/templates.schema";
 
 /**
@@ -121,7 +122,7 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
           where: { redeemedAt: null, expiresAt: { gt: now } },
           orderBy: [{ expiresAt: "asc" }, { issuedAt: "asc" }, { id: "asc" }],
           take: AVAILABLE_REWARDS_LIMIT,
-          select: { title: true, kind: true, expiresAt: true }
+          select: { title: true, kind: true, detail: true, expiresAt: true }
         },
         // The latest clinic message, in the same round trip for the same reason as the programme.
         walletMessage: true,
@@ -186,12 +187,20 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
       points: live ? toPoints(member.pointsBalance) : member.pointsBalance,
       reward,
       // Only a programme centre issues rewards. Filtered here as well as in the query: the
-      // clock is the caller's, and the card must never offer one that has lapsed.
+      // clock is the caller's, and the card must never offer one that has lapsed. The double-points
+      // perk is spent by the next payment and cannot be redeemed by hand, so it is not a gift.
       rewards: live
         ? {
             available: (member.rewards ?? [])
-              .filter((r) => r.expiresAt.getTime() > now.getTime())
-              .map((r) => ({ title: r.title.slice(0, 120), expiresAt: r.expiresAt.toISOString() }))
+              .filter(
+                (r) =>
+                  r.expiresAt.getTime() > now.getTime() && !isDoublePointsPerk(r.kind, r.detail)
+              )
+              .map((r) => ({
+                // A blank title would fail the schema and stop this member's card syncing at all.
+                title: clipText(r.title.trim(), 120) || "Regalo",
+                expiresAt: r.expiresAt.toISOString()
+              }))
           }
         : undefined,
       message: member.walletMessage ? { text: formatCardMessage(member.walletMessage) } : undefined,

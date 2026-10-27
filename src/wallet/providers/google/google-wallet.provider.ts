@@ -35,6 +35,9 @@ import {
   WalletNotificationTransientError
 } from "../../../common/errors/wallet.errors";
 
+// Google's text module body is a short card detail, not a document.
+const GOOGLE_REWARDS_BODY_MAX = 500;
+
 const GOOGLE_ID_SAFE_CHARACTER = /[^A-Za-z0-9._-]/g;
 
 const toGoogleSafeSuffix = (value: string): string =>
@@ -264,7 +267,7 @@ export class GoogleWalletProvider extends BaseWalletProvider {
 
   /** The same words the Apple back field carries, so the two wallets never disagree. */
   private toRewards(card: LoyaltyCard): LoyaltyRewardsInput | undefined {
-    const text = availableRewardsText(card);
+    const text = availableRewardsText(card, GOOGLE_REWARDS_BODY_MAX);
 
     return text === undefined ? undefined : { count: availableRewardCount(card), text };
   }

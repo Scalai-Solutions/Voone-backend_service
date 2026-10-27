@@ -463,23 +463,18 @@ describe("buildStoreCardFields: redeemable rewards", () => {
     expect(buildStoreCardFields(withRewards(many(20))).headerFields.at(-1)?.value).toBe("🎁 20");
   });
 
-  it("with none, says so and names the next reward, with the redemption line after it", () => {
+  it("with none, says so and names the next reward, and does not tell them to present anything", () => {
     expect(backValue(withRewards([], rewardsPass.reward))).toBe(
-      [
-        "Aún no tienes recompensas disponibles. Sérum reparador · te faltan 250 puntos.",
-        "Preséntalas en el centro para canjearlas."
-      ].join("\n")
+      "Aún no tienes recompensas disponibles. Sérum reparador · te faltan 250 puntos."
     );
   });
 
   it("with none and no next reward, has no dangling full stop or space", () => {
-    expect(backValue(withRewards([]))).toBe(
-      "Aún no tienes recompensas disponibles.\nPreséntalas en el centro para canjearlas."
-    );
+    expect(backValue(withRewards([]))).toBe("Aún no tienes recompensas disponibles.");
     // A next-reward text that already ends in a full stop is not given a second.
-    expect(
-      backValue(withRewards([], { description: "Un regalo.", progressPercent: 10 }))
-    ).toContain("Un regalo.\n");
+    expect(backValue(withRewards([], { description: "Un regalo.", progressPercent: 10 }))).toBe(
+      "Aún no tienes recompensas disponibles. Un regalo."
+    );
   });
 
   it("is identical on two builds", () => {
@@ -493,5 +488,22 @@ describe("buildStoreCardFields: redeemable rewards", () => {
     expect(english.REGALOS).toBe("GIFTS");
     expect(english["RECOMPENSAS DISPONIBLES"]).toBe("AVAILABLE REWARDS");
     expect(english["Tus regalos disponibles: %@"]).toBe("Your available gifts: %@");
+  });
+
+  it("keeps a long title to 60 characters on its line", () => {
+    const text = backValue(
+      withRewards([{ title: "T".repeat(100), expiresAt: "2026-11-15T10:00:00.000Z" }])
+    );
+    const [line] = text.split("\n");
+
+    expect(line).toBe(`🎁 ${"T".repeat(59)}… · hasta 15 nov`);
+  });
+
+  it("never cuts a title through an emoji", () => {
+    const text = backValue(
+      withRewards([{ title: `${"x".repeat(58)}😀😀`, expiresAt: "2026-11-15T10:00:00.000Z" }])
+    );
+
+    expect(text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
   });
 });

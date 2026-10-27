@@ -510,7 +510,7 @@ describe("PrismaLoyaltyCardAssembler: redeemable rewards", () => {
             // Rewards issued by one visit share an expiry; the tie-breakers keep two builds equal.
             orderBy: [{ expiresAt: "asc" }, { issuedAt: "asc" }, { id: "asc" }],
             take: 20,
-            select: { title: true, kind: true, expiresAt: true }
+            select: { title: true, kind: true, detail: true, expiresAt: true }
           }
         })
       })
@@ -583,5 +583,46 @@ describe("PrismaLoyaltyCardAssembler: redeemable rewards", () => {
     };
 
     expect(loyaltyCardSchema.safeParse(card).success).toBe(false);
+  });
+
+  it("leaves out the double-points perk, which cannot be redeemed by hand", async () => {
+    const card = await assembler(
+      programmeMember([
+        reward("Puntos dobles", "2026-11-01T10:00:00Z", {
+          kind: "VENTAJA",
+          detail: { perk: "doble" }
+        }),
+        reward("Sorpresa", "2026-11-02T10:00:00Z", {
+          kind: "VENTAJA",
+          detail: { perk: "sorpresa" }
+        }),
+        reward("Premio", "2026-11-03T10:00:00Z", { detail: { items: [] } })
+      ])
+    ).assemble(member.id);
+
+    expect(card.rewards?.available.map((r) => r.title)).toEqual(["Sorpresa", "Premio"]);
+  });
+
+  it("names a blank title Regalo instead of failing the whole card", async () => {
+    const card = await assembler(
+      programmeMember([
+        reward("", "2026-11-01T10:00:00Z"),
+        reward("   ", "2026-11-02T10:00:00Z", { id: "x" })
+      ])
+    ).assemble(member.id);
+
+    expect(card.rewards?.available.map((r) => r.title)).toEqual(["Regalo", "Regalo"]);
+  });
+
+  it("cuts a long title on a code point, never in the middle of an emoji", async () => {
+    const card = await assembler(
+      programmeMember([reward(`${"x".repeat(119)}😀😀`, "2026-11-01T10:00:00Z")])
+    ).assemble(member.id);
+    const [{ title }] = card.rewards!.available;
+
+    expect(title.length).toBeLessThanOrEqual(120);
+    expect(title).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    expect(title).toBe("x".repeat(119));
+    expect(loyaltyCardSchema.safeParse(card).success).toBe(true);
   });
 });

@@ -458,3 +458,13 @@ export const recalibrationAdvice = (input: RecalibrationInput): RecalibrationAdv
     reason: over ? undefined : "El ticket y la frecuencia reales encajan con el programa."
   };
 };
+
+/**
+ * The "puntos dobles" perk. It is spent automatically by the next payment, so it can never be
+ * redeemed by hand and a card must not offer it as a gift to present at the centre.
+ */
+export const isDoublePointsPerk = (kind: string, detail: unknown): boolean =>
+  kind === "VENTAJA" &&
+  typeof detail === "object" &&
+  detail !== null &&
+  (detail as { perk?: unknown }).perk === "doble";

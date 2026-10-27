@@ -186,3 +186,23 @@ describe("Google card: redeemable rewards", () => {
     expect(moduleOf("points")?.body).toBe("2000");
   });
 });
+
+describe("Google card: the rewards text is bounded", () => {
+  it("fits 500 characters even for eight long titles, saying how many it left out", async () => {
+    const long = Array.from({ length: 12 }, (_, i) => ({
+      title: `${i + 1} ${"T".repeat(80)}`,
+      expiresAt: "2026-11-15T10:00:00.000Z"
+    }));
+
+    await issue({ ...rewardsPass, rewards: { available: long } });
+
+    const body = moduleOf("rewards")?.body ?? "";
+    const shown = body.split("\n").filter((l) => l.startsWith("🎁")).length;
+
+    expect(body.length).toBeLessThanOrEqual(500);
+    expect(shown).toBeGreaterThanOrEqual(1);
+    expect(body).toContain(`… y ${12 - shown} más`);
+    // The count on the card is still every reward.
+    expect(stored().secondaryLoyaltyPoints).toMatchObject({ balance: { int: 12 } });
+  });
+});

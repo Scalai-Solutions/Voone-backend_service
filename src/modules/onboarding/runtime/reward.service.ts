@@ -1,7 +1,7 @@
 import { MemberRewardKind, type MemberReward, type PrismaClient } from "@prisma/client";
 
 import { OnboardingError } from "../onboarding.service";
-import { checkRedemption, isInSurprisePool } from "./rules";
+import { checkRedemption, isDoublePointsPerk, isInSurprisePool } from "./rules";
 
 /**
  * Listing and redeeming the rewards a member has been issued.
@@ -106,7 +106,7 @@ export class RewardService {
 
     const detail = asDetail(reward.detail);
 
-    if (reward.kind === MemberRewardKind.VENTAJA && detail.perk === "doble") {
+    if (isDoublePointsPerk(reward.kind, reward.detail)) {
       // Spent automatically by the next payment, so a manual redemption would only waste it.
       throw new OnboardingError(
         "Los puntos dobles se aplican solos en la próxima visita de pago; no se canjean a mano.",
