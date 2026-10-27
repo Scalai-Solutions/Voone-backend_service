@@ -26,6 +26,31 @@ const isUniqueClinicTemplateConflict = (error: unknown): boolean =>
   Array.isArray(error.meta?.target) &&
   error.meta.target.includes("clinicId");
 
+/**
+ * Adds `hasActiveProgramme` to template reads: with a live onboarding programme the pass shows
+ * each member's tier benefits, so the editor must not offer the free-text Beneficios field.
+ * One query for the whole list.
+ */
+const withProgrammeFlag = async <T extends { clinicId: string }>(
+  templates: T[]
+): Promise<Array<T & { hasActiveProgramme: boolean }>> => {
+  if (templates.length === 0) {
+    return [];
+  }
+
+  const active = await templatesRepository.findClinicIdsWithActiveProgramme(
+    templates.map((template) => template.clinicId)
+  );
+
+  return templates.map((template) => ({
+    ...template,
+    hasActiveProgramme: active.has(template.clinicId)
+  }));
+};
+
+const withProgrammeFlagOne = async <T extends { clinicId: string }>(template: T) =>
+  (await withProgrammeFlag([template]))[0];
+
 export const templatesService = {
   listVooneTemplates() {
     return vooneTemplatesRepository.findMany();
@@ -51,11 +76,13 @@ export const templatesService = {
   async listTemplates(clinicId: string) {
     const template = await templatesRepository.findByClinicId(clinicId);
 
-    return template ? [template] : [];
+    return withProgrammeFlag(template ? [template] : []);
   },
 
-  findByClinicId(clinicId: string) {
-    return templatesRepository.findByClinicId(clinicId);
+  async findByClinicId(clinicId: string) {
+    const template = await templatesRepository.findByClinicId(clinicId);
+
+    return template ? withProgrammeFlagOne(template) : null;
   },
 
   /** Throws TemplateNotFoundError for a missing template and for another clinic's alike. */
@@ -64,7 +91,7 @@ export const templatesService = {
 
     assertOwnsTemplate(template, clinicId, templateId);
 
-    return template;
+    return withProgrammeFlagOne(template);
   },
 
   async createClinicTemplate(clinicId: string, input: CreateTemplateInput) {
