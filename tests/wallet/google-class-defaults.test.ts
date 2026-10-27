@@ -212,6 +212,22 @@ describe("the Spanish, neutral words on a Google card", () => {
     expect(body.accountIdLabel).toBe("N.º de miembro");
   });
 
+  it("shows the rewards: the gift count on the card and the rewards module in the details", async () => {
+    const body = (await classWithLinks()) as unknown as {
+      classTemplateInfo: {
+        cardTemplateOverride: { cardRowTemplateInfos: unknown[] };
+        detailsTemplateOverride: { detailsItemInfos: unknown[] };
+      };
+    };
+
+    expect(JSON.stringify(body.classTemplateInfo.cardTemplateOverride)).toContain(
+      "object.secondaryLoyaltyPoints"
+    );
+    expect(JSON.stringify(body.classTemplateInfo.detailsTemplateOverride)).toContain(
+      "object.textModulesData['rewards']"
+    );
+  });
+
   it("never says socia anywhere in the class", async () => {
     expect(JSON.stringify(await classWithLinks())).not.toMatch(/\bsocias?\b/i);
   });

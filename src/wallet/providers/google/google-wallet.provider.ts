@@ -2,6 +2,7 @@ import { WalletProviderType } from "@prisma/client";
 
 import { config } from "../../../config/env";
 import { DEFAULT_WALLET_BENEFIT_CTA } from "../../../modules/templates/default-voone-template";
+import { availableRewardCount, availableRewardsText } from "../../engine/rewards-text";
 import { BaseWalletProvider } from "../../engine/base-wallet-provider";
 import type { LoyaltyCard } from "../../engine/loyalty-card";
 import type {
@@ -26,7 +27,7 @@ import {
 import { GoogleWalletApiError, getGoogleWalletIssuerId, isGoogleWalletConfigured } from "./client";
 import { buildSaveLink } from "./jwt";
 import { addObjectMessage, createObject, patchObject, removeObjectMessage } from "./objectService";
-import type { LoyaltyClassInput, LoyaltyObjectInput } from "./types";
+import type { LoyaltyClassInput, LoyaltyObjectInput, LoyaltyRewardsInput } from "./types";
 import {
   WalletNotificationAuthError,
   WalletNotificationNotFoundError,
@@ -77,6 +78,8 @@ export class GoogleWalletProvider extends BaseWalletProvider {
     await patchObject(ref.externalId, {
       loyaltyPointsBalance: card.points,
       tier: card.tier,
+      // Undefined for a clinic with no programme: the patch then leaves the rewards alone.
+      rewards: this.toRewards(card),
       state: "ACTIVE"
     });
   }
@@ -254,8 +257,16 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       loyaltyPointsBalance: card.points,
       tierLabel: card.template.tierLabel,
       tier: card.tier,
+      rewards: this.toRewards(card),
       state: "ACTIVE"
     };
+  }
+
+  /** The same words the Apple back field carries, so the two wallets never disagree. */
+  private toRewards(card: LoyaltyCard): LoyaltyRewardsInput | undefined {
+    const text = availableRewardsText(card);
+
+    return text === undefined ? undefined : { count: availableRewardCount(card), text };
   }
 }
 
