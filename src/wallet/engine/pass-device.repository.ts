@@ -40,6 +40,32 @@ export interface PassDeviceRepository {
   pushTokensFor(passTypeIdentifier: string, serialNumber: string): Promise<string[]>;
 
   /**
+   * What is known about whether these serials reached a phone, in at most two queries.
+   *
+   *  - `registered`: serials with at least one registered device right now.
+   *  - `evidenced`: serials whose pass was handed to a person (downloaded) or that a phone
+   *    registered for at some point. Read from the credential, so it survives the
+   *    registration row being deleted when a member turns Automatic Updates off.
+   *
+   * For the dashboard, which must tell staff whether a card can be updated at all without
+   * a lookup per member. A serial with neither is a card nobody is known to have
+   * installed, which is not the same as one that has lost its device.
+   */
+  installState(
+    passTypeIdentifier: string,
+    serials: string[]
+  ): Promise<{ registered: Set<string>; evidenced: Set<string> }>;
+
+  /**
+   * Stamp the member's Apple credential as just downloaded.
+   *
+   * Called wherever a .pkpass is served to a person. Updated on every download rather
+   * than only the first: it is cheap and reads as "last handed a pass". A member with no
+   * Apple card or no credential is a no-op, never an error.
+   */
+  markDownloadedForMember(passTypeIdentifier: string, memberId: string): Promise<void>;
+
+  /**
    * Forget every registration holding this push token. Returns how many were removed.
    *
    * APNs answers 410 Unregistered when a device token is dead — the pass was deleted, the
