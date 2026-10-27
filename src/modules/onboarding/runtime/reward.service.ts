@@ -1,7 +1,8 @@
 import { MemberRewardKind, type MemberReward, type PrismaClient } from "@prisma/client";
 
+import { POST_CHANGE_SYNC_DELAY_MS } from "../../../wallet/engine/wallet-sync.queue";
 import { OnboardingError } from "../onboarding.service";
-import { checkRedemption, isInSurprisePool } from "./rules";
+import { checkRedemption, isDoublePointsPerk, isInSurprisePool } from "./rules";
 
 /**
  * Listing and redeeming the rewards a member has been issued.
@@ -50,10 +51,19 @@ const asDetail = (detail: unknown): { perk?: string; pool?: Array<{ id: string }
     ? (detail as { perk?: string; pool?: Array<{ id: string }> })
     : {};
 
+/**
+ * What the service needs to refresh a member's wallet card after a redemption. `PointsService`
+ * satisfies it. Optional so a deployment without a wallet still redeems.
+ */
+export interface CardSyncPort {
+  requestCardSync(memberId: string, delayMs?: number): Promise<void>;
+}
+
 export class RewardService {
   constructor(
     private readonly prisma: PrismaClient,
-    private readonly now: () => Date = () => new Date()
+    private readonly now: () => Date = () => new Date(),
+    private readonly cardSync?: CardSyncPort
   ) {}
 
   /** A member's rewards, available ones first. Expired ones stay listed: they were promised. */
@@ -97,7 +107,7 @@ export class RewardService {
 
     const detail = asDetail(reward.detail);
 
-    if (reward.kind === MemberRewardKind.VENTAJA && detail.perk === "doble") {
+    if (isDoublePointsPerk(reward.kind, reward.detail)) {
       // Spent automatically by the next payment, so a manual redemption would only waste it.
       throw new OnboardingError(
         "Los puntos dobles se aplican solos en la próxima visita de pago; no se canjean a mano.",
@@ -152,6 +162,14 @@ export class RewardService {
     });
 
     if (updated.count === 0) throw new OnboardingError("Este premio ya se canjeó.", 409);
+
+    // The card lists what can still be redeemed, so it is stale now. Never allowed to fail the
+    // redemption, which is already recorded.
+    try {
+      await this.cardSync?.requestCardSync(reward.memberId, POST_CHANGE_SYNC_DELAY_MS);
+    } catch (cause) {
+      console.error(`[wallet] could not queue a card sync for member ${reward.memberId}:`, cause);
+    }
 
     const fresh = await this.prisma.memberReward.findUniqueOrThrow({ where: { id: reward.id } });
 

@@ -71,13 +71,18 @@ export class BullWalletSyncQueue implements WalletSyncQueue {
     });
   }
 
-  async enqueueMemberSync(memberId: string, recheck?: number): Promise<void> {
+  async enqueueMemberSync(memberId: string, delayMs = 0, recheck?: number): Promise<void> {
     try {
       // No jobId on purpose, so BullMQ generates a unique one and this add can never be
       // ignored because an earlier job for the member still exists (see the class
       // comment). Every change gets a sync that runs after it. `recheck` is set only by
-      // the worker, for a follow-up sync (see createWalletSyncProcessor).
-      await this.queue.add(WALLET_SYNC_QUEUE, recheck ? { memberId, recheck } : { memberId });
+      // the worker, for a follow-up sync (see createWalletSyncProcessor); `delayMs` holds
+      // a sync back, for the changes that land just after the credit's own sync.
+      await this.queue.add(
+        WALLET_SYNC_QUEUE,
+        recheck ? { memberId, recheck } : { memberId },
+        delayMs > 0 ? { delay: delayMs } : undefined
+      );
     } catch (cause) {
       // Enqueueing must never fail the caller: Redis being unreachable is an operational
       // problem, not a reason to reject a visit at reception.
@@ -150,7 +155,7 @@ export const createWalletSyncWorker = (
   const worker = new Worker<WalletSyncJob>(
     WALLET_SYNC_QUEUE,
     createWalletSyncProcessor(service, (memberId, recheck) =>
-      followUps.enqueueMemberSync(memberId, recheck)
+      followUps.enqueueMemberSync(memberId, 0, recheck)
     ),
     { connection: redisConnection(redisUrl), concurrency }
   );

@@ -58,3 +58,21 @@ export const uncodedMemberPass: LoyaltyCard = {
   ...aureaGoldPass,
   member: { fullName: "Miembro Antiguo", memberSince: "2024" }
 };
+
+/** A programme-centre member with two rewards waiting and a next one still to earn. */
+export const rewardsPass: LoyaltyCard = {
+  ...aureaGoldPass,
+  points: 1750,
+  reward: {
+    description: "Sérum reparador · te faltan 250 puntos",
+    progressPercent: 40,
+    title: "Sérum reparador",
+    remainingPoints: 250
+  },
+  rewards: {
+    available: [
+      { title: "Limpieza facial", expiresAt: "2026-11-15T10:00:00.000Z" },
+      { title: "Kit de minitallas", expiresAt: "2026-12-20T10:00:00.000Z" }
+    ]
+  }
+};

@@ -6,12 +6,15 @@ import { LoyaltyCardAssembler } from "./engine/loyalty-card-assembler";
 import { LoyaltyCard, loyaltyCardSchema } from "./engine/loyalty-card";
 import { formatCardMessage } from "./engine/card-message";
 import { clipCardText } from "./engine/card-text";
+import { clipText } from "./engine/rewards-text";
+import { fitTierBenefits } from "./engine/tier-benefits-text";
 import { deriveRedemptionCode } from "./engine/redemption-code";
 import { milestoneProgress } from "../modules/points/milestone-engine";
 import type { Program } from "../modules/onboarding/engine.types";
+import { presentProgram } from "../modules/onboarding/presentation";
 import { programView } from "../modules/onboarding/runtime/program-view";
 import { toPoints } from "../modules/onboarding/runtime/points-unit";
-import { nextRewardFor } from "../modules/onboarding/runtime/rules";
+import { isDoublePointsPerk, nextRewardFor } from "../modules/onboarding/runtime/rules";
 import { tierRewardsSchema } from "../modules/templates/templates.schema";
 
 /**
@@ -99,16 +102,59 @@ const programRewardFor = (
   };
 };
 
+/**
+ * The benefits of the member's current tier, from the live programme (the one place they are
+ * defined: the engine's rules plus the clinic's own lines, merged by `presentProgram`).
+ *
+ * Undefined when the member has no tier, the tier is not in the programme, or it has nothing to
+ * say. A programme that cannot be presented must not stop the member's card: it falls back to the
+ * template's text, as a clinic with no programme does.
+ */
+const tierBenefitsFor = (
+  programOutput: unknown,
+  tier: string | null
+): { tier: string; lines: string[] } | undefined => {
+  if (!tier) return undefined;
+
+  try {
+    const presented = presentProgram(programOutput as Program).tiers.find(
+      (candidate) => candidate.label === tier
+    );
+
+    if (!presented) return undefined;
+
+    const lines = fitTierBenefits(presented.label, presented.benefits);
+
+    return lines.length > 0 ? { tier: presented.label, lines } : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** The most rewards a card shows; the pass only ever lists a handful and counts the rest. */
+const AVAILABLE_REWARDS_LIMIT = 20;
+
 export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
   constructor(
     private readonly prisma: PrismaClient,
-    private readonly redemptionSecret: string
+    private readonly redemptionSecret: string,
+    private readonly now: () => Date = () => new Date()
   ) {}
 
   async assemble(memberId: string): Promise<LoyaltyCard> {
+    const now = this.now();
     const member = await this.prisma.member.findUnique({
       where: { id: memberId },
       include: {
+        // The rewards the member can redeem now, in the same round trip. Ordered with tie-breakers
+        // because one visit issues its rewards with the same expiry, and the card must come out
+        // byte-equal each time. Cheap for a clinic with no programme: the member has no rows.
+        rewards: {
+          where: { redeemedAt: null, expiresAt: { gt: now } },
+          orderBy: [{ expiresAt: "asc" }, { issuedAt: "asc" }, { id: "asc" }],
+          take: AVAILABLE_REWARDS_LIMIT,
+          select: { title: true, kind: true, detail: true, expiresAt: true }
+        },
         // The latest clinic message, in the same round trip for the same reason as the programme.
         walletMessage: true,
         clinic: {
@@ -171,6 +217,25 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
       // A programme centre shows points (ten per euro); the ledger holds euro progress.
       points: live ? toPoints(member.pointsBalance) : member.pointsBalance,
       reward,
+      // Only a programme centre issues rewards. Filtered here as well as in the query: the
+      // clock is the caller's, and the card must never offer one that has lapsed. The double-points
+      // perk is spent by the next payment and cannot be redeemed by hand, so it is not a gift.
+      rewards: live
+        ? {
+            available: (member.rewards ?? [])
+              .filter(
+                (r) =>
+                  r.expiresAt.getTime() > now.getTime() && !isDoublePointsPerk(r.kind, r.detail)
+              )
+              .map((r) => ({
+                // A blank title would fail the schema and stop this member's card syncing at all.
+                title: clipText(r.title.trim(), 120) || "Regalo",
+                expiresAt: r.expiresAt.toISOString()
+              }))
+          }
+        : undefined,
+      // The programme's benefits for the member's tier replace the hand-typed text on the pass.
+      tierBenefits: live ? tierBenefitsFor(live.output, member.tier) : undefined,
       message: member.walletMessage ? { text: formatCardMessage(member.walletMessage) } : undefined,
       template: {
         programName: template.programName,

@@ -101,6 +101,12 @@ export interface ProgramTemplate {
   templateId: string;
   clinicName: string;
   template: CardTemplate;
+  /**
+   * True when the clinic has a live onboarding programme, which owns the members' benefits: the
+   * class then carries no hand-typed benefits text, because each member's own tier's benefits are
+   * on their card instead.
+   */
+  tierBenefitsFromProgramme?: boolean;
 }
 
 /** Our handle on a provider-side programme. `externalId` is that provider's own id. */

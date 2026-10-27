@@ -362,6 +362,10 @@ export const PRODUCTION_DETAILS_TEMPLATE_FIELD_PATHS = [
   "class.textModulesData['clinic']",
   "object.textModulesData['member_id']",
   "object.textModulesData['member_since']",
+  "object.textModulesData['rewards']",
+  // Per member: the benefits of their current tier, for a clinic whose programme owns them.
+  // Absent from the object of any other clinic, where the item simply does not render.
+  "object.textModulesData['tierbenefits']",
   "class.textModulesData['benefits']",
   "object.accountName",
   "object.accountId",
@@ -394,6 +398,13 @@ export const buildClassTemplateInfo = (
           startItem: toTemplateItem("object.textModulesData['member_id']"),
           middleItem: toTemplateItem("object.textModulesData['tier']"),
           endItem: toTemplateItem("class.textModulesData['benefit_cta']")
+        }
+      },
+      // How many rewards are waiting: the stamp-card count, on the front of the card. Absent
+      // from objects of a clinic with no programme, where the row simply does not render.
+      {
+        oneItem: {
+          item: toTemplateItem("object.secondaryLoyaltyPoints")
         }
       }
     ]

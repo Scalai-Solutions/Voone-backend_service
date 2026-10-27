@@ -1,4 +1,6 @@
 import { LoyaltyCard } from "../../engine/loyalty-card";
+import { availableRewardCount, availableRewardsText } from "../../engine/rewards-text";
+import { tierBenefitsText } from "../../engine/tier-benefits-text";
 import { PASS_LABELS } from "./apple-pass.strings";
 import { PassField } from "./passkit";
 
@@ -50,6 +52,18 @@ export const buildStoreCardFields = (data: LoyaltyCard): StoreCardFields => {
       value: data.tier,
       textAlignment: "PKTextAlignmentRight",
       changeMessage: PASS_LABELS.tierChangeMessage
+    });
+  }
+
+  // The stamp-card count: how many rewards are waiting, shown even at zero. Beside the level in the
+  // header, where it is seen without opening the card. Only for a clinic on a programme.
+  if (data.rewards) {
+    headerFields.push({
+      key: "rewards",
+      label: PASS_LABELS.rewards,
+      value: `🎁 ${availableRewardCount(data)}`,
+      textAlignment: "PKTextAlignmentRight",
+      changeMessage: PASS_LABELS.rewardsChangeMessage
     });
   }
 
@@ -109,7 +123,23 @@ export const buildStoreCardFields = (data: LoyaltyCard): StoreCardFields => {
     });
   }
 
-  if (data.template.benefitsText) {
+  const rewardsText = availableRewardsText(data);
+
+  if (rewardsText !== undefined) {
+    backFields.push({
+      key: "availableRewards",
+      label: PASS_LABELS.availableRewards,
+      value: rewardsText
+    });
+  }
+
+  const tierText = tierBenefitsText(data);
+
+  if (tierText !== undefined) {
+    // The programme's benefits for the member's tier, in the place and under the key of the
+    // hand-typed text it replaces.
+    backFields.push({ key: "benefits", label: PASS_LABELS.tierBenefits, value: tierText });
+  } else if (data.template.benefitsText) {
     backFields.push({
       key: "benefits",
       label: PASS_LABELS.benefits,

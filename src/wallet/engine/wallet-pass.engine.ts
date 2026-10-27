@@ -7,6 +7,7 @@ import type {
 } from "../../modules/templates/templates.repository";
 import { WalletPlatform, getPassBuilder } from "../wallet.factory";
 import { loyaltyCardSchema } from "./loyalty-card";
+import { programTemplateFor } from "./program-template";
 import { BuiltPass } from "./pass-builder.interface";
 import type {
   WalletMerchantLocation,
@@ -32,24 +33,7 @@ export class WalletPassEngine {
   async createClassForTemplate(
     template: ClinicTemplateWithRelations
   ): Promise<WalletClassSyncResult[]> {
-    const program = {
-      templateId: template.id,
-      clinicName: template.clinic.name,
-      template: {
-        programName: template.programName,
-        backgroundColor: template.hexBackgroundColor,
-        logoUrl: template.logoUrl ?? undefined,
-        heroImageUrl: template.heroImageUrl ?? undefined,
-        websiteUrl: template.websiteUrl ?? undefined,
-        appointmentUrl: template.appointmentUrl ?? undefined,
-        appLinkText: template.appLinkText ?? undefined,
-        appLinkDescription: template.appLinkDescription ?? undefined,
-        pointsLabel: template.pointsLabel,
-        tierLabel: template.tierLabel,
-        benefitsText: template.benefitsText,
-        infoText: template.infoText
-      }
-    };
+    const program = programTemplateFor(template);
 
     const refs = await Promise.all(
       this.registry.enabled().map((provider) => provider.provisionProgram(program))

@@ -1,3 +1,4 @@
+import { OnboardingProgramStatus } from "@prisma/client";
 import { Router } from "express";
 
 import { prisma } from "../../infrastructure/database/prisma-client";
@@ -170,7 +171,7 @@ v1Router.use(
     onboarding: new OnboardingService(prisma, catalogRepository),
     catalog: catalogRepository,
     visits: pointsService ? new VisitService(prisma, pointsService) : undefined,
-    rewards: new RewardService(prisma),
+    rewards: new RewardService(prisma, undefined, pointsService ?? undefined),
     findClinic: (slug) => findClinicBySlug(prisma, slug),
     clinicExists: async (clinicId) => (await prisma.clinic.count({ where: { id: clinicId } })) > 0
   })
@@ -222,7 +223,20 @@ if (config.CARD_REDEMPTION_SECRET) {
         async (memberId) => {
           const member = await prisma.member.findUnique({
             where: { id: memberId },
-            select: { clinic: { select: { name: true, template: true } } }
+            select: {
+              clinic: {
+                select: {
+                  name: true,
+                  template: true,
+                  // Whether the live programme owns the benefits the class shows.
+                  onboardingPrograms: {
+                    where: { status: OnboardingProgramStatus.ACTIVO },
+                    take: 1,
+                    select: { id: true }
+                  }
+                }
+              }
+            }
           });
 
           const template = member?.clinic.template;
@@ -236,6 +250,7 @@ if (config.CARD_REDEMPTION_SECRET) {
           return {
             templateId: template.id,
             clinicName: member.clinic.name,
+            tierBenefitsFromProgramme: member.clinic.onboardingPrograms.length > 0,
             template: {
               programName: template.programName,
               backgroundColor: template.hexBackgroundColor,

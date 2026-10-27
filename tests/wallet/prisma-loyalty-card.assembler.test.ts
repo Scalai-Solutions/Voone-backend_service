@@ -7,7 +7,9 @@ import { run } from "../../src/modules/onboarding/engine";
 import type { CatalogItem } from "../../src/modules/onboarding/engine.types";
 import { isEngineError } from "../../src/modules/onboarding/engine.types";
 import catalogFixture from "../onboarding/reference/sapphira.catalogo.json";
+import { presentProgram } from "../../src/modules/onboarding/presentation";
 import { loyaltyCardSchema } from "../../src/wallet/engine/loyalty-card";
+import { tierBenefitsText } from "../../src/wallet/engine/tier-benefits-text";
 import { PrismaLoyaltyCardAssembler } from "../../src/wallet/prisma-loyalty-card.assembler";
 
 const SECRET = "a-server-secret-not-a-member-attribute";
@@ -382,5 +384,365 @@ describe("PrismaLoyaltyCardAssembler: overlong clinic texts", () => {
 
     expect(card.template.benefitsText).toBe(`${"😀".repeat(249)}…`);
     expect(loyaltyCardSchema.safeParse(card).success).toBe(true);
+  });
+});
+
+describe("PrismaLoyaltyCardAssembler: redeemable rewards", () => {
+  const NOW = new Date("2026-10-27T10:00:00Z");
+  const programOutput = (() => {
+    const result = run(catalogFixture as CatalogItem[], {
+      ticket: null,
+      freq: null,
+      objective: "equilibrado",
+      investment: "equilibrado",
+      occupancy: "o2",
+      members: "m3"
+    });
+
+    if (isEngineError(result)) throw new Error(result.error);
+
+    return result;
+  })();
+
+  const reward = (
+    title: string,
+    expiresAt: string,
+    extra: Record<string, unknown> = {}
+  ): Record<string, unknown> => ({
+    title,
+    kind: "PREMIO",
+    issuedAt: new Date("2026-10-01T09:00:00Z"),
+    id: `id-${title}`,
+    redeemedAt: null,
+    expiresAt: new Date(expiresAt),
+    ...extra
+  });
+
+  const programmeMember = (rewards?: Array<Record<string, unknown>>) => ({
+    ...member,
+    tier: "Bronce",
+    lifetimePoints: 175,
+    clinic: { ...member.clinic, onboardingPrograms: [{ output: programOutput }] },
+    ...(rewards ? { rewards } : {})
+  });
+
+  /**
+   * A stand-in for the database that honours the rewards `where` and `take` the assembler asks for,
+   * so "the redeemed one is dropped" is proved by the query it sends, not by what the test returns.
+   */
+  const assembler = (value: { rewards?: Array<Record<string, unknown>> }) => {
+    const findUnique = vi.fn(
+      async (args: {
+        include: {
+          rewards: {
+            where: { redeemedAt: null; expiresAt: { gt: Date } };
+            orderBy: Array<Record<string, "asc">>;
+            take: number;
+          };
+        };
+      }) => {
+        const { where, orderBy, take } = args.include.rewards;
+        const compare = (a: Record<string, unknown>, b: Record<string, unknown>): number => {
+          for (const clause of orderBy) {
+            const [field] = Object.keys(clause);
+            const x =
+              a[field] instanceof Date ? (a[field] as Date).getTime() : (a[field] as string);
+            const y =
+              b[field] instanceof Date ? (b[field] as Date).getTime() : (b[field] as string);
+
+            if (x < y) return -1;
+            if (x > y) return 1;
+          }
+
+          return 0;
+        };
+
+        return {
+          ...value,
+          rewards: (value.rewards ?? [])
+            .filter(
+              (r) =>
+                r.redeemedAt === where.redeemedAt &&
+                (r.expiresAt as Date).getTime() > where.expiresAt.gt.getTime()
+            )
+            .sort(compare)
+            .slice(0, take)
+        };
+      }
+    );
+
+    return new PrismaLoyaltyCardAssembler(
+      { member: { findUnique } } as unknown as PrismaClient,
+      SECRET,
+      () => NOW
+    );
+  };
+
+  it("lists the two available rewards ordered by expiry, dropping the redeemed and the expired", async () => {
+    const card = await assembler(
+      programmeMember([
+        reward("Segundo", "2026-12-20T10:00:00Z"),
+        reward("Canjeado", "2026-11-30T10:00:00Z", {
+          redeemedAt: new Date("2026-10-20T10:00:00Z")
+        }),
+        reward("Caducado", "2026-10-26T10:00:00Z"),
+        reward("Primero", "2026-11-15T10:00:00Z")
+      ])
+    ).assemble(member.id);
+
+    expect(card.rewards).toEqual({
+      available: [
+        { title: "Primero", expiresAt: "2026-11-15T10:00:00.000Z" },
+        { title: "Segundo", expiresAt: "2026-12-20T10:00:00.000Z" }
+      ]
+    });
+  });
+
+  it("asks the database for available rewards only, in a stable order, in the member's own query", async () => {
+    const findUnique = vi.fn(async () => programmeMember([]));
+    const prisma = { member: { findUnique } } as unknown as PrismaClient;
+
+    await new PrismaLoyaltyCardAssembler(prisma, SECRET, () => NOW).assemble(member.id);
+
+    expect(findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          rewards: {
+            where: { redeemedAt: null, expiresAt: { gt: NOW } },
+            // Rewards issued by one visit share an expiry; the tie-breakers keep two builds equal.
+            orderBy: [{ expiresAt: "asc" }, { issuedAt: "asc" }, { id: "asc" }],
+            take: 20,
+            select: { title: true, kind: true, detail: true, expiresAt: true }
+          }
+        })
+      })
+    );
+  });
+
+  it("breaks an expiry tie by issue time and then id, so two builds are byte-equal", async () => {
+    const same = "2026-12-01T10:00:00Z";
+    const rows = [
+      reward("C", same, { id: "z", issuedAt: new Date("2026-10-02T00:00:00Z") }),
+      reward("B", same, { id: "b", issuedAt: new Date("2026-10-01T00:00:00Z") }),
+      reward("A", same, { id: "a", issuedAt: new Date("2026-10-01T00:00:00Z") })
+    ];
+    const first = await assembler(programmeMember(rows)).assemble(member.id);
+    const second = await assembler(programmeMember([...rows].reverse())).assemble(member.id);
+
+    expect(first.rewards?.available.map((r) => r.title)).toEqual(["A", "B", "C"]);
+    expect(second).toEqual(first);
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+  });
+
+  it("carries an empty list, not nothing, for a programme member with no rewards", async () => {
+    expect((await assembler(programmeMember([])).assemble(member.id)).rewards).toEqual({
+      available: []
+    });
+    expect((await assembler(programmeMember()).assemble(member.id)).rewards).toEqual({
+      available: []
+    });
+  });
+
+  it("carries no rewards at all for a clinic with no programme", async () => {
+    const none = {
+      ...member,
+      clinic: { ...member.clinic, onboardingPrograms: [] },
+      rewards: [reward("Premio", "2026-12-01T10:00:00Z")]
+    };
+
+    expect((await assembler(none).assemble(member.id)).rewards).toBeUndefined();
+  });
+
+  it("passes the real card schema, shortening a title the pass cannot hold", async () => {
+    const card = await assembler(
+      programmeMember([reward("T".repeat(300), "2026-12-01T10:00:00Z")])
+    ).assemble(member.id);
+
+    expect(card.rewards?.available[0].title).toHaveLength(120);
+    expect(loyaltyCardSchema.safeParse(card).success).toBe(true);
+  });
+
+  it("rejects more than 20 rewards in the schema", () => {
+    const card = {
+      memberId: "m",
+      serialNumber: "s",
+      redemptionCode: "MFRGGZDFMZTWQ2LKNNWG23Q",
+      clinic: { name: "C" },
+      member: { fullName: "N" },
+      points: 0,
+      rewards: {
+        available: Array.from({ length: 21 }, () => ({
+          title: "x",
+          expiresAt: "2026-12-01T10:00:00.000Z"
+        }))
+      },
+      template: {
+        programName: "P",
+        backgroundColor: "#ffffff",
+        pointsLabel: "p",
+        tierLabel: "t"
+      }
+    };
+
+    expect(loyaltyCardSchema.safeParse(card).success).toBe(false);
+  });
+
+  it("leaves out the double-points perk, which cannot be redeemed by hand", async () => {
+    const card = await assembler(
+      programmeMember([
+        reward("Puntos dobles", "2026-11-01T10:00:00Z", {
+          kind: "VENTAJA",
+          detail: { perk: "doble" }
+        }),
+        reward("Sorpresa", "2026-11-02T10:00:00Z", {
+          kind: "VENTAJA",
+          detail: { perk: "sorpresa" }
+        }),
+        reward("Premio", "2026-11-03T10:00:00Z", { detail: { items: [] } })
+      ])
+    ).assemble(member.id);
+
+    expect(card.rewards?.available.map((r) => r.title)).toEqual(["Sorpresa", "Premio"]);
+  });
+
+  it("names a blank title Regalo instead of failing the whole card", async () => {
+    const card = await assembler(
+      programmeMember([
+        reward("", "2026-11-01T10:00:00Z"),
+        reward("   ", "2026-11-02T10:00:00Z", { id: "x" })
+      ])
+    ).assemble(member.id);
+
+    expect(card.rewards?.available.map((r) => r.title)).toEqual(["Regalo", "Regalo"]);
+  });
+
+  it("cuts a long title on a code point, never in the middle of an emoji", async () => {
+    const card = await assembler(
+      programmeMember([reward(`${"x".repeat(119)}😀😀`, "2026-11-01T10:00:00Z")])
+    ).assemble(member.id);
+    const [{ title }] = card.rewards!.available;
+
+    expect(title.length).toBeLessThanOrEqual(120);
+    expect(title).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    expect(title).toBe("x".repeat(119));
+    expect(loyaltyCardSchema.safeParse(card).success).toBe(true);
+  });
+});
+
+describe("PrismaLoyaltyCardAssembler: the member's tier benefits", () => {
+  const output = (() => {
+    const result = run(catalogFixture as CatalogItem[], {
+      ticket: null,
+      freq: null,
+      objective: "equilibrado",
+      investment: "equilibrado",
+      occupancy: "o2",
+      members: "m3"
+    });
+
+    if (isEngineError(result)) throw new Error(result.error);
+
+    return result;
+  })();
+
+  const programme = (programOutput: unknown) => ({
+    clinic: { ...member.clinic, onboardingPrograms: [{ output: programOutput }] }
+  });
+  const memberOf = (tier: string | null, programOutput: unknown = output) => ({
+    ...member,
+    tier,
+    lifetimePoints: 0,
+    ...programme(programOutput)
+  });
+  const presented = (label: string, programOutput: unknown = output) =>
+    presentProgram(programOutput as never).tiers.find((t) => t.label === label)?.benefits ?? [];
+
+  it("gives the benefits of the member's own tier as the programme defines them", async () => {
+    const card = await assemblerFor(memberOf("Plata")).assemble(member.id);
+
+    expect(card.tierBenefits?.tier).toBe("Plata");
+    expect(card.tierBenefits?.lines).toEqual(presented("Plata"));
+    expect(card.tierBenefits?.lines.length).toBeGreaterThan(0);
+  });
+
+  it("includes the benefits the clinic wrote itself", async () => {
+    const custom = { ...output, customBenefits: { plata: ["Masaje de bienvenida"] } };
+    const card = await assemblerFor(memberOf("Plata", custom)).assemble(member.id);
+
+    expect(card.tierBenefits?.lines).toEqual(presented("Plata", custom));
+    expect(card.tierBenefits?.lines).toContain("Masaje de bienvenida");
+  });
+
+  it("gives a member of another tier that tier's benefits, not Plata's", async () => {
+    const bronce = await assemblerFor(memberOf("Bronce")).assemble(member.id);
+    const oro = await assemblerFor(memberOf("Oro")).assemble(member.id);
+
+    expect(bronce.tierBenefits?.tier).toBe("Bronce");
+    expect(bronce.tierBenefits?.lines).toEqual(presented("Bronce"));
+    expect(oro.tierBenefits?.tier).toBe("Oro");
+    expect(oro.tierBenefits?.lines).toEqual(presented("Oro"));
+    expect(bronce.tierBenefits?.lines).not.toEqual(oro.tierBenefits?.lines);
+  });
+
+  it("has none for a clinic with no programme, which keeps its hand-typed text", async () => {
+    const card = await assemblerFor({
+      ...member,
+      clinic: { ...member.clinic, onboardingPrograms: [] }
+    }).assemble(member.id);
+
+    expect(card.tierBenefits).toBeUndefined();
+    expect(card.template.benefitsText).toBe(template.benefitsText);
+  });
+
+  it("has none when the member's tier is not in the programme, or the member has no tier", async () => {
+    expect((await assemblerFor(memberOf("Gold")).assemble(member.id)).tierBenefits).toBeUndefined();
+    expect((await assemblerFor(memberOf(null)).assemble(member.id)).tierBenefits).toBeUndefined();
+  });
+
+  it("has none, rather than failing the card, when the programme cannot be presented", async () => {
+    const card = await assemblerFor(memberOf("Plata", { ...output, gifts: undefined })).assemble(
+      member.id
+    );
+
+    expect(card.tierBenefits).toBeUndefined();
+    expect(card.template.benefitsText).toBe(template.benefitsText);
+  });
+
+  it("clips a long list inside 500 characters and says how many it left out", async () => {
+    const custom = {
+      ...output,
+      customBenefits: {
+        diamante: Array.from({ length: 6 }, (_, i) => `${i + 1} ${"Beneficio largo ".repeat(5)}`)
+      }
+    };
+    const card = await assemblerFor(memberOf("Diamante", custom)).assemble(member.id);
+    const all = presented("Diamante", custom);
+    const lines = card.tierBenefits?.lines ?? [];
+    const shown = lines.length - 1;
+
+    expect(all.length).toBeGreaterThan(shown);
+    expect(lines.at(-1)).toBe(`… y ${all.length - shown} más`);
+    expect(lines.slice(0, shown)).toEqual(all.slice(0, shown).map((l) => l.trim()));
+    expect(tierBenefitsText(card)?.length).toBeLessThanOrEqual(500);
+    expect(lines.length).toBeLessThanOrEqual(12);
+  });
+
+  it("builds a card the schema accepts, byte-equal on a second build", async () => {
+    const first = await assemblerFor(memberOf("Plata")).assemble(member.id);
+    const second = await assemblerFor(memberOf("Plata")).assemble(member.id);
+
+    expect(loyaltyCardSchema.safeParse(first).success).toBe(true);
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+  });
+
+  it("does not ask the database for anything more", async () => {
+    const findUnique = vi.fn(async () => memberOf("Plata"));
+
+    await new PrismaLoyaltyCardAssembler(
+      { member: { findUnique } } as unknown as PrismaClient,
+      SECRET
+    ).assemble(member.id);
+
+    expect(findUnique).toHaveBeenCalledTimes(1);
   });
 });

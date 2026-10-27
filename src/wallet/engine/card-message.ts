@@ -38,6 +38,21 @@ const madridDay = new Intl.DateTimeFormat("en-GB", {
   month: "numeric"
 });
 
+/**
+ * "27 oct": the Madrid calendar day of an instant, in the card's Spanish month abbreviations.
+ *
+ * `months` lets a caller with a house style of its own (the rewards line writes "sept") reuse the
+ * Europe/Madrid day arithmetic without changing what the message text, which is compared byte for
+ * byte against the phone, prints.
+ */
+export const formatMadridDayMonth = (at: Date, months: readonly string[] = MONTHS_ES): string => {
+  const parts = madridDay.formatToParts(at);
+  const day = Number(parts.find((part) => part.type === "day")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
+
+  return `${day} ${months[month - 1]}`;
+};
+
 export interface StoredCardMessage {
   header: string;
   body: string;
@@ -45,10 +60,7 @@ export interface StoredCardMessage {
 }
 
 export const formatCardMessage = ({ header, body, sentAt }: StoredCardMessage): string => {
-  const parts = madridDay.formatToParts(sentAt);
-  const day = Number(parts.find((part) => part.type === "day")?.value);
-  const month = Number(parts.find((part) => part.type === "month")?.value);
-  const text = `${day} ${MONTHS_ES[month - 1]} · ${header}: ${body}`;
+  const text = `${formatMadridDayMonth(sentAt)} · ${header}: ${body}`;
 
   // Counted in UTF-16 units, the unit the card schema's max(300) counts: capping by code points
   // let an emoji-heavy message through here and then fail validation in assemble(), which would

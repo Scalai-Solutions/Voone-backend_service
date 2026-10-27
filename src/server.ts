@@ -7,6 +7,7 @@ import {
   buildNotificationService,
   startInProcessNotificationWorker
 } from "./modules/notifications/notification.composition";
+import { syncMembersWithExpiredRewards } from "./modules/wallet-refresh/expired-rewards-sync";
 import { startInProcessWalletWorker } from "./wallet/wallet.composition";
 
 const app = buildApp();
@@ -43,7 +44,10 @@ const notificationService = buildNotificationService(prisma);
 const walletWorker = startInProcessWalletWorker(prisma);
 const notificationWorker = startInProcessNotificationWorker(prisma, notificationService);
 const birthdayCron = config.BIRTHDAY_NOTIFICATION_CRON_ENABLED
-  ? startBirthdayNotificationCron(notificationService)
+  ? // The same daily tick also takes rewards that lapsed overnight off members' cards.
+    startBirthdayNotificationCron(notificationService, undefined, () =>
+      syncMembersWithExpiredRewards()
+    )
   : null;
 
 if (walletWorker) {

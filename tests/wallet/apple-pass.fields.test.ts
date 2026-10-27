@@ -11,8 +11,14 @@ import {
   aureaGoldPass,
   brandNewMemberPass,
   fullyPopulatedPass,
+  rewardsPass,
   uncodedMemberPass
 } from "../fixtures/loyalty-card.fixture";
+import {
+  PASS_LABELS,
+  PASS_TRANSLATIONS
+} from "../../src/wallet/providers/apple/apple-pass.strings";
+import type { LoyaltyCard } from "../../src/wallet/engine/loyalty-card";
 
 const allKeys = (fields: ReturnType<typeof buildStoreCardFields>): string[] =>
   [
@@ -27,7 +33,9 @@ describe("buildStoreCardFields", () => {
   it.each([
     ["typical member", aureaGoldPass],
     ["fully populated", fullyPopulatedPass],
-    ["brand new member", brandNewMemberPass]
+    ["brand new member", brandNewMemberPass],
+    ["member with rewards waiting", rewardsPass],
+    ["programme member with none", { ...rewardsPass, rewards: { available: [] } }]
   ])("keeps every key unique across all five slots for a %s", (_label, data) => {
     // A PassType shares one key pool between the slots and throws on a duplicate push, so a
     // collision would only surface as a runtime failure while signing.
@@ -363,5 +371,190 @@ describe("loyaltyCardSchema", () => {
       );
       expect(allKeys(fields)).not.toContain("rewardName");
     });
+  });
+});
+
+describe("buildStoreCardFields: redeemable rewards", () => {
+  const withRewards = (
+    available: Array<{ title: string; expiresAt: string }>,
+    reward?: LoyaltyCard["reward"]
+  ): LoyaltyCard => ({ ...rewardsPass, reward, rewards: { available } });
+  const reward = (n: number) => ({
+    title: `Premio ${n}`,
+    expiresAt: "2026-11-15T10:00:00.000Z"
+  });
+  const many = (n: number) => Array.from({ length: n }, (_, i) => reward(i + 1));
+  const backValue = (data: LoyaltyCard): string =>
+    String(buildStoreCardFields(data).backFields.find((f) => f.key === "availableRewards")?.value);
+
+  it("shows a gift count in the header beside the level", () => {
+    const { headerFields } = buildStoreCardFields(rewardsPass);
+
+    expect(headerFields.map((f) => f.key)).toEqual(["tier", "rewards"]);
+    expect(headerFields[1]).toEqual({
+      key: "rewards",
+      label: "REGALOS",
+      value: "🎁 2",
+      textAlignment: "PKTextAlignmentRight",
+      changeMessage: "Tus regalos disponibles: %@"
+    });
+  });
+
+  it("shows 🎁 0 when there is none, so the card reads like a stamp card", () => {
+    const { headerFields } = buildStoreCardFields(withRewards([]));
+
+    expect(headerFields.find((f) => f.key === "rewards")?.value).toBe("🎁 0");
+  });
+
+  it("keeps the gift count when the member has no tier", () => {
+    const { headerFields } = buildStoreCardFields({ ...rewardsPass, tier: undefined });
+
+    expect(headerFields.map((f) => f.key)).toEqual(["rewards"]);
+  });
+
+  it("adds neither field for a clinic with no programme", () => {
+    const data = { ...rewardsPass, rewards: undefined };
+    const fields = buildStoreCardFields(data);
+
+    expect(allKeys(fields)).not.toContain("rewards");
+    expect(allKeys(fields)).not.toContain("availableRewards");
+  });
+
+  it("lists each reward on the back with its Madrid expiry, then the redemption line", () => {
+    expect(backValue(rewardsPass)).toBe(
+      [
+        "🎁 Limpieza facial · hasta 15 nov",
+        "🎁 Kit de minitallas · hasta 20 dic",
+        "Preséntalas en el centro para canjearlas."
+      ].join("\n")
+    );
+    expect(
+      buildStoreCardFields(rewardsPass).backFields.find((f) => f.key === "availableRewards")?.label
+    ).toBe("RECOMPENSAS DISPONIBLES");
+  });
+
+  it("dates in Europe/Madrid: 23:30 UTC on 30 Nov is already 1 dic there", () => {
+    const text = backValue(withRewards([{ title: "A", expiresAt: "2026-11-30T23:30:00.000Z" }]));
+
+    expect(text).toContain("A · hasta 1 dic");
+  });
+
+  it("writes September as sept", () => {
+    const text = backValue(withRewards([{ title: "A", expiresAt: "2026-09-12T10:00:00.000Z" }]));
+
+    expect(text).toContain("A · hasta 12 sept");
+  });
+
+  it("shows eight lines and counts the rest", () => {
+    const text = backValue(withRewards(many(8)));
+
+    expect(text.split("\n").filter((l) => l.startsWith("🎁"))).toHaveLength(8);
+    expect(text).not.toContain("más");
+
+    const nine = backValue(withRewards(many(9)));
+
+    expect(nine.split("\n").filter((l) => l.startsWith("🎁"))).toHaveLength(8);
+    expect(nine).toContain("… y 1 más");
+    expect(nine).not.toContain("Premio 9");
+    expect(nine.endsWith("Preséntalas en el centro para canjearlas.")).toBe(true);
+
+    expect(backValue(withRewards(many(20)))).toContain("… y 12 más");
+    // The header still counts every one of them.
+    expect(buildStoreCardFields(withRewards(many(20))).headerFields.at(-1)?.value).toBe("🎁 20");
+  });
+
+  it("with none, says so and names the next reward, and does not tell them to present anything", () => {
+    expect(backValue(withRewards([], rewardsPass.reward))).toBe(
+      "Aún no tienes recompensas disponibles. Sérum reparador · te faltan 250 puntos."
+    );
+  });
+
+  it("with none and no next reward, has no dangling full stop or space", () => {
+    expect(backValue(withRewards([]))).toBe("Aún no tienes recompensas disponibles.");
+    // A next-reward text that already ends in a full stop is not given a second.
+    expect(backValue(withRewards([], { description: "Un regalo.", progressPercent: 10 }))).toBe(
+      "Aún no tienes recompensas disponibles. Un regalo."
+    );
+  });
+
+  it("is identical on two builds", () => {
+    expect(buildStoreCardFields(rewardsPass)).toEqual(buildStoreCardFields(rewardsPass));
+  });
+
+  it("has an English translation for the new labels and the change message", () => {
+    const english = PASS_TRANSLATIONS.en;
+
+    expect(PASS_LABELS.rewards).toBe("REGALOS");
+    expect(english.REGALOS).toBe("GIFTS");
+    expect(english["RECOMPENSAS DISPONIBLES"]).toBe("AVAILABLE REWARDS");
+    expect(english["Tus regalos disponibles: %@"]).toBe("Your available gifts: %@");
+  });
+
+  it("keeps a long title to 60 characters on its line", () => {
+    const text = backValue(
+      withRewards([{ title: "T".repeat(100), expiresAt: "2026-11-15T10:00:00.000Z" }])
+    );
+    const [line] = text.split("\n");
+
+    expect(line).toBe(`🎁 ${"T".repeat(59)}… · hasta 15 nov`);
+  });
+
+  it("never cuts a title through an emoji", () => {
+    const text = backValue(
+      withRewards([{ title: `${"x".repeat(58)}😀😀`, expiresAt: "2026-11-15T10:00:00.000Z" }])
+    );
+
+    expect(text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+  });
+});
+
+describe("tier benefits on the back of the pass", () => {
+  const withTier: LoyaltyCard = {
+    ...rewardsPass,
+    tier: "Plata",
+    tierBenefits: {
+      tier: "Plata",
+      lines: ["Descuento del 3% en cosmética", "Prioridad en huecos de última hora"]
+    }
+  };
+  const backOf = (card: LoyaltyCard) =>
+    Object.fromEntries(buildStoreCardFields(card).backFields.map((f) => [f.key, f]));
+
+  it("shows the tier's own benefits, tier name first, one bullet per line", () => {
+    const { benefits } = backOf(withTier);
+
+    expect(benefits.value).toBe(
+      "Plata\n• Descuento del 3% en cosmética\n• Prioridad en huecos de última hora"
+    );
+    expect(benefits.label).toBe(PASS_LABELS.tierBenefits);
+    expect(benefits.label).toBe("BENEFICIOS DE TU NIVEL");
+  });
+
+  it("replaces the hand-typed benefits text rather than adding a second field", () => {
+    const fields = buildStoreCardFields(withTier);
+
+    expect(JSON.stringify(fields)).not.toContain("Acceso exclusivo");
+    expect(fields.backFields.filter((f) => f.key === "benefits")).toHaveLength(1);
+  });
+
+  it("translates the new label to English", () => {
+    expect(PASS_TRANSLATIONS.en["BENEFICIOS DE TU NIVEL"]).toBe("YOUR TIER BENEFITS");
+  });
+
+  it("keeps the information field as it was", () => {
+    expect(backOf(withTier).info.value).toBe(aureaGoldPass.template.infoText);
+  });
+
+  it("leaves a card with no tier benefits exactly as before", () => {
+    const { benefits } = backOf(rewardsPass);
+
+    expect(benefits.label).toBe(PASS_LABELS.benefits);
+    expect(benefits.value).toBe(aureaGoldPass.template.benefitsText);
+  });
+
+  it("keeps every key unique", () => {
+    const keys = allKeys(buildStoreCardFields(withTier));
+
+    expect(new Set(keys).size).toBe(keys.length);
   });
 });

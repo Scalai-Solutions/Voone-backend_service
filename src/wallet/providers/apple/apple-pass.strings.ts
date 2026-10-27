@@ -14,6 +14,9 @@ export const PASS_LABELS = {
   progress: "PROGRESO",
   program: "PROGRAMA",
   benefits: "BENEFICIOS",
+  // Replaces BENEFICIOS for a member of a clinic on a programme: the value starts with the tier's
+  // name, so the label itself stays static and translatable.
+  tierBenefits: "BENEFICIOS DE TU NIVEL",
   info: "INFORMACIÓN",
   memberSince: "MIEMBRO DESDE",
   redemptionCode: "CÓDIGO DE CANJE",
@@ -25,6 +28,9 @@ export const PASS_LABELS = {
   pointsChangeMessage: "Tu saldo ahora es %@",
   tierChangeMessage: "Ahora eres nivel %@",
   lastMessage: "ÚLTIMO MENSAJE",
+  rewards: "REGALOS",
+  availableRewards: "RECOMPENSAS DISPONIBLES",
+  rewardsChangeMessage: "Tus regalos disponibles: %@",
   // The bare format: the lock-screen notification is the field's own value, which already
   // carries the date, the title and the text of the clinic's message.
   messageChangeMessage: "%@"
@@ -39,6 +45,7 @@ export const PASS_TRANSLATIONS: Record<string, Record<string, string>> = {
     PROGRESO: "PROGRESS",
     PROGRAMA: "PROGRAMME",
     BENEFICIOS: "BENEFITS",
+    "BENEFICIOS DE TU NIVEL": "YOUR TIER BENEFITS",
     INFORMACIÓN: "INFORMATION",
     "MIEMBRO DESDE": "MEMBER SINCE",
     "CÓDIGO DE CANJE": "REDEMPTION CODE",
@@ -50,6 +57,9 @@ export const PASS_TRANSLATIONS: Record<string, Record<string, string>> = {
     "Tu saldo ahora es %@": "Your balance is now %@",
     "Ahora eres nivel %@": "You are now %@ tier",
     "ÚLTIMO MENSAJE": "LAST MESSAGE",
+    REGALOS: "GIFTS",
+    "RECOMPENSAS DISPONIBLES": "AVAILABLE REWARDS",
+    "Tus regalos disponibles: %@": "Your available gifts: %@",
     "%@": "%@"
   }
 };

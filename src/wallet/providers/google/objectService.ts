@@ -8,6 +8,24 @@ import type {
   LoyaltyObjectState
 } from "./types";
 
+/** The reserved object-level IDs and labels the class template points at for rewards. */
+export const REWARDS_MODULE_ID = "rewards";
+export const REWARDS_MODULE_HEADER = "Recompensas disponibles";
+export const REWARDS_COUNT_LABEL = "Regalos";
+/** The per-member module the class details point at for a clinic whose programme owns the benefits. */
+export const TIER_BENEFITS_MODULE_ID = "tierbenefits";
+export const TIER_BENEFITS_MODULE_HEADER = "Beneficios de tu nivel";
+
+interface GoogleSecondaryLoyaltyPoints {
+  label: string;
+  balance: { int: number };
+}
+
+const toSecondaryPoints = (count: number): GoogleSecondaryLoyaltyPoints => ({
+  label: REWARDS_COUNT_LABEL,
+  balance: { int: count }
+});
+
 interface GoogleLoyaltyPointsBalance {
   string?: string;
   int?: number;
@@ -38,6 +56,7 @@ interface GoogleLoyaltyObject {
   accountName?: string;
   accountId?: string;
   loyaltyPoints?: GoogleLoyaltyPoints;
+  secondaryLoyaltyPoints?: GoogleSecondaryLoyaltyPoints;
   state?: LoyaltyObjectState;
   textModulesData?: Array<{
     id: string;
@@ -62,6 +81,7 @@ interface GoogleLoyaltyObjectRequest {
       string: string;
     };
   };
+  secondaryLoyaltyPoints?: GoogleSecondaryLoyaltyPoints;
   state: LoyaltyObjectState;
   barcode: GoogleBarcode;
   textModulesData: Array<{
@@ -81,6 +101,7 @@ interface GoogleLoyaltyObjectPatchRequest {
       string: string;
     };
   };
+  secondaryLoyaltyPoints?: GoogleSecondaryLoyaltyPoints;
   state?: LoyaltyObjectState;
   barcode?: GoogleBarcode;
   textModulesData?: Array<{
@@ -131,7 +152,14 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
   const client = getAuthenticatedClient();
   const body: GoogleLoyaltyObjectPatchRequest = {};
 
-  if (patch.loyaltyPointsBalance !== undefined || patch.tier !== undefined) {
+  if (
+    patch.loyaltyPointsBalance !== undefined ||
+    patch.tier !== undefined ||
+    patch.rewards !== undefined ||
+    patch.tierBenefits !== undefined
+  ) {
+    // A PATCH of textModulesData REPLACES the whole array, so the object is read first and the
+    // changed modules are merged into what it holds: nothing the object already carries is lost.
     const existingObject = await client.request<GoogleLoyaltyObject>(
       `/loyaltyObject/${encodeURIComponent(objectId)}`
     );
@@ -139,7 +167,7 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
     const existingHeaderFor = (id: string, fallback: string): string =>
       existingTextModules.find((module) => module.id === id)?.header ?? fallback;
 
-    body.textModulesData = upsertTextModules(existingTextModules, [
+    const merged = upsertTextModules(existingTextModules, [
       ...(patch.loyaltyPointsBalance !== undefined
         ? [
             {
@@ -151,8 +179,38 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
         : []),
       ...(patch.tier !== undefined
         ? [{ id: "tier", header: existingHeaderFor("tier", "Nivel"), body: patch.tier }]
+        : []),
+      ...(patch.rewards !== undefined
+        ? [{ id: REWARDS_MODULE_ID, header: REWARDS_MODULE_HEADER, body: patch.rewards.text }]
+        : []),
+      ...(patch.tierBenefits
+        ? [
+            {
+              id: TIER_BENEFITS_MODULE_ID,
+              header: TIER_BENEFITS_MODULE_HEADER,
+              body: patch.tierBenefits.text
+            }
+          ]
         : [])
     ]);
+    // The merge keeps modules it does not know, so a stale tier benefits module is dropped by name.
+    const next =
+      patch.tierBenefits === null
+        ? merged.filter((module) => module.id !== TIER_BENEFITS_MODULE_ID)
+        : merged;
+    const onlyRemoval =
+      patch.loyaltyPointsBalance === undefined &&
+      patch.tier === undefined &&
+      patch.rewards === undefined;
+
+    // A removal with nothing to remove writes nothing: most clinics have no such module.
+    if (!onlyRemoval || next.length !== existingTextModules.length) {
+      body.textModulesData = next;
+    }
+  }
+
+  if (patch.rewards !== undefined) {
+    body.secondaryLoyaltyPoints = toSecondaryPoints(patch.rewards.count);
   }
 
   if (patch.loyaltyPointsBalance !== undefined) {
@@ -291,6 +349,7 @@ const toGoogleLoyaltyObjectBody = (input: LoyaltyObjectInput): GoogleLoyaltyObje
         string: String(input.loyaltyPointsBalance)
       }
     },
+    ...(input.rewards ? { secondaryLoyaltyPoints: toSecondaryPoints(input.rewards.count) } : {}),
     state: input.state ?? "ACTIVE",
     barcode: {
       type: "QR_CODE",
@@ -318,7 +377,19 @@ const toGoogleLoyaltyObjectBody = (input: LoyaltyObjectInput): GoogleLoyaltyObje
         id: "tier",
         header: input.tierLabel ?? "Nivel",
         body: input.tier ?? "—"
-      }
+      },
+      ...(input.rewards
+        ? [{ id: REWARDS_MODULE_ID, header: REWARDS_MODULE_HEADER, body: input.rewards.text }]
+        : []),
+      ...(input.tierBenefits
+        ? [
+            {
+              id: TIER_BENEFITS_MODULE_ID,
+              header: TIER_BENEFITS_MODULE_HEADER,
+              body: input.tierBenefits.text
+            }
+          ]
+        : [])
     ],
     // TODO: Verify object-level tier support against https://developers.google.com/wallet/retail/loyalty-cards/rest/v1/loyaltyclass before relying on this field in production.
     // As of now, this field has no effect when written on a LoyaltyObject; only LoyaltyClass.rewardsTier is real.
@@ -329,13 +400,21 @@ const toGoogleLoyaltyObjectBody = (input: LoyaltyObjectInput): GoogleLoyaltyObje
 const toGoogleLoyaltyObjectPatchBody = (
   input: LoyaltyObjectInput
 ): GoogleLoyaltyObjectPatchRequest => {
-  const { accountId, loyaltyPoints, state, barcode, textModulesData, rewardsTier } =
-    toGoogleLoyaltyObjectBody(input);
+  const {
+    accountId,
+    loyaltyPoints,
+    secondaryLoyaltyPoints,
+    state,
+    barcode,
+    textModulesData,
+    rewardsTier
+  } = toGoogleLoyaltyObjectBody(input);
 
   return {
     accountName: input.accountName,
     accountId,
     loyaltyPoints,
+    secondaryLoyaltyPoints,
     state,
     barcode,
     textModulesData,

@@ -50,6 +50,17 @@ export interface LoyaltyMessageInput {
 
 export type LoyaltyObjectState = "ACTIVE" | "INACTIVE";
 
+/** The rewards a member can redeem now: how many, and the text listing them. */
+export interface LoyaltyRewardsInput {
+  count: number;
+  text: string;
+}
+
+/** The text of the member's tier benefits, from the clinic's live programme. */
+export interface LoyaltyTierBenefitsInput {
+  text: string;
+}
+
 export interface LoyaltyObjectInput {
   objectId: string;
   classId: string;
@@ -61,10 +72,16 @@ export interface LoyaltyObjectInput {
   tierLabel?: string;
   tier?: string;
   state?: LoyaltyObjectState;
+  /** Absent for a clinic with no programme: the object then carries no rewards parts at all. */
+  rewards?: LoyaltyRewardsInput;
+  /** Absent for a clinic with no live programme: the object then carries no such module. */
+  tierBenefits?: LoyaltyTierBenefitsInput;
 }
 
 export type LoyaltyObjectPatch = Partial<
-  Pick<LoyaltyObjectInput, "loyaltyPointsBalance" | "tier" | "state">
+  Pick<LoyaltyObjectInput, "loyaltyPointsBalance" | "tier" | "state" | "rewards">
 > & {
+  /** The module's text; `null` REMOVES a stale module (a card with no tier benefits). */
+  tierBenefits?: LoyaltyTierBenefitsInput | null;
   notify?: boolean;
 };

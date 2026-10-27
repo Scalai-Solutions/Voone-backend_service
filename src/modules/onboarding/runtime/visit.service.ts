@@ -8,6 +8,7 @@ import {
   type PrismaClient
 } from "@prisma/client";
 
+import { POST_CHANGE_SYNC_DELAY_MS } from "../../../wallet/engine/wallet-sync.queue";
 import { toPoints } from "./points-unit";
 import type { PointsService } from "../../points/points.service";
 import { toCents } from "../catalog.repository";
@@ -213,6 +214,10 @@ export class VisitService {
 
     const issued = await this.issue(visit, active.id, active.version, active.view, before, after);
 
+    // The credit above enqueued a card sync BEFORE these rewards existed, so that sync can build a
+    // card without them. Ask again now that they are written.
+    if (issued.length > 0) await this.requestCardSync(input.memberId);
+
     if (visit.kind === VisitKind.PAYMENT && visit.hasTreatment) {
       await this.countReferral(visit, active.id, active.view);
     }
@@ -245,6 +250,15 @@ export class VisitService {
       bono,
       bonusPoints: toPoints(visit.bonusProgress ?? 0)
     };
+  }
+
+  /** Never throws: a wallet outage must not fail a visit that is already recorded. */
+  private async requestCardSync(memberId: string): Promise<void> {
+    try {
+      await this.points.requestCardSync(memberId, POST_CHANGE_SYNC_DELAY_MS);
+    } catch (cause) {
+      console.error(`[wallet] could not queue a card sync for member ${memberId}:`, cause);
+    }
   }
 
   /** The outcome's bono block, the same for a first record and for a retry. */
@@ -677,7 +691,7 @@ export class VisitService {
 
     if (!reward) return;
 
-    await this.prisma.memberReward.createMany({
+    const created = await this.prisma.memberReward.createMany({
       data: [
         {
           clinicId: visit.clinicId,
@@ -693,5 +707,8 @@ export class VisitService {
       ],
       skipDuplicates: true
     });
+
+    // The reward lands on the REFERRER's card, whose owner is not the one at reception.
+    if (created.count > 0) await this.requestCardSync(counted.referrerId);
   }
 }
