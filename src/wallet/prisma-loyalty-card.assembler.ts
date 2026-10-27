@@ -4,6 +4,7 @@ import { MemberNotFoundError } from "../common/errors/membership.errors";
 import { WalletConfigurationError } from "../common/errors/wallet.errors";
 import { LoyaltyCardAssembler } from "./engine/loyalty-card-assembler";
 import { LoyaltyCard, loyaltyCardSchema } from "./engine/loyalty-card";
+import { formatCardMessage } from "./engine/card-message";
 import { deriveRedemptionCode } from "./engine/redemption-code";
 import { milestoneProgress } from "../modules/points/milestone-engine";
 import type { Program } from "../modules/onboarding/engine.types";
@@ -107,6 +108,8 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
     const member = await this.prisma.member.findUnique({
       where: { id: memberId },
       include: {
+        // The latest clinic message, in the same round trip for the same reason as the programme.
+        walletMessage: true,
         clinic: {
           include: {
             template: true,
@@ -163,6 +166,7 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
       // A programme centre shows points (ten per euro); the ledger holds euro progress.
       points: live ? toPoints(member.pointsBalance) : member.pointsBalance,
       reward,
+      message: member.walletMessage ? { text: formatCardMessage(member.walletMessage) } : undefined,
       template: {
         programName: template.programName,
         backgroundColor: template.hexBackgroundColor,

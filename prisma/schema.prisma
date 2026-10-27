@@ -297,6 +297,7 @@ model Member {
   referralsMade          Referral[]             @relation("Referrer")
   referredBy             Referral?              @relation("Referred")
   notificationDeliveries NotificationDelivery[]
+  walletMessage          MemberWalletMessage?
 
   @@unique([clinicId, phone])
   @@unique([clinicId, code])
@@ -468,6 +469,20 @@ model NotificationDelivery {
 
   @@index([notificationId, status])
   @@index([memberId])
+}
+
+/// The latest clinic message shown on a member's Apple card: one row per member, overwritten by
+/// each new message. Apple has no free-form push, so the message rides in a pass field whose
+/// changeMessage fires when the value changes. sentAt is stored, never read from the clock at
+/// build time, so rebuilding the pass is stable and does not re-notify.
+model MemberWalletMessage {
+  memberId       String   @id
+  member         Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  header         String
+  body           String
+  sentAt         DateTime
+  notificationId String?
+  updatedAt      DateTime @updatedAt
 }
 
 model ClinicNotificationSettings {

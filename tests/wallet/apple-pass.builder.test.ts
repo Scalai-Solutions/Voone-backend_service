@@ -183,6 +183,34 @@ describe("ApplePassBuilder", () => {
     expect(strings).not.toMatch(/SOCIA/);
   });
 
+  it("translates the last-message label and its change format", () => {
+    const strings = Buffer.from(entries["en.lproj/pass.strings"]).toString("utf8");
+
+    expect(strings).toContain('"ÚLTIMO MENSAJE" = "LAST MESSAGE";');
+    expect(strings).toContain('"%@" = "%@";');
+  });
+
+  it("puts the last message on the back with a changeMessage of %@ only when there is one", async () => {
+    const withMessage = {
+      ...aureaGoldPass,
+      message: { text: "27 oct · Título: cuerpo" }
+    };
+    const built = await buildBuilder().build(withMessage);
+    const pass = readPassJson(readPkpass(built.buffer));
+    const back = (pass.storeCard as { backFields: Array<Record<string, unknown>> }).backFields;
+
+    expect(back.find((f) => f.key === "lastMessage")).toMatchObject({
+      value: "27 oct · Título: cuerpo",
+      changeMessage: "%@"
+    });
+
+    const plain = readPassJson(entries);
+    const plainBack = (plain.storeCard as { backFields: Array<Record<string, unknown>> })
+      .backFields;
+
+    expect(plainBack.find((f) => f.key === "lastMessage")).toBeUndefined();
+  });
+
   it("reports a missing model directory without leaking key material", async () => {
     const builder = buildBuilder("/tmp/voone-does-not-exist.pass");
 

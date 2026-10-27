@@ -23,7 +23,11 @@ export const PASS_LABELS = {
   book: "RESERVAR CITA",
   website: "WEB",
   pointsChangeMessage: "Tu saldo ahora es %@",
-  tierChangeMessage: "Ahora eres nivel %@"
+  tierChangeMessage: "Ahora eres nivel %@",
+  lastMessage: "ÚLTIMO MENSAJE",
+  // The bare format: the lock-screen notification is the field's own value, which already
+  // carries the date, the title and the text of the clinic's message.
+  messageChangeMessage: "%@"
 } as const;
 
 export const PASS_TRANSLATIONS: Record<string, Record<string, string>> = {
@@ -44,6 +48,8 @@ export const PASS_TRANSLATIONS: Record<string, Record<string, string>> = {
     "RESERVAR CITA": "BOOK AN APPOINTMENT",
     WEB: "WEBSITE",
     "Tu saldo ahora es %@": "Your balance is now %@",
-    "Ahora eres nivel %@": "You are now %@ tier"
+    "Ahora eres nivel %@": "You are now %@ tier",
+    "ÚLTIMO MENSAJE": "LAST MESSAGE",
+    "%@": "%@"
   }
 };
