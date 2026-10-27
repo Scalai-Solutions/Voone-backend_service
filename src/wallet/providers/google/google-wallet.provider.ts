@@ -65,7 +65,23 @@ export class GoogleWalletProvider extends BaseWalletProvider {
   protected async doIssue(card: LoyaltyCard, program: ProgramRef): Promise<IssuedCard> {
     const externalId = this.objectIdFor(card.memberId);
 
-    await createObject(this.toLoyaltyObjectInput(card, program.externalId, externalId));
+    const input = this.toLoyaltyObjectInput(card, program.externalId, externalId);
+
+    try {
+      await createObject(input);
+    } catch (error) {
+      // The rewards are an addition to the card: if Google refuses them the member still gets a
+      // card, and the next sync tries the rewards again on their own.
+      if (!input.rewards || !(error instanceof GoogleWalletApiError) || error.status !== 400) {
+        throw error;
+      }
+
+      console.error("[wallet] Google refused the rewards fields; creating the card without them", {
+        error: error.name,
+        status: error.status
+      });
+      await createObject({ ...input, rewards: undefined });
+    }
 
     return {
       ref: { provider: this.provider, externalId, memberId: card.memberId },
@@ -81,10 +97,24 @@ export class GoogleWalletProvider extends BaseWalletProvider {
     await patchObject(ref.externalId, {
       loyaltyPointsBalance: card.points,
       tier: card.tier,
-      // Undefined for a clinic with no programme: the patch then leaves the rewards alone.
-      rewards: this.toRewards(card),
       state: "ACTIVE"
     });
+
+    // The rewards go in a patch of their own, after the one that matters: a Google rejection of
+    // these newer fields must never stop the balance and tier updating. Undefined for a clinic
+    // with no programme, which leaves the rewards alone.
+    const rewards = this.toRewards(card);
+
+    if (!rewards) return;
+
+    try {
+      await patchObject(ref.externalId, { rewards });
+    } catch (error) {
+      console.error("[wallet] Google card rewards were not updated", {
+        error: error instanceof Error ? error.name : "unknown",
+        status: error instanceof GoogleWalletApiError ? error.status : undefined
+      });
+    }
   }
 
   protected async doRevoke(ref: CardRef): Promise<void> {

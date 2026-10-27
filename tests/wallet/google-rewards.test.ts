@@ -12,7 +12,9 @@ type Stored = Record<string, unknown> & {
 
 const google = vi.hoisted(() => ({
   objects: new Map<string, Record<string, unknown>>(),
-  calls: [] as Array<{ path: string; method: string; body?: Record<string, unknown> }>
+  calls: [] as Array<{ path: string; method: string; body?: Record<string, unknown> }>,
+  /** Google refusing anything that carries the rewards fields. */
+  rejectRewards: false
 }));
 
 // A small stand-in for Google's object store with Google's PATCH semantics: top-level fields in
@@ -27,6 +29,16 @@ vi.mock("../../src/wallet/providers/google/client", async (importOriginal) => {
     const method = options?.method ?? "GET";
 
     google.calls.push({ path, method, body: options?.body });
+
+    if (
+      google.rejectRewards &&
+      method !== "GET" &&
+      JSON.stringify(options?.body).includes("secondaryLoyaltyPoints")
+    ) {
+      throw new original.GoogleWalletApiError("bad rewards field", 400, "Bad Request", {
+        member: "private-data"
+      });
+    }
 
     if (method === "POST") {
       const body = options?.body as { id: string };
@@ -79,6 +91,7 @@ beforeEach(() => {
   process.env.GOOGLE_WALLET_ISSUER_ID = "issuer-1";
   google.objects.clear();
   google.calls.length = 0;
+  google.rejectRewards = false;
 });
 
 describe("Google card: redeemable rewards", () => {
@@ -204,5 +217,57 @@ describe("Google card: the rewards text is bounded", () => {
     expect(body).toContain(`… y ${12 - shown} más`);
     // The count on the card is still every reward.
     expect(stored().secondaryLoyaltyPoints).toMatchObject({ balance: { int: 12 } });
+  });
+});
+
+describe("Google card: the new fields can never stop the points updating", () => {
+  it("sends the rewards in their own patch after the balance, tier and state patch", async () => {
+    await issue({ ...rewardsPass, rewards: undefined });
+    google.calls.length = 0;
+
+    await provider().syncCard(ref, { ...rewardsPass, points: 1900 });
+
+    const patches = google.calls.filter((c) => c.method === "PATCH");
+
+    expect(patches).toHaveLength(2);
+    expect(patches[0].body).toHaveProperty("loyaltyPoints");
+    expect(patches[0].body).toHaveProperty("state", "ACTIVE");
+    expect(JSON.stringify(patches[0].body)).not.toContain("secondaryLoyaltyPoints");
+    expect(JSON.stringify(patches[0].body)).not.toContain("Recompensas disponibles");
+    expect(patches[1].body).toHaveProperty("secondaryLoyaltyPoints");
+  });
+
+  it("still updates the points, and still succeeds, when Google rejects the rewards fields", async () => {
+    await issue(rewardsPass);
+    google.rejectRewards = true;
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(
+      provider().syncCard(ref, { ...rewardsPass, points: 1900, tier: "Oro" })
+    ).resolves.toBeUndefined();
+
+    expect(moduleOf("points")?.body).toBe("1900");
+    expect(moduleOf("tier")?.body).toBe("Oro");
+    // Logged by the error's name and status only, never the response body.
+    expect(error).toHaveBeenCalled();
+    expect(JSON.stringify(error.mock.calls)).not.toContain("private-data");
+    error.mockRestore();
+  });
+
+  it("creates the object without the rewards when Google rejects them", async () => {
+    google.rejectRewards = true;
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(issue(rewardsPass)).resolves.toBeDefined();
+
+    expect(stored()).toBeDefined();
+    expect(stored().secondaryLoyaltyPoints).toBeUndefined();
+    expect(moduleOf("rewards")).toBeUndefined();
+    expect(moduleOf("points")).toBeDefined();
+    error.mockRestore();
+  });
+
+  it("does not hide a failure that has nothing to do with the rewards", async () => {
+    await expect(provider().syncCard(ref, rewardsPass)).rejects.toThrow();
   });
 });
