@@ -1,4 +1,10 @@
-import { Prisma, TemplateStatus, WalletProviderType, WalletSyncStatus } from "@prisma/client";
+import {
+  OnboardingProgramStatus,
+  Prisma,
+  TemplateStatus,
+  WalletProviderType,
+  WalletSyncStatus
+} from "@prisma/client";
 
 import { prisma } from "../../infrastructure/database/prisma-client";
 import type { CreateTemplateInput, CreateVooneTemplateInput } from "./templates.schema";
@@ -33,6 +39,26 @@ export const templatesRepository = {
       where: { clinicId },
       include: templateInclude
     });
+  },
+
+  /**
+   * Which of these clinics have a live (ACTIVO) onboarding programme. One query however many
+   * clinics are asked about, so a list can be flagged without a query per row. A BORRADOR or
+   * SUSTITUIDO programme does not count: the pass only shows a programme's tier benefits
+   * while it is the live one.
+   */
+  async findClinicIdsWithActiveProgramme(clinicIds: string[]): Promise<Set<string>> {
+    if (clinicIds.length === 0) {
+      return new Set();
+    }
+
+    const rows = await prisma.onboardingProgram.findMany({
+      where: { clinicId: { in: clinicIds }, status: OnboardingProgramStatus.ACTIVO },
+      select: { clinicId: true },
+      distinct: ["clinicId"]
+    });
+
+    return new Set(rows.map((row) => row.clinicId));
   },
 
   findById(templateId: string) {

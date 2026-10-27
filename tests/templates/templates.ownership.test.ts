@@ -8,6 +8,7 @@ vi.mock("../../src/modules/templates/templates.repository", () => ({
     findPresets: vi.fn(),
     findByClinicId: vi.fn(),
     findById: vi.fn(),
+    findClinicIdsWithActiveProgramme: vi.fn(async () => new Set<string>()),
     create: vi.fn(),
     update: vi.fn(),
     markActive: vi.fn(),
@@ -154,7 +155,7 @@ describe("GET /templates/:templateId", () => {
     });
 
     expect(result.statusCode).toBe(200);
-    expect(result.payload).toEqual(MINE);
+    expect(result.payload).toEqual({ ...MINE, hasActiveProgramme: false });
   });
 
   it("answers 404, not 403, to another clinic so ids are not confirmed to exist", async () => {
@@ -243,7 +244,7 @@ describe("GET /templates", () => {
     const result = await call(templatesController.list, { clinicId: "clinic-mine" });
 
     expect(templatesRepository.findByClinicId).toHaveBeenCalledWith("clinic-mine");
-    expect(result.payload).toEqual([MINE]);
+    expect(result.payload).toEqual([{ ...MINE, hasActiveProgramme: false }]);
   });
 
   it("lists nothing for a clinic that has no template yet", async () => {
