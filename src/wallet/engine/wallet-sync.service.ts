@@ -1,5 +1,7 @@
 import { WalletProviderType } from "@prisma/client";
 
+import { cardFingerprint } from "./card-fingerprint";
+import type { LoyaltyCard } from "./loyalty-card";
 import { LoyaltyCardAssembler } from "./loyalty-card-assembler";
 import { WalletProviderRegistry } from "./wallet-provider.registry";
 import { WalletSyncRepository } from "./wallet-sync.repository";
@@ -9,6 +11,15 @@ export type SyncOutcome =
   /** The member holds no card with this provider — not a failure, just nothing to do. */
   | { provider: WalletProviderType; result: "no-card" }
   | { provider: WalletProviderType; result: "failed"; cause: unknown };
+
+export interface CheckedSync {
+  outcomes: SyncOutcome[];
+  /**
+   * The member's card changed while this sync was pushing, so what it pushed is out of date
+   * and another sync must run afterwards. Never true when the card could not be re-read.
+   */
+  stale: boolean;
+}
 
 /**
  * Pushing one member's current card to every wallet that holds it.
@@ -38,13 +49,33 @@ export class WalletSyncService {
     memberId: string,
     options: { providers?: WalletProviderType[] } = {}
   ): Promise<SyncOutcome[]> {
+    return (await this.syncMemberChecked(memberId, options)).outcomes;
+  }
+
+  /**
+   * `syncMember`, plus whether the card went stale while it ran.
+   *
+   * Two syncs of one member can run at the same time, and each assembles its card once at
+   * the start, so the one holding the OLDER card can push last and leave the wallet behind
+   * until the next change. After pushing, the card is therefore read once more: if it
+   * differs from what was pushed, the caller must run another sync. That is correct under
+   * any concurrency, because whichever sync pushed an out-of-date card is the one that
+   * sees the difference. It costs one extra read, and none when nothing was pushed.
+   *
+   * A failed re-read never fails the sync (the pushes already happened): it is logged and
+   * reported as not stale.
+   */
+  async syncMemberChecked(
+    memberId: string,
+    options: { providers?: WalletProviderType[] } = {}
+  ): Promise<CheckedSync> {
     const wanted = options.providers;
     const providers = this.registry
       .enabled()
       .filter((provider) => !wanted || wanted.includes(provider.provider));
 
     if (providers.length === 0) {
-      return [];
+      return { outcomes: [], stale: false };
     }
 
     const card = await this.assembler.assemble(memberId);
@@ -66,10 +97,28 @@ export class WalletSyncService {
       })
     );
 
-    return settled.map((outcome, index) =>
+    const outcomes = settled.map((outcome, index): SyncOutcome =>
       outcome.status === "fulfilled"
         ? outcome.value
         : { provider: providers[index].provider, result: "failed", cause: outcome.reason }
     );
+
+    if (outcomes.every((outcome) => outcome.result === "no-card")) {
+      return { outcomes, stale: false };
+    }
+
+    return { outcomes, stale: await this.changedSince(memberId, card) };
+  }
+
+  private async changedSince(memberId: string, pushed: LoyaltyCard): Promise<boolean> {
+    try {
+      const current = await this.assembler.assemble(memberId);
+
+      return cardFingerprint(current) !== cardFingerprint(pushed);
+    } catch (cause) {
+      console.error(`[wallet] could not re-check the card of member ${memberId}:`, cause);
+
+      return false;
+    }
   }
 }

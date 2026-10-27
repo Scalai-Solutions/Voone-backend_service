@@ -106,8 +106,8 @@ describe.skipIf(!enabled)("BullMQ queues against a real Redis", () => {
   });
 
   it("syncs a member again after the first sync job has COMPLETED", async () => {
-    const syncMember = vi.fn(async (_memberId: string) => []);
-    const service = { syncMember } as unknown as WalletSyncService;
+    const syncMember = vi.fn(async (_memberId: string) => ({ outcomes: [], stale: false }));
+    const service = { syncMemberChecked: syncMember } as unknown as WalletSyncService;
     const queue = new BullWalletSyncQueue(url);
     queues.push(queue);
     workers.push(createWalletSyncWorker(url, service));
@@ -134,8 +134,8 @@ describe.skipIf(!enabled)("BullMQ queues against a real Redis", () => {
   });
 
   it("syncs a member despite a legacy FAILED job still holding the old member-<id> job id", async () => {
-    const syncMember = vi.fn(async (_memberId: string) => []);
-    const service = { syncMember } as unknown as WalletSyncService;
+    const syncMember = vi.fn(async (_memberId: string) => ({ outcomes: [], stale: false }));
+    const service = { syncMemberChecked: syncMember } as unknown as WalletSyncService;
     const queue = new BullWalletSyncQueue(url);
     queues.push(queue);
     const inspect = new Queue(WALLET_SYNC_QUEUE, { connection: redisConnection(url) });
@@ -149,7 +149,10 @@ describe.skipIf(!enabled)("BullMQ queues against a real Redis", () => {
       { jobId: "member-member-2", attempts: 1 }
     );
     const failing = createWalletSyncWorker(url, {
-      syncMember: async () => [{ provider: "APPLE", result: "failed" }]
+      syncMemberChecked: async () => ({
+        outcomes: [{ provider: "APPLE", result: "failed" }],
+        stale: false
+      })
     } as unknown as WalletSyncService);
     workers.push(failing);
     expect(await until(async () => (await inspect.getJobCounts("failed")).failed === 1)).toBe(true);
@@ -160,5 +163,55 @@ describe.skipIf(!enabled)("BullMQ queues against a real Redis", () => {
     await queue.enqueueMemberSync("member-2");
 
     expect(await until(() => syncMember.mock.calls.length === 1)).toBe(true);
+  });
+
+  it("chases a card that changed during a sync with one follow-up job carrying recheck: 1", async () => {
+    // Stale on the first run only: the follow-up finds the card settled and ends the chain.
+    const syncMember = vi.fn(async (_memberId: string) => ({
+      outcomes: [],
+      stale: syncMember.mock.calls.length === 1
+    }));
+    const queue = new BullWalletSyncQueue(url);
+    queues.push(queue);
+    workers.push(
+      createWalletSyncWorker(url, { syncMemberChecked: syncMember } as unknown as WalletSyncService)
+    );
+    const inspect = new Queue(WALLET_SYNC_QUEUE, { connection: redisConnection(url) });
+    queues.push(inspect);
+
+    await queue.enqueueMemberSync("member-3");
+
+    expect(await until(async () => (await inspect.getJobCounts("completed")).completed === 2)).toBe(
+      true
+    );
+    expect(syncMember).toHaveBeenCalledTimes(2);
+    const data = (await inspect.getJobs(["completed"]))
+      .map((job) => job.data)
+      .sort((a, b) => (a.recheck ?? 0) - (b.recheck ?? 0));
+    expect(data).toEqual([{ memberId: "member-3" }, { memberId: "member-3", recheck: 1 }]);
+  });
+
+  it("stops chasing a card that never settles after 3 re-checks, and warns", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const syncMember = vi.fn(async (_memberId: string) => ({ outcomes: [], stale: true }));
+    const queue = new BullWalletSyncQueue(url);
+    queues.push(queue);
+    workers.push(
+      createWalletSyncWorker(url, { syncMemberChecked: syncMember } as unknown as WalletSyncService)
+    );
+    const inspect = new Queue(WALLET_SYNC_QUEUE, { connection: redisConnection(url) });
+    queues.push(inspect);
+
+    await queue.enqueueMemberSync("member-4");
+
+    expect(await until(async () => (await inspect.getJobCounts("completed")).completed === 4)).toBe(
+      true
+    );
+    // Give a wrongly enqueued fifth job the chance to show up.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(syncMember).toHaveBeenCalledTimes(4);
+    expect(warn).toHaveBeenCalledWith(
+      "[wallet] sync for member member-4 still changing after 3 re-checks"
+    );
   });
 });
