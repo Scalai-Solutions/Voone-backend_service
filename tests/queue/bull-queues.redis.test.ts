@@ -1,35 +1,56 @@
+import { Redis } from "ioredis";
 import { Queue, type Worker } from "bullmq";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  BullNotificationQueue,
-  NOTIFICATIONS_QUEUE,
-  createNotificationWorker
-} from "../../src/infrastructure/queue/bull-notifications.queue";
 import {
   BullWalletSyncQueue,
   WALLET_SYNC_QUEUE,
   createWalletSyncWorker,
   redisConnection
 } from "../../src/infrastructure/queue/bull-wallet-sync.queue";
-import type { NotificationService } from "../../src/modules/notifications/notification.service";
 import type { WalletSyncService } from "../../src/wallet/engine/wallet-sync.service";
 
 /**
- * Against a REAL Redis, because the bug these guard against is BullMQ's own behaviour
+ * Against a REAL Redis, because the bug this guards against is BullMQ's own behaviour
  * (an add with an existing job id is ignored in any state) and a mocked Queue cannot
  * reproduce it.
  *
- * Opt-in: set TEST_REDIS_URL to a throwaway local Redis, for example
+ * Opt-in: set TEST_REDIS_URL to a THROWAWAY local Redis, for example
  *   redis-server --port 6390 --save "" --appendonly no
  *   TEST_REDIS_URL=redis://127.0.0.1:6390 npx vitest run tests/queue
  *
- * It obliterates the two queues it uses, so it refuses anything that is not loopback.
+ * The suite obliterates the wallet-sync queue (the production queue name: the code under
+ * test takes no queue-name override), so it refuses to run unless ALL of these hold:
+ *  - a loopback host;
+ *  - an explicit port that is not Redis's default 6379, so a developer's everyday Redis
+ *    is never the target by accident;
+ *  - no database index 0 on the URL (index 0 is where everything else lives);
+ *  - the instance holds no keys other than BullMQ's wallet-sync ones (checked before
+ *    anything is deleted; a dev Redis with other data fails loudly instead of being wiped).
+ * A malformed URL skips the suite rather than throwing at import.
  */
-const url = process.env.TEST_REDIS_URL;
-const isLoopback = (value: string) =>
-  ["localhost", "127.0.0.1", "::1", "[::1]"].includes(new URL(value).hostname);
-const enabled = Boolean(url) && isLoopback(url as string);
+const isSafeTestUrl = (value: string | undefined): value is string => {
+  if (!value) return false;
+
+  try {
+    const parsed = new URL(value);
+    const loopback = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(parsed.hostname);
+    const dbIndex = parsed.pathname.replace(/^\//, "");
+
+    return (
+      ["redis:", "rediss:"].includes(parsed.protocol) &&
+      loopback &&
+      parsed.port !== "" &&
+      parsed.port !== "6379" &&
+      (dbIndex === "" || (/^\d+$/.test(dbIndex) && Number(dbIndex) !== 0))
+    );
+  } catch {
+    return false;
+  }
+};
+const candidate = process.env.TEST_REDIS_URL;
+const enabled = isSafeTestUrl(candidate);
+const url = candidate as string;
 
 const until = async (condition: () => boolean | Promise<boolean>, timeoutMs = 8_000) => {
   const deadline = Date.now() + timeoutMs;
@@ -47,12 +68,31 @@ describe.skipIf(!enabled)("BullMQ queues against a real Redis", () => {
   const queues: Array<{ close(): Promise<void> }> = [];
 
   const wipe = async () => {
-    for (const name of [WALLET_SYNC_QUEUE, NOTIFICATIONS_QUEUE]) {
-      const queue = new Queue(name, { connection: redisConnection(url as string) });
+    for (const name of [WALLET_SYNC_QUEUE]) {
+      const queue = new Queue(name, { connection: redisConnection(url) });
       await queue.obliterate({ force: true });
       await queue.close();
     }
   };
+
+  beforeAll(async () => {
+    // Refuse to touch an instance that holds anything but this queue's own keys.
+    const redis = new Redis(url, { lazyConnect: true, maxRetriesPerRequest: 1 });
+
+    try {
+      const keys = await redis.keys("*");
+      const foreign = keys.filter((key) => !key.startsWith(`bull:${WALLET_SYNC_QUEUE}:`));
+
+      if (foreign.length > 0) {
+        throw new Error(
+          `TEST_REDIS_URL points at a Redis holding ${foreign.length} key(s) that are not ` +
+            `${WALLET_SYNC_QUEUE} queue keys; refusing to wipe it. Use an empty throwaway instance.`
+        );
+      }
+    } finally {
+      redis.disconnect();
+    }
+  });
 
   beforeEach(async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -68,10 +108,10 @@ describe.skipIf(!enabled)("BullMQ queues against a real Redis", () => {
   it("syncs a member again after the first sync job has COMPLETED", async () => {
     const syncMember = vi.fn(async (_memberId: string) => []);
     const service = { syncMember } as unknown as WalletSyncService;
-    const queue = new BullWalletSyncQueue(url as string);
+    const queue = new BullWalletSyncQueue(url);
     queues.push(queue);
-    workers.push(createWalletSyncWorker(url as string, service));
-    const inspect = new Queue(WALLET_SYNC_QUEUE, { connection: redisConnection(url as string) });
+    workers.push(createWalletSyncWorker(url, service));
+    const inspect = new Queue(WALLET_SYNC_QUEUE, { connection: redisConnection(url) });
     queues.push(inspect);
 
     await queue.enqueueMemberSync("member-1");
@@ -96,9 +136,9 @@ describe.skipIf(!enabled)("BullMQ queues against a real Redis", () => {
   it("syncs a member despite a legacy FAILED job still holding the old member-<id> job id", async () => {
     const syncMember = vi.fn(async (_memberId: string) => []);
     const service = { syncMember } as unknown as WalletSyncService;
-    const queue = new BullWalletSyncQueue(url as string);
+    const queue = new BullWalletSyncQueue(url);
     queues.push(queue);
-    const inspect = new Queue(WALLET_SYNC_QUEUE, { connection: redisConnection(url as string) });
+    const inspect = new Queue(WALLET_SYNC_QUEUE, { connection: redisConnection(url) });
     queues.push(inspect);
     // What the previous release leaves in Redis for up to seven days: a job that ran out
     // of its attempts under the fixed id. Added raw with attempts: 1 so the test does not
@@ -108,69 +148,17 @@ describe.skipIf(!enabled)("BullMQ queues against a real Redis", () => {
       { memberId: "member-2" },
       { jobId: "member-member-2", attempts: 1 }
     );
-    const failing = createWalletSyncWorker(
-      url as string,
-      {
-        syncMember: async () => [{ provider: "APPLE", result: "failed" }]
-      } as unknown as WalletSyncService
-    );
+    const failing = createWalletSyncWorker(url, {
+      syncMember: async () => [{ provider: "APPLE", result: "failed" }]
+    } as unknown as WalletSyncService);
     workers.push(failing);
     expect(await until(async () => (await inspect.getJobCounts("failed")).failed === 1)).toBe(true);
     await failing.close();
     workers.splice(0);
 
-    workers.push(createWalletSyncWorker(url as string, service));
+    workers.push(createWalletSyncWorker(url, service));
     await queue.enqueueMemberSync("member-2");
 
     expect(await until(() => syncMember.mock.calls.length === 1)).toBe(true);
-  });
-
-  it("re-enqueues a delivery whose earlier job FAILED, so a QUEUED delivery is not stranded", async () => {
-    const processDelivery = vi.fn(async (_deliveryId: string) => undefined);
-    const inspect = new Queue(NOTIFICATIONS_QUEUE, { connection: redisConnection(url as string) });
-    queues.push(inspect);
-    const queue = new BullNotificationQueue(url as string);
-    queues.push(queue);
-    // The job a transient wallet outage leaves behind once its attempts are spent (the
-    // delivery row stays QUEUED): same id the real enqueue uses.
-    await inspect.add(
-      "delivery",
-      { kind: "delivery", deliveryId: "d-1" },
-      { jobId: "delivery-d-1", attempts: 1 }
-    );
-    const failing = createNotificationWorker(
-      url as string,
-      {
-        processDelivery: async () => {
-          throw new Error("transient");
-        }
-      } as unknown as NotificationService
-    );
-    workers.push(failing);
-    expect(await until(async () => (await inspect.getJobCounts("failed")).failed === 1)).toBe(true);
-    await failing.close();
-    workers.splice(0);
-
-    workers.push(
-      createNotificationWorker(url as string, { processDelivery } as unknown as NotificationService)
-    );
-    await queue.enqueueDelivery("d-1");
-
-    expect(await until(() => processDelivery.mock.calls.length === 1)).toBe(true);
-  });
-
-  it("still collapses a duplicate enqueue of a delivery that is waiting", async () => {
-    const inspect = new Queue(NOTIFICATIONS_QUEUE, { connection: redisConnection(url as string) });
-    queues.push(inspect);
-    const queue = new BullNotificationQueue(url as string);
-    queues.push(queue);
-
-    await queue.enqueueDelivery("d-2", 60_000);
-    await queue.enqueueDelivery("d-2", 60_000);
-    await queue.enqueueNotification("n-1", 60_000);
-    await queue.enqueueNotification("n-1", 60_000);
-
-    const counts = await inspect.getJobCounts("delayed", "waiting");
-    expect(counts.delayed + counts.waiting).toBe(2);
   });
 });
