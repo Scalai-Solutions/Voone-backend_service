@@ -12,6 +12,9 @@ import type {
 export const REWARDS_MODULE_ID = "rewards";
 export const REWARDS_MODULE_HEADER = "Recompensas disponibles";
 export const REWARDS_COUNT_LABEL = "Regalos";
+/** The per-member module the class details point at for a clinic whose programme owns the benefits. */
+export const TIER_BENEFITS_MODULE_ID = "tier-benefits";
+export const TIER_BENEFITS_MODULE_HEADER = "Beneficios de tu nivel";
 
 interface GoogleSecondaryLoyaltyPoints {
   label: string;
@@ -152,7 +155,8 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
   if (
     patch.loyaltyPointsBalance !== undefined ||
     patch.tier !== undefined ||
-    patch.rewards !== undefined
+    patch.rewards !== undefined ||
+    patch.tierBenefits !== undefined
   ) {
     // A PATCH of textModulesData REPLACES the whole array, so the object is read first and the
     // changed modules are merged into what it holds: nothing the object already carries is lost.
@@ -178,6 +182,15 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
         : []),
       ...(patch.rewards !== undefined
         ? [{ id: REWARDS_MODULE_ID, header: REWARDS_MODULE_HEADER, body: patch.rewards.text }]
+        : []),
+      ...(patch.tierBenefits !== undefined
+        ? [
+            {
+              id: TIER_BENEFITS_MODULE_ID,
+              header: TIER_BENEFITS_MODULE_HEADER,
+              body: patch.tierBenefits.text
+            }
+          ]
         : [])
     ]);
   }
@@ -353,6 +366,15 @@ const toGoogleLoyaltyObjectBody = (input: LoyaltyObjectInput): GoogleLoyaltyObje
       },
       ...(input.rewards
         ? [{ id: REWARDS_MODULE_ID, header: REWARDS_MODULE_HEADER, body: input.rewards.text }]
+        : []),
+      ...(input.tierBenefits
+        ? [
+            {
+              id: TIER_BENEFITS_MODULE_ID,
+              header: TIER_BENEFITS_MODULE_HEADER,
+              body: input.tierBenefits.text
+            }
+          ]
         : [])
     ],
     // TODO: Verify object-level tier support against https://developers.google.com/wallet/retail/loyalty-cards/rest/v1/loyaltyclass before relying on this field in production.

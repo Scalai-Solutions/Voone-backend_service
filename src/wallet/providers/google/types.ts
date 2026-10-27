@@ -56,6 +56,11 @@ export interface LoyaltyRewardsInput {
   text: string;
 }
 
+/** The text of the member's tier benefits, from the clinic's live programme. */
+export interface LoyaltyTierBenefitsInput {
+  text: string;
+}
+
 export interface LoyaltyObjectInput {
   objectId: string;
   classId: string;
@@ -69,10 +74,12 @@ export interface LoyaltyObjectInput {
   state?: LoyaltyObjectState;
   /** Absent for a clinic with no programme: the object then carries no rewards parts at all. */
   rewards?: LoyaltyRewardsInput;
+  /** Absent for a clinic with no live programme: the object then carries no such module. */
+  tierBenefits?: LoyaltyTierBenefitsInput;
 }
 
 export type LoyaltyObjectPatch = Partial<
-  Pick<LoyaltyObjectInput, "loyaltyPointsBalance" | "tier" | "state" | "rewards">
+  Pick<LoyaltyObjectInput, "loyaltyPointsBalance" | "tier" | "state" | "rewards" | "tierBenefits">
 > & {
   notify?: boolean;
 };

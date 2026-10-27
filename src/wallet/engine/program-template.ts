@@ -17,12 +17,16 @@ export type TemplateForProgram = Pick<
   | "tierLabel"
   | "benefitsText"
   | "infoText"
-> & { clinic: { name: string } };
+> & {
+  /** `onboardingPrograms` is the clinic's live programme, if any: at most one row, id only. */
+  clinic: { name: string; onboardingPrograms?: Array<unknown> };
+};
 
 /** A clinic template as the provider-neutral programme the wallets provision and refresh. */
 export const programTemplateFor = (template: TemplateForProgram): ProgramTemplate => ({
   templateId: template.id,
   clinicName: template.clinic.name,
+  tierBenefitsFromProgramme: (template.clinic.onboardingPrograms?.length ?? 0) > 0,
   template: {
     programName: template.programName,
     backgroundColor: template.hexBackgroundColor,

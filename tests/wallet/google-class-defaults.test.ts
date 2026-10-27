@@ -228,6 +228,41 @@ describe("the Spanish, neutral words on a Google card", () => {
     );
   });
 
+  it("points the details at the member's own tier benefits module", async () => {
+    const body = (await classWithLinks()) as unknown as {
+      classTemplateInfo: { detailsTemplateOverride: { detailsItemInfos: unknown[] } };
+    };
+
+    expect(JSON.stringify(body.classTemplateInfo.detailsTemplateOverride)).toContain(
+      "object.textModulesData['tier-benefits']"
+    );
+  });
+
+  it("keeps the shared benefits module for a clinic with no programme", async () => {
+    const body = await classWithLinks();
+
+    expect(body.textModulesData.map((m: { header: string }) => m.header)).toContain("Beneficios");
+  });
+
+  it("leaves the hand-typed benefits off the class of a clinic whose programme owns them", async () => {
+    const body = (await provision({
+      templateId: "tpl-1",
+      clinicName: "Centro Prueba",
+      tierBenefitsFromProgramme: true,
+      template: {
+        programName: "Club Prueba",
+        backgroundColor: "#30221f",
+        pointsLabel: "Puntos",
+        tierLabel: "Nivel",
+        benefitsText: "TEXTO ANTIGUO",
+        infoText: "Informacion."
+      }
+    })) as unknown as ClassBody;
+
+    expect(JSON.stringify(body.textModulesData)).not.toContain("TEXTO ANTIGUO");
+    expect(body.textModulesData.map((m: { header: string }) => m.header)).toContain("Información");
+  });
+
   it("never says socia anywhere in the class", async () => {
     expect(JSON.stringify(await classWithLinks())).not.toMatch(/\bsocias?\b/i);
   });

@@ -1,4 +1,4 @@
-import { WalletProviderType, type PrismaClient } from "@prisma/client";
+import { OnboardingProgramStatus, WalletProviderType, type PrismaClient } from "@prisma/client";
 
 import { prisma as defaultPrisma } from "../../infrastructure/database/prisma-client";
 import { programTemplateFor } from "../../wallet/engine/program-template";
@@ -49,7 +49,22 @@ export const refreshGoogleClasses = async ({
       provider: WalletProviderType.GOOGLE,
       ...(clinicId ? { clinicTemplate: { clinicId } } : {})
     },
-    include: { clinicTemplate: { include: { clinic: true } } }
+    include: {
+      clinicTemplate: {
+        include: {
+          clinic: {
+            include: {
+              // Whether the programme owns the benefits text: id only, in the same query.
+              onboardingPrograms: {
+                where: { status: OnboardingProgramStatus.ACTIVO },
+                take: 1,
+                select: { id: true }
+              }
+            }
+          }
+        }
+      }
+    }
   });
 
   result.found = classes.length;

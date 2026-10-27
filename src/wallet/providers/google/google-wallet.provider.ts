@@ -3,6 +3,7 @@ import { WalletProviderType } from "@prisma/client";
 import { config } from "../../../config/env";
 import { DEFAULT_WALLET_BENEFIT_CTA } from "../../../modules/templates/default-voone-template";
 import { availableRewardCount, availableRewardsText } from "../../engine/rewards-text";
+import { tierBenefitsText } from "../../engine/tier-benefits-text";
 import { BaseWalletProvider } from "../../engine/base-wallet-provider";
 import type { LoyaltyCard } from "../../engine/loyalty-card";
 import type {
@@ -27,7 +28,12 @@ import {
 import { GoogleWalletApiError, getGoogleWalletIssuerId, isGoogleWalletConfigured } from "./client";
 import { buildSaveLink } from "./jwt";
 import { addObjectMessage, createObject, patchObject, removeObjectMessage } from "./objectService";
-import type { LoyaltyClassInput, LoyaltyObjectInput, LoyaltyRewardsInput } from "./types";
+import type {
+  LoyaltyClassInput,
+  LoyaltyObjectInput,
+  LoyaltyRewardsInput,
+  LoyaltyTierBenefitsInput
+} from "./types";
 import {
   WalletNotificationAuthError,
   WalletNotificationNotFoundError,
@@ -35,7 +41,8 @@ import {
   WalletNotificationTransientError
 } from "../../../common/errors/wallet.errors";
 
-// Google's text module body is a short card detail, not a document.
+// Google's text module body is a short card detail, not a document. The tier benefits text is
+// already fitted to the same 500 by the assembler.
 const GOOGLE_REWARDS_BODY_MAX = 500;
 
 const GOOGLE_ID_SAFE_CHARACTER = /[^A-Za-z0-9._-]/g;
@@ -79,17 +86,24 @@ export class GoogleWalletProvider extends BaseWalletProvider {
     try {
       await createObject(input);
     } catch (error) {
-      // The rewards are an addition to the card: if Google refuses them the member still gets a
-      // card, and the next sync tries the rewards again on their own.
-      if (!input.rewards || !(error instanceof GoogleWalletApiError) || error.status !== 400) {
+      // The rewards and the tier benefits are additions to the card: if Google refuses them the
+      // member still gets a card, and the next sync tries them again on their own.
+      if (
+        (!input.rewards && !input.tierBenefits) ||
+        !(error instanceof GoogleWalletApiError) ||
+        error.status !== 400
+      ) {
         throw error;
       }
 
-      console.error("[wallet] Google refused the rewards fields; creating the card without them", {
-        error: error.name,
-        status: error.status
-      });
-      await createObject({ ...input, rewards: undefined });
+      console.error(
+        "[wallet] Google refused the newer card fields; creating the card without them",
+        {
+          error: error.name,
+          status: error.status
+        }
+      );
+      await createObject({ ...input, rewards: undefined, tierBenefits: undefined });
     }
 
     return {
@@ -109,17 +123,21 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       state: "ACTIVE"
     });
 
-    // The rewards go in a patch of their own, after the one that matters: a Google rejection of
-    // these newer fields must never stop the balance and tier updating. Undefined for a clinic
-    // with no programme, which leaves the rewards alone.
+    // The rewards and the tier benefits go in a patch of their own, after the one that matters: a
+    // Google rejection of these newer fields must never stop the balance and tier updating. Both
+    // are undefined for a clinic with no programme, which leaves them alone.
     const rewards = this.toRewards(card);
+    const tierBenefits = this.toTierBenefits(card);
 
-    if (!rewards) return;
+    if (!rewards && !tierBenefits) return;
 
     try {
-      await patchObject(ref.externalId, { rewards });
+      await patchObject(ref.externalId, {
+        ...(rewards ? { rewards } : {}),
+        ...(tierBenefits ? { tierBenefits } : {})
+      });
     } catch (error) {
-      console.error("[wallet] Google card rewards were not updated", {
+      console.error("[wallet] Google card rewards and tier benefits were not updated", {
         error: error instanceof Error ? error.name : "unknown",
         status: error instanceof GoogleWalletApiError ? error.status : undefined
       });
@@ -239,7 +257,9 @@ export class GoogleWalletProvider extends BaseWalletProvider {
           header: "Beneficio",
           body: DEFAULT_WALLET_BENEFIT_CTA
         },
-        ...(template.benefitsText
+        // A clinic whose live programme owns the benefits shows them per member instead (the
+        // object's tier-benefits module), so its hand-typed text is not shown to everybody.
+        ...(template.benefitsText && !program.tierBenefitsFromProgramme
           ? [
               {
                 id: "benefits",
@@ -300,8 +320,16 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       tierLabel: card.template.tierLabel,
       tier: card.tier,
       rewards: this.toRewards(card),
+      tierBenefits: this.toTierBenefits(card),
       state: "ACTIVE"
     };
+  }
+
+  /** The same words the Apple back field carries, so the two wallets never disagree. */
+  private toTierBenefits(card: LoyaltyCard): LoyaltyTierBenefitsInput | undefined {
+    const text = tierBenefitsText(card);
+
+    return text === undefined ? undefined : { text };
   }
 
   /** The same words the Apple back field carries, so the two wallets never disagree. */

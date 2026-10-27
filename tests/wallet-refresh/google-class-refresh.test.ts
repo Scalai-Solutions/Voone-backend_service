@@ -104,6 +104,29 @@ describe("refreshGoogleClasses", () => {
     expect(google.patches[0].body.programName).toBe("Club");
   });
 
+  it("leaves the hand-typed benefits off the class of a clinic with a live programme", async () => {
+    const programme = row("c1", "issuer-1.club_1");
+
+    (programme.clinicTemplate.clinic as Record<string, unknown>).onboardingPrograms = [
+      { id: "prog-1" }
+    ];
+    const { prisma: db, findMany } = prismaWith([programme]);
+
+    await refreshGoogleClasses({ prisma: db, provider: provider(), apply: true });
+
+    expect(JSON.stringify(google.patches[0].body.textModulesData)).not.toContain("Ventajas.");
+    // The live programme is read in the same query as the class, not one more per class.
+    expect(JSON.stringify(findMany.mock.calls[0])).toContain("onboardingPrograms");
+  });
+
+  it("keeps the benefits text on the class of a clinic with no programme", async () => {
+    const { prisma: db } = prismaWith([row("c1", "issuer-1.club_1")]);
+
+    await refreshGoogleClasses({ prisma: db, provider: provider(), apply: true });
+
+    expect(JSON.stringify(google.patches[0].body.textModulesData)).toContain("Ventajas.");
+  });
+
   it("writes nothing on a dry run, and says what it would do", async () => {
     const { prisma: db } = prismaWith([row("c1", "issuer-1.club_1")]);
 
