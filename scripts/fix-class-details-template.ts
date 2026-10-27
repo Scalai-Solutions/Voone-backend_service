@@ -106,7 +106,13 @@ const fixClass = async (target: ClassTarget): Promise<boolean> => {
   const missingPaths = MESSAGE_DETAILS_FIELD_PATHS.filter((path) => !existingPaths.includes(path));
 
   if (missingPaths.length === 0) {
-    report(target, reviewStatus, existingItems.length, existingItems.length, "OK (already has messages items)");
+    report(
+      target,
+      reviewStatus,
+      existingItems.length,
+      existingItems.length,
+      "OK (already has messages items)"
+    );
     return true;
   }
 
@@ -200,6 +206,9 @@ const main = async (): Promise<void> => {
 };
 
 void main().catch((error) => {
-  console.error("class:fix-details failed:", error instanceof Error ? error.message : String(error));
+  console.error(
+    "class:fix-details failed:",
+    error instanceof Error ? error.message : String(error)
+  );
   process.exitCode = 1;
 });
