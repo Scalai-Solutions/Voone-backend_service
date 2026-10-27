@@ -52,9 +52,14 @@ export interface MemberSummary {
   /**
    * Whether a phone is registered to be told when this member's Apple card changes.
    *
-   * null when there is nothing to say (no SYNCED Apple card, or Apple unavailable); false
-   * when the card is synced but no device will ever be pushed to, which is why its points
-   * can lag the member's real balance. Additive: walletStatus.apple is unchanged.
+   *  - true: at least one device is registered.
+   *  - false: none is, but the card was downloaded or a phone registered before, so it is
+   *    on a phone that will not be updated (typically Automatic Updates turned off).
+   *  - null: unknown. No SYNCED Apple card, Apple unavailable here (not configured, or
+   *    the pass type unreadable), or no evidence the card was ever installed. Existing
+   *    members read null until they next download the pass or register a phone.
+   *
+   * Additive: walletStatus.apple is unchanged.
    */
   appleUpdatesRegistered: boolean | null;
   history: Array<{ id: string; label: string; points: number; date: string }>;
@@ -170,12 +175,16 @@ export class MemberDirectoryService {
       select: this.selection(LIST_HISTORY)
     });
 
-    const appleUpdates = await this.appleUpdates(members);
+    // The registrations lookup and the spending stats are independent reads.
+    const [summaries, appleUpdates] = await Promise.all([
+      this.withSpendingStats(
+        members.map((member) => this.toSummary(member, null)),
+        options.clinicId
+      ),
+      this.appleUpdates(members)
+    ]);
 
-    return this.withSpendingStats(
-      members.map((member) => this.toSummary(member, appleUpdates.get(member.id) ?? null)),
-      options.clinicId
-    );
+    return this.withAppleUpdates(summaries, appleUpdates);
   }
 
   async get(memberId: string): Promise<MemberSummary> {
@@ -188,13 +197,12 @@ export class MemberDirectoryService {
       throw new MemberNotFoundError(memberId);
     }
 
-    const appleUpdates = await this.appleUpdates([member]);
-    const [summary] = await this.withSpendingStats(
-      [this.toSummary(member, appleUpdates.get(member.id) ?? null)],
-      member.clinicId
-    );
+    const [summaries, appleUpdates] = await Promise.all([
+      this.withSpendingStats([this.toSummary(member, null)], member.clinicId),
+      this.appleUpdates([member])
+    ]);
 
-    return summary;
+    return this.withAppleUpdates(summaries, appleUpdates)[0];
   }
 
   /**
@@ -359,7 +367,17 @@ export class MemberDirectoryService {
     };
   }
 
-  /** One registrations query for every member given; null for all when Apple is unavailable. */
+  private withAppleUpdates(
+    summaries: MemberSummary[],
+    appleUpdates: Map<string, boolean | null>
+  ): MemberSummary[] {
+    return summaries.map((summary) => ({
+      ...summary,
+      appleUpdatesRegistered: appleUpdates.get(summary.id) ?? null
+    }));
+  }
+
+  /** At most two lookups for every member given; null for all when Apple is unavailable. */
   private appleUpdates(
     members: Array<{
       id: string;
