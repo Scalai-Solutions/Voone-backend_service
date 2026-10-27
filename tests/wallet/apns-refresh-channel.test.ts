@@ -102,6 +102,49 @@ describe("ApnsPassRefreshChannel", () => {
     expect(client.sent).toEqual([]);
   });
 
+  it("says so, once per card, when no device is registered to receive the push", async () => {
+    // The silent no-op was the problem: a member with 1750 points and a card showing 750,
+    // and nothing anywhere to say why. Staff read this line to find out.
+    await channel.notifyRefresh([ref("never-installed"), ref("also-never")]);
+
+    const lines = log.mock.calls.map((call) => call[0]);
+
+    expect(lines).toEqual([
+      "[apns] no registered device for never-installed; no push sent",
+      "[apns] no registered device for also-never; no push sent"
+    ]);
+    expect(client.sent).toEqual([]);
+  });
+
+  it("names only the cards with no device when others have one", async () => {
+    devices.tokens.set("card-1", ["tok"]);
+
+    await channel.notifyRefresh([ref("card-1"), ref("card-2")]);
+
+    expect(log.mock.calls.map((call) => call[0])).toEqual([
+      "[apns] no registered device for card-2; no push sent"
+    ]);
+    expect(client.sent.map((s) => s.token)).toEqual(["tok"]);
+  });
+
+  it("stays quiet about a card that has a registered device", async () => {
+    devices.tokens.set("card-1", ["tok-a", "tok-b"]);
+
+    await channel.notifyRefresh([ref("card-1")]);
+
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it("does not claim a card has no device when the lookup itself failed", async () => {
+    devices.failFor = "card-2";
+
+    await channel.notifyRefresh([ref("card-2")]);
+
+    expect(log.mock.calls.map((call) => call[0])).toEqual([
+      "[apns] could not read push tokens for card-2"
+    ]);
+  });
+
   it("touches nothing for an empty list", async () => {
     await channel.notifyRefresh([]);
 

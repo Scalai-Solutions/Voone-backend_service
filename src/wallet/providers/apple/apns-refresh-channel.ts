@@ -75,6 +75,16 @@ export class ApnsPassRefreshChannel implements PassRefreshChannel {
         return;
       }
 
+      if (lookup.value.length === 0) {
+        // The silent case that made a stale card undiagnosable: no phone registered for
+        // this pass (never added, or Automatic Updates turned off, which makes iOS delete
+        // the registration), so there is nobody to push to. The serial carries a member
+        // id, not a secret. A failed lookup is logged above instead and never reaches
+        // here, so this line never claims a device is missing when the database was down.
+        this.log(`[apns] no registered device for ${refs[index].externalId}; no push sent`);
+        return;
+      }
+
       lookup.value.forEach((token) => tokens.add(token));
     });
 
