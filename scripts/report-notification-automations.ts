@@ -7,13 +7,7 @@
  */
 import dotenv from "dotenv";
 
-import {
-  MemberBonoStatus,
-  NotificationType,
-  PrismaClient,
-  WalletProviderType,
-  WalletSyncStatus
-} from "@prisma/client";
+import { MemberBonoStatus, NotificationType, PrismaClient, WalletSyncStatus } from "@prisma/client";
 
 dotenv.config();
 
