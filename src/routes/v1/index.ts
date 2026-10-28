@@ -49,10 +49,12 @@ import { MemberDirectoryService } from "../../modules/members/member-directory.s
 import { createMemberDirectoryRouter } from "./member-directory.route";
 import { certificateStatus, isAppleWalletConfigured } from "../../config/apple-wallet.config";
 import { DashboardService } from "../../modules/dashboard/dashboard.service";
+import { AutomationReportService } from "../../modules/notifications/automation-report.service";
 import { createDashboardRouter } from "./dashboard.route";
 import { createAppleRefreshChannel } from "../../wallet/providers/apple/apple-refresh-channel.factory";
 import { createAppleWalletProvider } from "../../wallet/providers/apple/apple-wallet.provider";
 import { adminClinicsRouter } from "./admin-clinics.route";
+import { createAdminNotificationsRouter } from "./admin-notifications.route";
 import { createApplePassesRouter } from "./apple-passes.route";
 import { clinicUsersRouter } from "./clinic-users.route";
 import { clinicsRouter } from "./clinics.route";
@@ -67,6 +69,11 @@ const notificationService = buildNotificationService(prisma);
 
 v1Router.use(healthRouter);
 v1Router.use(adminClinicsRouter);
+v1Router.use(
+  createAdminNotificationsRouter({
+    reports: new AutomationReportService(prisma)
+  })
+);
 v1Router.use(clinicUsersRouter);
 v1Router.use(clinicsRouter);
 v1Router.use(membersRouter);
