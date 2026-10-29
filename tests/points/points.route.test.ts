@@ -35,7 +35,10 @@ const post = async (app: Express, path: string, body: unknown) => {
   }
 };
 
-const buildApp = (overrides: Partial<Record<"credit" | "redeem" | "clawBack", unknown>> = {}) => {
+const buildApp = (
+  overrides: Partial<Record<"credit" | "redeem" | "clawBack", unknown>> = {},
+  programmeCentre?: boolean
+) => {
   const calls: Call[] = [];
 
   const outcome = {
@@ -68,7 +71,8 @@ const buildApp = (overrides: Partial<Record<"credit" | "redeem" | "clawBack", un
     "/api/v1",
     createPointsRouter({
       points,
-      clinicOfMember: async (memberId) => (memberId === MEMBER ? CLINIC : null)
+      clinicOfMember: async (memberId) => (memberId === MEMBER ? CLINIC : null),
+      ...(programmeCentre === undefined ? {} : { usesProgram: async () => programmeCentre })
     })
   );
   // The real handler, not a stand-in: the status codes under test are produced by it.
@@ -207,5 +211,80 @@ describe("POST /members/:id/points/claw-back", () => {
     });
 
     expect(res.status).toBe(200);
+  });
+});
+
+/**
+ * A programme centre keeps progress in euros and every screen shows ten points per euro. The
+ * API speaks the screens' unit there: amounts in, balances out. Elsewhere it is untouched.
+ */
+describe("units at a programme centre", () => {
+  const clawBackPath = `/api/v1/members/${MEMBER}/points/claw-back`;
+
+  it("takes a claw-back in points and records the euros", async () => {
+    const { app, calls } = buildApp({}, true);
+
+    const res = await post(app, clawBackPath, {
+      points: 150,
+      reason: "credited twice",
+      idempotencyKey: "undo-abc-1"
+    });
+
+    expect(res.status).toBe(200);
+    expect((calls[0].args as { points: number }).points).toBe(15);
+  });
+
+  it("answers in points: the ledger's 300 / 500 euros read 3000 / 5000", async () => {
+    const { app } = buildApp({}, true);
+
+    const res = await post(app, clawBackPath, {
+      points: 150,
+      reason: "credited twice",
+      idempotencyKey: "undo-abc-1"
+    });
+
+    expect(res.body.balance).toEqual({ spendable: 3000, lifetime: 5000 });
+  });
+
+  it("refuses an amount that is not a whole euro of progress, rather than rounding it", async () => {
+    const { app, calls } = buildApp({}, true);
+
+    const res = await post(app, clawBackPath, {
+      points: 155,
+      reason: "credited twice",
+      idempotencyKey: "undo-abc-1"
+    });
+
+    expect(res.status).toBe(422);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("leaves a centre without a programme exactly as it was", async () => {
+    const { app, calls } = buildApp({}, false);
+
+    const res = await post(app, clawBackPath, {
+      points: 150,
+      reason: "credited twice",
+      idempotencyKey: "undo-abc-1"
+    });
+
+    expect((calls[0].args as { points: number }).points).toBe(150);
+    expect(res.body.balance).toEqual({ spendable: 300, lifetime: 500 });
+  });
+
+  it("still refuses a by-hand credit or redemption at a programme centre", async () => {
+    const { app, calls } = buildApp({}, true);
+
+    const credited = await post(app, `/api/v1/members/${MEMBER}/points/credit`, {
+      points: 100,
+      idempotencyKey: "scan-abc-123"
+    });
+    const redeemed = await post(app, `/api/v1/members/${MEMBER}/points/redeem`, {
+      points: 100,
+      idempotencyKey: "scan-abc-124"
+    });
+
+    expect([credited.status, redeemed.status]).toEqual([409, 409]);
+    expect(calls).toHaveLength(0);
   });
 });

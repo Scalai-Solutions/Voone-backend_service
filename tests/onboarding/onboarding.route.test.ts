@@ -872,8 +872,9 @@ describe("adding points by hand, at a clinic on a programme", () => {
   });
 
   it("still allows a correction, which is how a mistake gets undone", async () => {
+    // In points, the unit the screens show: 50 points is 5 euros of progress.
     const r = await post(pointsApp(true), "/members/m1/points/claw-back", {
-      points: 5,
+      points: 50,
       idempotencyKey: "key-123456",
       reason: "Error"
     });
