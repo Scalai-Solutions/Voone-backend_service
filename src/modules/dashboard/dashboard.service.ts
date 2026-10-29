@@ -99,6 +99,14 @@ export class DashboardService {
 
   async clinicOverview(clinicId: string): Promise<DashboardOverview> {
     // The clinic's calendar month, in Madrid: [start, end).
+    //
+    // Two things to know when reading these figures side by side:
+    // - Points are bucketed by the ledger row's createdAt (when it was written), while revenue,
+    //   top clients and programme rewards use the visit's occurredAt / the reward's redeemedAt. A
+    //   visit backdated across a month edge can therefore sit in one month's revenue and the
+    //   other month's points.
+    // - Programme versus legacy (x10 and the REDEEM count) is decided by TODAY's programme status
+    //   for the whole month, so a centre that switched mid-month shows all of it one way.
     const at = this.now();
     const monthStart = startOfMonthIn(CLINIC_TIME_ZONE, at);
     const monthEnd = startOfNextMonthIn(CLINIC_TIME_ZONE, at);
@@ -145,7 +153,17 @@ export class DashboardService {
       // inside the row), REFERRAL (welcome credit) and ADJUSTMENT rows. Claw-backs (negative
       // ADJUSTMENT), EXPIRY and REDEEM are subtractions and never counted.
       this.prisma.pointsTransaction.aggregate({
-        where: { clinicId, kind: { in: CREDIT_KINDS }, points: { gt: 0 }, createdAt: inMonth },
+        where: {
+          clinicId,
+          kind: { in: CREDIT_KINDS },
+          points: { gt: 0 },
+          createdAt: inMonth,
+          // Reconciliation rows written by scripts/backfill-points-ledger.ts
+          // (idempotencyKey "backfill:pre-ledger:<member>") restate points earned before the
+          // ledger existed; they are not points issued this month. A genuine staff ADJUSTMENT has
+          // no such prefix and is counted.
+          NOT: { idempotencyKey: { startsWith: "backfill:" } }
+        },
         _sum: { points: true }
       }),
 

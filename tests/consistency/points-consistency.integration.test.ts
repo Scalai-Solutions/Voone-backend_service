@@ -106,10 +106,14 @@ const directory = new MemberDirectoryService(
   () => new Set(),
   () => null
 );
+// Ledger rows get the database's now(); they are moved to FIXED_AT before the dashboard is read
+// and the dashboard's clock is fixed, so a run across a Madrid month-end cannot split the month.
+const FIXED_AT = new Date("2026-10-10T10:00:00Z");
 const dashboard = new DashboardService(
   db,
   () => ({ expiresAt: null, enabled: false }),
-  () => "demo"
+  () => "demo",
+  () => new Date("2026-10-15T10:00:00Z")
 );
 
 const app = express();
@@ -203,6 +207,11 @@ const readEverywhere = async (member: Member, clinic: { id: string; slug: string
   const passPage = await send("GET", `/wallet/passes/${code}`);
   const card = await new PrismaLoyaltyCardAssembler(db, secret).assemble(member.id);
   const push = await googlePush(member);
+  await db.pointsTransaction.updateMany({
+    where: { clinicId: clinic.id },
+    data: { createdAt: FIXED_AT }
+  });
+
   const overview = await dashboard.clinicOverview(clinic.id);
 
   expect(lookup.status).toBe(200);

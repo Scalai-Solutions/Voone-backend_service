@@ -80,7 +80,8 @@ const ledger = (
   memberId: string,
   points: number,
   kind: PointsTransactionKind,
-  at: string
+  at: string,
+  idempotencyKey?: string
 ) => {
   seq += 1;
 
@@ -90,7 +91,7 @@ const ledger = (
       memberId,
       points,
       kind,
-      idempotencyKey: `dash-ledger-${seq}`,
+      idempotencyKey: idempotencyKey ?? `dash-ledger-${seq}`,
       createdAt: new Date(at)
     }
   });
@@ -286,6 +287,31 @@ describe("clinicOverview: points issued this month", () => {
 
     // 100 + 5 + 20 progress euros credited this month = 125, shown as 1250 points.
     expect(overview.pointsIssuedThisMonth).toBe(1250);
+  });
+
+  it("does not count migration rows, but keeps a genuine positive adjustment", async () => {
+    const ana = await makeMember(programme.id, "Ana");
+
+    // What scripts/backfill-points-ledger.ts writes: a reconciliation, not points issued.
+    await ledger(
+      programme.id,
+      ana.id,
+      999,
+      PointsTransactionKind.ADJUSTMENT,
+      "2026-10-05T10:00:00Z",
+      `backfill:pre-ledger:${ana.id}`
+    );
+    await ledger(
+      programme.id,
+      ana.id,
+      20,
+      PointsTransactionKind.ADJUSTMENT,
+      "2026-10-06T10:00:00Z"
+    );
+
+    const overview = await serviceAt("2026-10-15T10:00:00Z").clinicOverview(programme.id);
+
+    expect(overview.pointsIssuedThisMonth).toBe(200);
   });
 
   it("stays raw at a centre without a programme", async () => {
