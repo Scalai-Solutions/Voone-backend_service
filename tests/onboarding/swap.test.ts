@@ -146,7 +146,7 @@ describe("swapReward, refusing what it must", () => {
 
     expect(swapReward(p, ANSWERS, 9, 0)).toMatchObject({
       ok: false,
-      reason: "Ese cambio repetiría un regalo en dos hitos seguidos."
+      reason: expect.stringContaining("Ese cambio repetiría un regalo en dos hitos seguidos")
     });
   });
 
@@ -158,7 +158,7 @@ describe("swapReward, refusing what it must", () => {
 
     expect(swapReward(p, ANSWERS, 9, 0)).toMatchObject({
       ok: false,
-      reason: expect.stringContaining("menos valor")
+      reason: "Ese cambio dejaría el premio del hito 9 con menos valor que el del hito 7."
     });
   });
 

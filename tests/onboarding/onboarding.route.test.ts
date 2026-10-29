@@ -204,6 +204,64 @@ describe("the catalogue", () => {
     });
   });
 
+  it("says per row whether it can be given as a reward, by the rule the swap uses", async () => {
+    await call("PUT", admin("/catalog"), {
+      items: [
+        ...fixtureItems,
+        { externalId: "FREE", name: "Cera de cortesía", priceEuro: 0 },
+        { externalId: "WHO", name: "Servicio sin nombre reconocible", priceEuro: 40 }
+      ]
+    });
+
+    const r = await call("GET", admin("/catalog"));
+    const row = (id: string) =>
+      r.body.items.find((i: { externalId: string }) => i.externalId === id);
+
+    expect(row("F2")).toMatchObject({ giftable: true, category: "APF" });
+    // Waxing and diagnosis are not proposed by the engine but may be chosen by hand.
+    expect(row("W3")).toMatchObject({ giftable: true, category: "CER" });
+    expect(row("C5")).toMatchObject({ giftable: true, category: "DIA" });
+    expect(row("K1")).toMatchObject({ giftable: true, category: "COS" });
+    expect(row("M1")).toMatchObject({ giftable: false, category: "MFA" });
+    expect(row("M10")).toMatchObject({ giftable: false, category: "MNF" });
+    expect(row("FREE")).toMatchObject({ giftable: false });
+    // Parked in DIA by the engine, but with no category the centre chose: not giftable.
+    expect(row("WHO")).toMatchObject({ giftable: false, needsReview: true });
+    // Existing fields are all still there.
+    expect(Object.keys(row("F2")).sort()).toEqual(
+      [
+        "category",
+        "categoryId",
+        "classifiedBy",
+        "costPctOverride",
+        "durationMin",
+        "estimated",
+        "externalId",
+        "giftable",
+        "isProduct",
+        "name",
+        "needsReview",
+        "position",
+        "priceEuro"
+      ].sort()
+    );
+  });
+
+  it("lets a swap through on exactly the rows the catalogue calls giftable", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const draft = await call("POST", admin("/programs"), ANSWERS);
+    const path = admin(`/programs/${draft.body.id}/milestones/3`);
+
+    const wax = await call("PATCH", path, { itemId: "W8" });
+    const medical = await call("PATCH", path, { itemId: "M11" });
+
+    expect(wax.status).toBe(200);
+    expect(medical.status).toBe(409);
+    expect(medical.body.message).toBe(
+      "Los tratamientos y productos médicos no se pueden dar como premio."
+    );
+  });
+
   it("accepts an empty catalogue and answers with an empty list", async () => {
     await call("PUT", admin("/catalog"), { items: fixtureItems });
     const r = await call("PUT", admin("/catalog"), { items: [] });

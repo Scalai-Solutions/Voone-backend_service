@@ -321,22 +321,60 @@ export const buildLadder = (est: Estimates, ans: Answers, useFloor: boolean): La
 
 /* --------------------------------------------------------------- step 4: candidates */
 
+/** A catalogue row as a candidate reward, priced at what it costs the centre. */
+const toCandidate = (
+  i: ClassifiedItem,
+  occ: (typeof OCCUPANCY)[keyof typeof OCCUPANCY]
+): Candidate => ({
+  id: i.id,
+  name: i.name,
+  cat: i.cat,
+  value: i.price,
+  cost:
+    i.price *
+    (i.costPct != null && (i.costPct as unknown) !== "" ? i.costPct : CATEGORIES[i.cat].cost) *
+    (TIME_CATS.includes(i.cat) ? occ.svc : 1)
+});
+
 /** Catalogue rows that may be given away, priced at what they cost the centre. */
 export const candidates = (items: ClassifiedItem[], ans: Answers): Candidate[] => {
   const occ = OCCUPANCY[ans?.occupancy] ?? OCCUPANCY.o2;
 
   return items
     .filter((i) => CATEGORIES[i.cat]?.reward && i.price > 0)
-    .map((i) => ({
-      id: i.id,
-      name: i.name,
-      cat: i.cat,
-      value: i.price,
-      cost:
-        i.price *
-        (i.costPct != null && (i.costPct as unknown) !== "" ? i.costPct : CATEGORIES[i.cat].cost) *
-        (TIME_CATS.includes(i.cat) ? occ.svc : 1)
-    }));
+    .map((i) => toCandidate(i, occ));
+};
+
+/**
+ * Why the admin may not hand-pick a row as a reward, or null when they may.
+ *
+ * The order is the order the centre should fix things in: a row with no price is not a reward
+ * of any kind; one with no category the centre chose cannot be judged yet (the engine parks
+ * such a row in DIA, which is otherwise allowed, so `review` must be checked first); and only
+ * then the legal block on medical items.
+ */
+export type ManualRefusal = "price" | "category" | "medical";
+
+export const manualRefusal = (item: ClassifiedItem): ManualRefusal | null => {
+  if (!(item.price > 0)) return "price";
+  if (item.review || !CATEGORIES[item.cat]) return "category";
+  if (!CATEGORIES[item.cat].manualReward) return "medical";
+
+  return null;
+};
+
+/** The single rule behind both the admin's item swap and the catalogue's `giftable` flag. */
+export const isGiftable = (item: ClassifiedItem): boolean => manualRefusal(item) === null;
+
+/**
+ * Rows the admin may choose by hand as a reward: the engine's candidates plus waxing and
+ * diagnosis, never medical. Used by the item swap ONLY, so the engine's own proposals (which
+ * read `candidates`) are untouched.
+ */
+export const manualCandidates = (items: ClassifiedItem[], ans: Answers): Candidate[] => {
+  const occ = OCCUPANCY[ans?.occupancy] ?? OCCUPANCY.o2;
+
+  return items.filter(isGiftable).map((i) => toCandidate(i, occ));
 };
 
 /* ------------------------------------------------------------------ step 5: rewards */

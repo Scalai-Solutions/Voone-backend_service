@@ -32,8 +32,17 @@ export interface CategoryConfig {
   cost: number;
   /** Whether spending on it earns progress. False for pharmacological medicine. */
   points: boolean;
-  /** Whether it may be given as a reward. */
+  /** Whether the ENGINE may propose it as a reward, in the programmes it generates. */
   reward: boolean;
+  /**
+   * Whether the centre's admin may choose it BY HAND as a reward ("Cambiar" > "O cualquier
+   * artículo del catálogo"). Wider than `reward` on purpose: waxing and diagnosis are not
+   * proposed (a diagnosis costs the centre nothing, so a 5 euro one would look like a free
+   * reward and dominate every ladder) but the owner may still choose them. Only the
+   * prescription and medical categories stay out, a legal constraint in Spain (see MFA).
+   * Used by the item swap alone; nothing the engine computes reads it.
+   */
+  manualReward: boolean;
   /** Whether it may be given before Plata, where budgets are smallest. */
   early: boolean;
   pharma?: boolean;
@@ -47,6 +56,7 @@ export const CATEGORIES: Record<CategoryCode, CategoryConfig> = {
     cost: 0.2,
     points: true,
     reward: true,
+    manualReward: true,
     early: false
   },
   APF: {
@@ -56,9 +66,19 @@ export const CATEGORIES: Record<CategoryCode, CategoryConfig> = {
     cost: 0.12,
     points: true,
     reward: true,
+    manualReward: true,
     early: false
   },
-  MAS: { name: "Masaje", w: 2, iv: 6, cost: 0.1, points: true, reward: true, early: false },
+  MAS: {
+    name: "Masaje",
+    w: 2,
+    iv: 6,
+    cost: 0.1,
+    points: true,
+    reward: true,
+    manualReward: true,
+    early: false
+  },
   COR: {
     name: "Tratamiento corporal",
     w: 3,
@@ -66,6 +86,7 @@ export const CATEGORIES: Record<CategoryCode, CategoryConfig> = {
     cost: 0.15,
     points: true,
     reward: true,
+    manualReward: true,
     early: false
   },
   LAS: {
@@ -75,6 +96,7 @@ export const CATEGORIES: Record<CategoryCode, CategoryConfig> = {
     cost: 0.08,
     points: true,
     reward: true,
+    manualReward: true,
     early: false
   },
   CER: {
@@ -84,12 +106,32 @@ export const CATEGORIES: Record<CategoryCode, CategoryConfig> = {
     cost: 0.15,
     points: true,
     reward: false,
+    // Not proposed by the engine, but the admin may choose it by hand.
+    manualReward: true,
     early: false
   },
   // Hair, nails and brows come from an earlier scope. Kept so a centre that still has
   // such rows classifies rather than falling through to "unclassified".
-  PEL: { name: "Peluquería", w: 3, iv: 7, cost: 0.15, points: true, reward: true, early: false },
-  UNA: { name: "Manos y pies", w: 3, iv: 3, cost: 0.15, points: true, reward: true, early: false },
+  PEL: {
+    name: "Peluquería",
+    w: 3,
+    iv: 7,
+    cost: 0.15,
+    points: true,
+    reward: true,
+    manualReward: true,
+    early: false
+  },
+  UNA: {
+    name: "Manos y pies",
+    w: 3,
+    iv: 3,
+    cost: 0.15,
+    points: true,
+    reward: true,
+    manualReward: true,
+    early: false
+  },
   CEJ: {
     name: "Cejas y pestañas",
     w: 2,
@@ -97,6 +139,7 @@ export const CATEGORIES: Record<CategoryCode, CategoryConfig> = {
     cost: 0.15,
     points: true,
     reward: true,
+    manualReward: true,
     early: false
   },
   COS: {
@@ -106,6 +149,7 @@ export const CATEGORIES: Record<CategoryCode, CategoryConfig> = {
     cost: 0.5,
     points: true,
     reward: true,
+    manualReward: true,
     early: true
   },
   PRE: {
@@ -115,6 +159,7 @@ export const CATEGORIES: Record<CategoryCode, CategoryConfig> = {
     cost: 0.05,
     points: true,
     reward: true,
+    manualReward: true,
     early: true
   },
   DIA: {
@@ -124,6 +169,8 @@ export const CATEGORIES: Record<CategoryCode, CategoryConfig> = {
     cost: 0,
     points: true,
     reward: false,
+    // Not proposed (cost 0 would make any diagnosis look free), but the admin may choose it.
+    manualReward: true,
     early: false
   },
   // Never earns progress and is never a reward. A legal constraint in Spain, not a
@@ -135,6 +182,8 @@ export const CATEGORIES: Record<CategoryCode, CategoryConfig> = {
     cost: 0,
     points: false,
     reward: false,
+    // The legal block: never a reward, not even by the admin's own choice.
+    manualReward: false,
     early: false,
     pharma: true
   },
@@ -145,6 +194,8 @@ export const CATEGORIES: Record<CategoryCode, CategoryConfig> = {
     cost: 0,
     points: false,
     reward: false,
+    // Medical too: no medicine is given away, with or without a medicament.
+    manualReward: false,
     early: false
   }
 };

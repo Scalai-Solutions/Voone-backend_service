@@ -1,4 +1,12 @@
-import { COST_REVIEW_NOTE, buildGuarantees, candidates, chooseRecurring } from "./engine";
+import {
+  COST_REVIEW_NOTE,
+  buildGuarantees,
+  candidates,
+  chooseRecurring,
+  manualCandidates,
+  manualRefusal,
+  type ManualRefusal
+} from "./engine";
 import { ids } from "./engine.math";
 import type { Answers, ChosenReward, Program, RewardOption } from "./engine.types";
 
@@ -21,8 +29,9 @@ const fail = (reason: string): SwapResult => ({ ok: false, reason });
 const sharesItem = (a: RewardOption, b: RewardOption): boolean =>
   ids(a).some((id) => ids(b).includes(id));
 
-const hasConsecutiveRepeat = (chosen: ChosenReward[]): boolean =>
-  chosen.some((c, i) => i > 0 && sharesItem(c.o, chosen[i - 1].o));
+/** The position of the first reward that shares a gift with the one before it, if any. */
+const consecutiveRepeatAt = (chosen: ChosenReward[]): number =>
+  chosen.findIndex((c, i) => i > 0 && sharesItem(c.o, chosen[i - 1].o));
 
 /** The "best reward first" guarantee, as the engine words it. */
 const BRONCE_FIRST = "En Bronce el mejor premio es el primero";
@@ -47,11 +56,19 @@ export const swapReward = (
   return replaceReward(program, answers, at, replacement, alternative);
 };
 
+const MANUAL_REFUSALS: Record<ManualRefusal, string> = {
+  price: "Ese artículo no tiene precio, así que no puede ser un premio.",
+  category: "Asigna una categoría a este artículo en el catálogo antes de usarlo como premio.",
+  medical: "Los tratamientos y productos médicos no se pueden dar como premio."
+};
+
 /**
- * Gives a milestone any item from the centre's catalogue that may be given as a reward (founders'
- * E2E item 28). The same checks as an engine alternative apply, so a ladder that stops climbing is
- * still refused; what it adds is that the choice is no longer limited to the two the engine
- * proposed, and a dearer one is flagged, not refused.
+ * Gives a milestone any item from the centre's catalogue that the admin may hand-pick as a reward
+ * (founders' E2E item 28). That is wider than what the engine proposes from: waxing and diagnosis
+ * are allowed, only medical items are not (see `manualCandidates`). The same checks as an engine
+ * alternative apply, so a ladder that stops climbing is still refused; what it adds is that the
+ * choice is no longer limited to the two the engine proposed, and a dearer one is flagged, not
+ * refused.
  */
 export const swapRewardToItem = (
   program: Program,
@@ -63,11 +80,17 @@ export const swapRewardToItem = (
 
   if (at < 0) return fail("Ese hito no tiene un premio que se pueda cambiar.");
 
-  const item = candidates(program.catalog, answers).find((candidate) => candidate.id === itemId);
+  const row = program.catalog.find((candidate) => candidate.id === itemId);
 
-  if (!item) {
-    return fail("Ese artículo no se puede dar como premio. Elige otro del catálogo.");
-  }
+  if (!row) return fail("Ese artículo no está en el catálogo.");
+
+  const refusal = manualRefusal(row);
+
+  if (refusal) return fail(MANUAL_REFUSALS[refusal]);
+
+  // Priced exactly as the engine prices a candidate, through the same function the catalogue's
+  // `giftable` flag is derived from.
+  const [item] = manualCandidates([row], answers);
 
   return replaceReward(
     program,
@@ -103,8 +126,12 @@ const replaceReward = (
     if (k !== at) c.alts = c.alts.filter((a) => !ids(a).some((id) => taken.has(id)));
   });
 
-  if (hasConsecutiveRepeat(next.chosen)) {
-    return fail("Ese cambio repetiría un regalo en dos hitos seguidos.");
+  const repeat = consecutiveRepeatAt(next.chosen);
+
+  if (repeat > 0) {
+    return fail(
+      `Ese cambio repetiría un regalo en dos hitos seguidos (hitos ${next.chosen[repeat - 1].m.n} y ${next.chosen[repeat].m.n}).`
+    );
   }
 
   // The ladder must keep climbing. Bronce is exempt from ordering inside itself — its best
@@ -113,13 +140,17 @@ const replaceReward = (
   const later = next.chosen.filter((c) => c.m.tramo > 1);
   const ceiling = Math.max(0, ...bronce.map((c) => c.o.value));
   let floor = ceiling;
+  let floorAt = bronce.find((c) => c.o.value === ceiling)?.m.n;
 
   for (const c of later) {
     if (c.o.value < floor) {
-      return fail("Ese cambio dejaría un premio con menos valor que el anterior.");
+      return fail(
+        `Ese cambio dejaría el premio del hito ${c.m.n} con menos valor que el del hito ${floorAt ?? "anterior"}.`
+      );
     }
 
     floor = c.o.value;
+    floorAt = c.m.n;
   }
 
   // The recurring reward must be worth at least the last ladder reward, so a swap that

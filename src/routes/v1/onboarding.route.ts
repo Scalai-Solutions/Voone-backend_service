@@ -14,7 +14,7 @@ import {
   toEngineCatalog,
   type CatalogRepository
 } from "../../modules/onboarding/catalog.repository";
-import { classify } from "../../modules/onboarding/engine";
+import { classify, isGiftable } from "../../modules/onboarding/engine";
 import { TIERS } from "../../modules/onboarding/engine.config";
 import type { CategoryCode, Program, TierCode } from "../../modules/onboarding/engine.types";
 import {
@@ -143,7 +143,8 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
   /**
    * The catalogue as the review screen needs it: each row with the category the engine
    * would give it and where that came from, so the centre can see why a row is filed where
-   * it is and correct the ones it cannot classify.
+   * it is and correct the ones it cannot classify. `giftable` says whether the admin may give the row
+   * as a reward by hand, so the swap dropdown can filter without repeating the rule.
    */
   const catalogView = async (clinicId: string) => {
     const rows = await deps.catalog.listForClinic(clinicId);
@@ -164,7 +165,10 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
         position: row.position,
         category: c?.cat ?? null,
         classifiedBy: c?.src ?? null,
-        needsReview: Boolean(c?.review)
+        needsReview: Boolean(c?.review),
+        // Whether the admin may hand-pick this row as a reward: the same function the item
+        // swap uses, so the dropdown never offers what the swap would refuse.
+        giftable: c ? isGiftable(c) : false
       };
     });
   };
