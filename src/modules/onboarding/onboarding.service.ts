@@ -224,6 +224,8 @@ export class OnboardingService {
    * its thresholds and the record of what they were promised has to survive.
    */
   async publish(clinicId: string, programId: string): Promise<OnboardingProgram> {
+    let replaced = false;
+
     const published = await this.prisma.$transaction(async (tx) => {
       const draft = await tx.onboardingProgram.findFirst({ where: { id: programId, clinicId } });
 
@@ -248,10 +250,12 @@ export class OnboardingService {
         );
       }
 
-      await tx.onboardingProgram.updateMany({
+      const superseded = await tx.onboardingProgram.updateMany({
         where: { clinicId, status: OnboardingProgramStatus.ACTIVO },
         data: { status: OnboardingProgramStatus.SUSTITUIDO }
       });
+
+      replaced = superseded.count > 0;
 
       return tx.onboardingProgram.update({
         where: { id: draft.id },
@@ -259,18 +263,12 @@ export class OnboardingService {
       });
     });
 
-    // Place each member on the new ladder by her progress, which is stored in euros and so
-    // carries across. This runs for a replacement AND for a centre's FIRST programme: at a first
-    // activation the members it already has hold no tier, or only a legacy name ("Gold") that
-    // reads as none, and would otherwise sit on a ladder with no rung until their next visit.
-    // Up-only and idempotent, so it never demotes and a retry finishes the job. Rewards already
-    // issued stay valid until their own expiry, and a step she has already passed on the new
-    // ladder is not issued again, because issuing is judged on crossing.
-    //
-    // What this does NOT do is convert a legacy balance. The old scheme's points are typed per
-    // treatment with no fixed relation to euros, so a balance is carried as stored and read as
-    // euros (shown x10). See scripts/check-legacy-balances.ts and docs/onboarding-decisions.md D5.
-    await placeMembersOnProgram(this.prisma, clinicId);
+    // A new version replacing a live one: place each member on the new ladder by her progress,
+    // which is stored in euros and so carries across. Rewards already issued stay valid until
+    // their own expiry, and a step she has already passed on the new ladder is not issued again,
+    // because issuing is judged on crossing. The first programme a centre ever publishes is left
+    // alone, as migrating members who were on the old scheme is a separate, deliberate step.
+    if (replaced) await placeMembersOnProgram(this.prisma, clinicId);
 
     // The card shows the programme's next reward, so a new live version changes every card.
     void refreshClinicCards(clinicId);

@@ -1206,7 +1206,7 @@ describe("replacing a live programme with a new version", () => {
     expect(await lifetime(holder.id)).toBe(300);
   });
 
-  it("places existing members on the ladder at a centre's first programme, balances untouched", async () => {
+  it("leaves members alone when it is the first programme a centre has published", async () => {
     const m = await newMember();
 
     await db.pointsTransaction.create({
@@ -1222,17 +1222,8 @@ describe("replacing a live programme with a new version", () => {
     await db.member.update({ where: { id: m.id }, data: { tier: "Bronze" } });
     await goLive();
 
-    // "Bronze" is the old scheme's name and reads as no tier; she is placed by her progress (500
-    // euros) on the programme's own ladder. Her balance is carried as stored, not converted.
-    const row = await db.member.findUniqueOrThrow({ where: { id: m.id } });
-
-    const ledger = await db.pointsTransaction.aggregate({
-      where: { memberId: m.id },
-      _sum: { points: true }
-    });
-
-    expect(row.tier).toBe("Plata");
-    expect(ledger._sum.points).toBe(500);
+    // Migrating members who were on the old scheme is a separate, deliberate step.
+    expect((await db.member.findUniqueOrThrow({ where: { id: m.id } })).tier).toBe("Bronze");
   });
 
   it("keeps rewards already issued, and still issues the new version's own", async () => {

@@ -115,41 +115,34 @@ afterAll(async () => {
 });
 
 describe("publishing a centre's first programme", () => {
-  it("places members who have no tier, or only a legacy tier name, on the new ladder", async () => {
+  it("leaves existing members alone: no tier is written, no balance changes", async () => {
     const fresh = await legacyMember(0, null);
-    const spender = await legacyMember(20, null);
     const gold = await legacyMember(500, "Gold");
 
-    const view = await publishFirst();
-    const labels = view.tiers.map((tier) => tier.label);
+    await publishFirst();
 
-    for (const member of [fresh, spender, gold]) {
-      expect(labels).toContain(await tierOf(member.id));
-    }
+    // Placement from raw legacy ledger rows read as euros would mis-rank them (500 old points
+    // would land on a mid rung), and there is no safe conversion yet (docs D5, undecided).
+    expect(await tierOf(fresh.id)).toBeNull();
+    expect(await tierOf(gold.id)).toBe("Gold");
 
-    expect(await tierOf(fresh.id)).toBe(labels[0]);
+    const row = await db.member.findUniqueOrThrow({ where: { id: gold.id } });
+
+    expect(row.pointsBalance).toBe(500);
   });
 
-  it("never lowers a tier and leaves balances exactly as stored", async () => {
+  it("still places members when a publish REPLACES an earlier programme, up-only", async () => {
     const view = await publishFirst();
     const top = view.tiers[view.tiers.length - 1].label;
-    // Already on the programme's own ladder (published earlier, then the member moved up).
     const diamond = await legacyMember(0, top);
     const spender = await legacyMember(20, null);
 
-    expect(await placeMembersOnProgram(db, clinic.id)).toMatchObject({ checked: 2 });
+    const draft = await service.createDraft(clinic.id, { ...ANSWERS, investment: "generoso" });
+
+    await service.publish(clinic.id, draft.id);
+
     expect(await tierOf(diamond.id)).toBe(top);
-
-    const row = await db.member.findUniqueOrThrow({ where: { id: spender.id } });
-
-    expect(row.pointsBalance).toBe(20);
-  });
-
-  it("is idempotent: a second run changes nothing", async () => {
-    await legacyMember(0, null);
-    await legacyMember(500, "Gold");
-    await publishFirst();
-
+    expect(await tierOf(spender.id)).not.toBeNull();
     expect(await placeMembersOnProgram(db, clinic.id)).toMatchObject({ promoted: 0 });
   });
 });
