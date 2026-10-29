@@ -29,7 +29,8 @@
     "notifications:worker:dev": "tsx watch src/jobs/notifications.worker.ts",
     "points:recompute": "tsx scripts/recompute-points.ts",
     "points:backfill": "tsx scripts/backfill-points-ledger.ts",
-    "tiers:backfill": "tsx scripts/backfill-tier-points.ts"
+    "tiers:backfill": "tsx scripts/backfill-tier-points.ts",
+    "programme:check-legacy": "tsx scripts/check-legacy-balances.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

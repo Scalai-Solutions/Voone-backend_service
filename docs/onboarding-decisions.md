@@ -231,10 +231,15 @@ Stated plainly, so nothing is assumed finished.
    centre-managed list of people and perks has no data model yet.
 4. **Happy Hour.** The benefit is shown; flagging "fill fast" slots needs agenda integration
    that does not exist.
-5. **Migrating existing members.** Publishing a programme does not retier existing members.
-   They are ranked by it at their next movement, or when `npm run points:recompute --apply` is
-   run. Their legacy tier names ("Gold") read as no tier until then. Run the script
-   deliberately after publishing for a clinic that already has members.
+5. **Migrating existing members.** Publishing a centre's FIRST programme now places the members it
+   already has on the new ladder by their progress, up-only and idempotent (the same step as a
+   replacement), so nobody is left with no tier or a legacy name ("Gold"). **Balances are not
+   converted.** Old points were typed per treatment (`ClinicTreatment.pointsAllotted`) with no
+   fixed relation to euros, so a balance is carried as stored and read as euros, shown x10: a
+   member with 500 old points shows 5000. **Open question for Sergio:** convert at a fixed ten
+   points per euro (balance / 10, no visible jump, wrong where a centre's own rate differs),
+   per-centre rate from its own treatments, or leave it. `npm run programme:check-legacy` prints
+   counts and the centre's own points-per-euro spread to decide with.
 6. **Google Wallet.** The pass change is Apple/Google-agnostic (it feeds the shared card), but
    Google remains unconfigured for the pilot and was not exercised.
 7. **Pushing and opening pull requests**, because of tooling gates on this machine, not code.
@@ -328,8 +333,8 @@ from changing under them.
 ### E9. Activating a programme
 
 **Question.** Activating moves the centre from the old points scheme to the programme: manual
-points stop working (C5) and existing members are not re-ranked until their next visit (D5).
-Should activation warn about that, and be undoable?
+points stop working (C5) and existing members are placed on the ladder at activation, with
+balances carried as stored (D5). Should activation warn about that, and be undoable?
 
 **Approach implemented.** One click, then a message saying the programme is active. There is
 **no confirmation dialog and no undo**. Activating a _new version_ only replaces the old one;
@@ -431,8 +436,8 @@ allowing a **demotion** when the new ladder is harder. The guide says tiers are 
 is made. Confirm that is wanted.
 
 **Not done.** Passes (Apple and Google Wallet) of members promoted this way refresh at their next
-visit, not at the moment of approval. Publishing the first programme a centre has ever had does
-not place members at all (D5 still applies).
+visit, not at the moment of approval. Publishing the first programme a centre has ever had now
+places its existing members too; converting their legacy balances is still open (D5).
 
 ### F3. No gift value anywhere on the centre's page
 
