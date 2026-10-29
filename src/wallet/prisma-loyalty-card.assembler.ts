@@ -1,9 +1,9 @@
-import { OnboardingProgramStatus, type PrismaClient } from "@prisma/client";
+import { MemberRewardKind, OnboardingProgramStatus, type PrismaClient } from "@prisma/client";
 
 import { MemberNotFoundError } from "../common/errors/membership.errors";
 import { WalletConfigurationError } from "../common/errors/wallet.errors";
 import { LoyaltyCardAssembler } from "./engine/loyalty-card-assembler";
-import { LoyaltyCard, loyaltyCardSchema } from "./engine/loyalty-card";
+import { LoyaltyCard, loyaltyCardSchema, MEMBER_CODE_PATTERN } from "./engine/loyalty-card";
 import { formatCardMessage } from "./engine/card-message";
 import { clipCardText } from "./engine/card-text";
 import { clipText } from "./engine/rewards-text";
@@ -14,6 +14,12 @@ import type { Program } from "../modules/onboarding/engine.types";
 import { presentProgram } from "../modules/onboarding/presentation";
 import { programView } from "../modules/onboarding/runtime/program-view";
 import { toPoints } from "../modules/onboarding/runtime/points-unit";
+import {
+  chooseDouble,
+  DOUBLE_PERK,
+  isReferralPending,
+  PERK_ORDER
+} from "../modules/onboarding/runtime/double-points";
 import { isDoublePointsPerk, nextRewardFor } from "../modules/onboarding/runtime/rules";
 import { tierRewardsSchema } from "../modules/templates/templates.schema";
 
@@ -131,6 +137,84 @@ const tierBenefitsFor = (
   }
 };
 
+/**
+ * The x2 waiting for the member's next visit, decided by the SAME function the visit credit and the
+ * reception lookup use (double-points.ts), so the card never promises what the credit will not do.
+ *
+ * Called for a programme centre only, so a legacy clinic pays no extra query. The waiting perk is
+ * among the open rewards the member query already loaded; the referral is looked up first and the
+ * paid visit only when there is one. Only when the card's list is full (20 rewards) and shows no
+ * perk is the perk asked for on its own, so a perk is never lost behind a long list. No clock but
+ * the expiry filter's `now`.
+ */
+const boostFor = async (
+  prisma: PrismaClient,
+  member: {
+    id: string;
+    rewards?: Array<{ kind: string; detail: unknown; expiresAt: Date }>;
+  },
+  now: Date,
+  listFull: boolean
+): Promise<LoyaltyCard["boost"]> => {
+  const referralPending = await isReferralPending(prisma, member.id);
+  let perk: { id: string; expiresAt: Date } | null = null;
+
+  if (!referralPending) {
+    const open = (member.rewards ?? []).find(
+      (r) => isDoublePointsPerk(r.kind, r.detail) && r.expiresAt.getTime() > now.getTime()
+    );
+
+    if (open) {
+      perk = { id: "", expiresAt: open.expiresAt };
+    } else if (listFull) {
+      perk = await prisma.memberReward.findFirst({
+        where: {
+          memberId: member.id,
+          kind: MemberRewardKind.VENTAJA,
+          redeemedAt: null,
+          expiresAt: { gt: now },
+          detail: { path: ["perk"], equals: DOUBLE_PERK }
+        },
+        orderBy: [...PERK_ORDER],
+        select: { id: true, expiresAt: true }
+      });
+    }
+  }
+
+  const decided = chooseDouble(referralPending, perk);
+
+  if (!decided.applies || !decided.reason) return undefined;
+
+  return decided.reason === "referral"
+    ? { kind: "referral" }
+    : { kind: "perk", until: decided.until ?? undefined };
+};
+
+/**
+ * What the member shares to recommend the clinic: their own code and the public sign-up link that
+ * carries it. Undefined (so the card has no `referral` at all) when the base URL, the clinic's slug
+ * or a usable code is missing: a broken link on a card is worse than none.
+ */
+const referralFor = (
+  signupBaseUrl: string | undefined,
+  slug: string | null | undefined,
+  code: string | null
+): LoyaltyCard["referral"] => {
+  const base = signupBaseUrl?.trim().replace(/\/+$/, "");
+
+  if (!base || !slug || !code || !MEMBER_CODE_PATTERN.test(code)) return undefined;
+
+  return {
+    code,
+    url: `${base}/alta/${encodeURIComponent(slug)}?ref=${encodeURIComponent(code)}`
+  };
+};
+
+/** The key is left off the card altogether, not set to undefined, when there is no referral. */
+const referralField = (
+  referral: LoyaltyCard["referral"]
+): { referral?: LoyaltyCard["referral"] } => (referral ? { referral } : {});
+
 /** The most rewards a card shows; the pass only ever lists a handful and counts the rest. */
 const AVAILABLE_REWARDS_LIMIT = 20;
 
@@ -138,7 +222,12 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
   constructor(
     private readonly prisma: PrismaClient,
     private readonly redemptionSecret: string,
-    private readonly now: () => Date = () => new Date()
+    private readonly now: () => Date = () => new Date(),
+    /**
+     * The public frontend's origin, for the referral link on the card (`config.FRONTEND_URL`).
+     * Without it no card carries a referral.
+     */
+    private readonly signupBaseUrl?: string
   ) {}
 
   async assemble(memberId: string): Promise<LoyaltyCard> {
@@ -234,6 +323,19 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
               }))
           }
         : undefined,
+      // A pending x2, for a programme centre only.
+      boost: live
+        ? await boostFor(
+            this.prisma,
+            member,
+            now,
+            (member.rewards ?? []).length >= AVAILABLE_REWARDS_LIMIT
+          )
+        : undefined,
+      // Referrals need an ACTIVO programme, so only a programme centre shows the share.
+      ...(live
+        ? referralField(referralFor(this.signupBaseUrl, member.clinic.slug, member.code))
+        : {}),
       // The programme's benefits for the member's tier replace the hand-typed text on the pass.
       tierBenefits: live ? tierBenefitsFor(live.output, member.tier) : undefined,
       message: member.walletMessage ? { text: formatCardMessage(member.walletMessage) } : undefined,

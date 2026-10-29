@@ -10,8 +10,7 @@ import type { MemberUpdateInput } from "./membership.schema";
 import { toPoints } from "../onboarding/runtime/points-unit";
 import { listTreatments } from "../treatments/treatment-catalogue.service";
 import type { CardRef } from "../../wallet/engine/wallet-pass-provider.interface";
-import { tierRewardsSchema } from "../templates/templates.schema";
-import { normaliseScale } from "../points/tier-engine";
+import { tierLabelFor } from "./member-tier";
 import {
   appleUpdatesRegisteredFor,
   applePassTypeIdentifier
@@ -113,26 +112,6 @@ const statusFor = (
 
   // PENDING: issued but not yet confirmed with the provider.
   return "not_added";
-};
-
-const baseTierFromTemplate = (tierRewards: unknown): string => {
-  const parsed = tierRewardsSchema.safeParse(tierRewards ?? []);
-
-  if (!parsed.success) return "";
-
-  try {
-    return (
-      normaliseScale(
-        parsed.data.map((tier) => ({
-          code: tier.name,
-          label: tier.name,
-          minLifetimePoints: tier.minLifetimePoints
-        }))
-      )[0]?.code ?? ""
-    );
-  } catch {
-    return "";
-  }
 };
 
 export class MemberDirectoryService {
@@ -356,7 +335,15 @@ export class MemberDirectoryService {
       tier: true,
       erasedAt: true,
       clinic: {
-        select: { template: { select: { id: true, programName: true, tierRewards: true } } }
+        select: {
+          template: { select: { id: true, programName: true, tierRewards: true } },
+          // Whether a programme is live, for the label of a member with no tier.
+          onboardingPrograms: {
+            where: { status: OnboardingProgramStatus.ACTIVO },
+            take: 1,
+            select: { id: true }
+          }
+        }
       },
       walletObjects: { select: { provider: true, status: true, externalObjectId: true } },
       pointsLedger: {
@@ -410,7 +397,10 @@ export class MemberDirectoryService {
       clinicId: string;
       pointsBalance: number;
       tier: string | null;
-      clinic: { template: { id: string; programName: string; tierRewards: unknown } | null };
+      clinic: {
+        template: { id: string; programName: string; tierRewards: unknown } | null;
+        onboardingPrograms?: Array<{ id: string }>;
+      };
       walletObjects: Array<{ provider: WalletProviderType; status: WalletSyncStatus }>;
       pointsLedger: Array<{
         id: string;
@@ -447,7 +437,11 @@ export class MemberDirectoryService {
       points: member.pointsBalance,
       moneySpent: 0,
       lastVisitedAt: null,
-      tier: member.tier ?? baseTierFromTemplate(member.clinic.template?.tierRewards),
+      tier: tierLabelFor(
+        member.tier,
+        member.clinic.template?.tierRewards,
+        (member.clinic.onboardingPrograms?.length ?? 0) > 0
+      ),
       walletStatus: {
         apple: statusFor(apple, configured.has(WalletProviderType.APPLE)),
         google: statusFor(google, configured.has(WalletProviderType.GOOGLE))

@@ -117,6 +117,9 @@ const lineSchema = z.object({
     .max(100_000, "El importe es demasiado alto")
 });
 
+/** The multipliers reception's slider offers; it flags its flat extra so a x2 can ignore it. */
+const boostMultiplierSchema = z.union([z.literal(2), z.literal(3), z.literal(5), z.literal(10)]);
+
 const key = z.string().trim().min(8, "La clave de la operación es demasiado corta").max(80);
 
 /**
@@ -132,6 +135,7 @@ export const visitSchema = z.discriminatedUnion("kind", [
     lines: z.array(lineSchema).min(1, "Añade al menos un importe").max(50),
     discountedProducts: z.number().int().min(0).max(20).optional(),
     bonusPoints: bonusPointsSchema.optional(),
+    boostMultiplier: boostMultiplierSchema.optional(),
     idempotencyKey: key
   }),
   z
@@ -152,10 +156,11 @@ export const visitSchema = z.discriminatedUnion("kind", [
       /** For a client who already did sessions elsewhere before tracking started here. */
       startAtSession: startAtSessionSchema.optional(),
       bonusPoints: bonusPointsSchema.optional(),
+      boostMultiplier: boostMultiplierSchema.optional(),
       idempotencyKey: key
     })
     .refine((body) => Boolean(body.planId || body.memberBonoId || body.package), {
-      message: "Indica el bono: elige un plan o un bono de la clienta, o su precio y sesiones."
+      message: "Indica el bono: elige un plan o un bono del cliente, o su precio y sesiones."
     })
 ]);
 

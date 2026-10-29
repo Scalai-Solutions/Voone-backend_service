@@ -25,6 +25,7 @@ import {
   toProvisionedSummary
 } from "../../modules/clinics/clinic-provisioning.service";
 import { programmeCentreIds, toPoints } from "../../modules/onboarding/runtime/points-unit";
+import { tierLabelFor } from "../../modules/members/member-tier";
 import { hasOwnLogo, usesBorrowedImages } from "../../modules/templates/own-logo";
 import {
   applePassTypeIdentifier,
@@ -248,7 +249,11 @@ const toAdminMemberSummary = (
     : member.pointsBalance,
   moneySpent: 0,
   lastVisitedAt: null,
-  tier: member.tier ?? "Nuevo",
+  tier: tierLabelFor(
+    member.tier,
+    member.clinic.template?.tierRewards,
+    programmeCentres.has(member.clinicId)
+  ),
   walletStatus: member.walletObjects.reduce(
     (statuses, walletObject) => ({
       ...statuses,

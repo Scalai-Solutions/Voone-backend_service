@@ -146,6 +146,22 @@ export const purchaseProgress = ({ cents, tier, doubled = false }: ProgressInput
   rha((cents / 100) * (tier?.multiplier ?? 1) * (doubled ? 2 : 1));
 
 /**
+ * The fewest cents a payment can have and still earn progress at multiplier 1: progress is rounded
+ * to whole euros, so a payment under 50 cents earns 0. ONE predicate (`earnsProgress`) says whether
+ * a payment "earns", and the visit credit, the double-points decision and the wallet card all use
+ * it, so a 10-cent payment is never "the first payment" for one of them and not for another.
+ */
+export const MIN_EARNING_CENTS = ((): number => {
+  let cents = 1;
+
+  while (purchaseProgress({ cents, tier: null }) <= 0) cents += 1;
+
+  return cents;
+})();
+
+export const earnsProgress = (cents: number): boolean => cents >= MIN_EARNING_CENTS;
+
+/**
  * What one session of a prepaid package is worth, in cents.
  *
  * The guide: progress is added when each session is CONSUMED, the package price divided by its
@@ -349,7 +365,7 @@ const REFUSALS: Record<RedemptionRefusal, string> = {
   caducado: "Este premio ha caducado: se puede usar durante 60 días desde que se consigue.",
   sin_visita_de_pago:
     "Solo se puede canjear en una visita con un pago o con una sesión de un bono ya pagado.",
-  visita_ajena: "Esa visita no corresponde a esta clienta.",
+  visita_ajena: "Esa visita no corresponde a este cliente.",
   visita_de_otro_dia: "Esa visita no es de hoy. Registra el pago de esta visita para canjear."
 };
 

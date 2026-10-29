@@ -19,7 +19,7 @@ const NONE_YET = "Aún no tienes recompensas disponibles.";
 // "sept", the way the clinic writes it for a reward deadline. The clinic-message date keeps "sep"
 // (its text is compared byte for byte against what phones already hold), so this list is the
 // rewards line's own.
-const MONTHS_ES_REWARDS = [
+export const MONTHS_ES_REWARDS = [
   "ene",
   "feb",
   "mar",

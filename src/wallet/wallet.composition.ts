@@ -87,7 +87,12 @@ export const buildWalletSyncService = (prisma: PrismaClient): WalletSyncService 
   return new WalletSyncService(
     buildWalletRegistry(prisma),
     new PrismaWalletSyncRepository(prisma),
-    new PrismaLoyaltyCardAssembler(prisma, config.CARD_REDEMPTION_SECRET)
+    new PrismaLoyaltyCardAssembler(
+      prisma,
+      config.CARD_REDEMPTION_SECRET,
+      undefined,
+      config.FRONTEND_URL
+    )
   );
 };
 

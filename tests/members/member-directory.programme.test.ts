@@ -36,10 +36,25 @@ const row = {
 const serviceFor = (
   programme: boolean,
   catalogue: Array<{ id: string; name: string; priceCents: number; categoryId: null }> = [],
-  credits: Array<{ memberId: string; reason: string; createdAt: Date }> = []
+  credits: Array<{ memberId: string; reason: string; createdAt: Date }> = [],
+  tier: string | null = row.tier
 ) => {
+  // The member as the directory's own query returns her, including whether the clinic's
+  // programme is live.
+  const current = {
+    ...row,
+    tier,
+    clinic: {
+      template: {
+        id: "t",
+        programName: "Club",
+        tierRewards: [{ name: "Silver", minLifetimePoints: 0 }]
+      },
+      onboardingPrograms: programme ? [{ id: "p-1" }] : []
+    }
+  };
   const prisma = {
-    member: { findMany: async () => [row], findUnique: async () => row },
+    member: { findMany: async () => [current], findUnique: async () => current },
     // Spending stats read treatments through listTreatments, which asks the catalogue first.
     catalogItem: { count: async () => catalogue.length, findMany: async () => catalogue },
     clinicTreatment: { findMany: async () => [] },
@@ -84,5 +99,25 @@ describe("member directory at a programme centre", () => {
     ).list({ clinicId: "c-1", limit: 10, offset: 0 });
 
     expect(member.moneySpent).toBe(120);
+  });
+
+  it("labels a member with no tier by the programme's first rung at a programme centre", async () => {
+    const [member] = await serviceFor(true, [], [], null).list({
+      clinicId: "c-1",
+      limit: 10,
+      offset: 0
+    });
+
+    expect(member.tier).toBe("Bronce");
+  });
+
+  it("keeps the template's lowest tier for a tierless member at a centre without a programme", async () => {
+    const [member] = await serviceFor(false, [], [], null).list({
+      clinicId: "c-1",
+      limit: 10,
+      offset: 0
+    });
+
+    expect(member.tier).toBe("Silver");
   });
 });

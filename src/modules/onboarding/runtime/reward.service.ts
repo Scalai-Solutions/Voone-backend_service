@@ -2,6 +2,7 @@ import { MemberRewardKind, type MemberReward, type PrismaClient } from "@prisma/
 
 import { POST_CHANGE_SYNC_DELAY_MS } from "../../../wallet/engine/wallet-sync.queue";
 import { OnboardingError } from "../onboarding.service";
+import { publicDouble, pendingDouble, type DoublePoints } from "./double-points";
 import { checkRedemption, isDoublePointsPerk, isInSurprisePool } from "./rules";
 
 /**
@@ -89,6 +90,21 @@ export class RewardService {
     const order = { disponible: 0, canjeado: 1, caducado: 2 } as const;
 
     return summaries.sort((a, b) => order[a.status] - order[b.status]);
+  }
+
+  /**
+   * Whether this member's next payment will be doubled, and why. The very same decision the visit
+   * credit takes (double-points.ts), so the reception screen and the credit cannot disagree.
+   */
+  async doublePoints(clinicId: string, memberId: string): Promise<DoublePoints> {
+    const member = await this.prisma.member.findFirst({
+      where: { id: memberId, clinicId },
+      select: { id: true }
+    });
+
+    if (!member) return publicDouble({ applies: false, reason: null, until: null });
+
+    return publicDouble(await pendingDouble(this.prisma, memberId, this.now()));
   }
 
   async redeem(input: RedeemInput): Promise<MemberRewardSummary> {

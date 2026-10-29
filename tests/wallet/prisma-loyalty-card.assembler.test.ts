@@ -9,6 +9,7 @@ import { isEngineError } from "../../src/modules/onboarding/engine.types";
 import catalogFixture from "../onboarding/reference/sapphira.catalogo.json";
 import { presentProgram } from "../../src/modules/onboarding/presentation";
 import { loyaltyCardSchema } from "../../src/wallet/engine/loyalty-card";
+import { aureaGoldPass } from "../fixtures/loyalty-card.fixture";
 import { tierBenefitsText } from "../../src/wallet/engine/tier-benefits-text";
 import { PrismaLoyaltyCardAssembler } from "../../src/wallet/prisma-loyalty-card.assembler";
 
@@ -34,9 +35,15 @@ const member = {
   clinic: { id: "clinic-1", name: "AURÉA", template }
 };
 
+/** A programme centre also asks whether the member was referred; nobody was. */
+const NO_REFERRAL = {
+  referral: { findUnique: vi.fn(async () => null) },
+  paidVisit: { findFirst: vi.fn(async () => null) }
+};
+
 /** Only the one call the assembler makes, so the test states its own dependency. */
 const prismaReturning = (value: unknown) =>
-  ({ member: { findUnique: vi.fn(async () => value) } }) as unknown as PrismaClient;
+  ({ member: { findUnique: vi.fn(async () => value) }, ...NO_REFERRAL }) as unknown as PrismaClient;
 
 const assemblerFor = (value: unknown) =>
   new PrismaLoyaltyCardAssembler(prismaReturning(value), SECRET);
@@ -144,7 +151,7 @@ describe("PrismaLoyaltyCardAssembler", () => {
 
     it("reads the message in the same query as the member", async () => {
       const findUnique = vi.fn(async () => ({ ...member, walletMessage: stored }));
-      const prisma = { member: { findUnique } } as unknown as PrismaClient;
+      const prisma = { member: { findUnique }, ...NO_REFERRAL } as unknown as PrismaClient;
 
       await new PrismaLoyaltyCardAssembler(prisma, SECRET).assemble(member.id);
 
@@ -230,7 +237,7 @@ describe("PrismaLoyaltyCardAssembler for a clinic on an onboarding programme", (
 
   it("reads the newest ACTIVO programme, so two of them can never make the card alternate", async () => {
     const findUnique = vi.fn(async () => onProgramme(15));
-    const prisma = { member: { findUnique } } as unknown as PrismaClient;
+    const prisma = { member: { findUnique }, ...NO_REFERRAL } as unknown as PrismaClient;
 
     await new PrismaLoyaltyCardAssembler(prisma, "x".repeat(32)).assemble(member.id);
 
@@ -472,7 +479,7 @@ describe("PrismaLoyaltyCardAssembler: redeemable rewards", () => {
     );
 
     return new PrismaLoyaltyCardAssembler(
-      { member: { findUnique } } as unknown as PrismaClient,
+      { member: { findUnique }, ...NO_REFERRAL } as unknown as PrismaClient,
       SECRET,
       () => NOW
     );
@@ -500,7 +507,7 @@ describe("PrismaLoyaltyCardAssembler: redeemable rewards", () => {
 
   it("asks the database for available rewards only, in a stable order, in the member's own query", async () => {
     const findUnique = vi.fn(async () => programmeMember([]));
-    const prisma = { member: { findUnique } } as unknown as PrismaClient;
+    const prisma = { member: { findUnique }, ...NO_REFERRAL } as unknown as PrismaClient;
 
     await new PrismaLoyaltyCardAssembler(prisma, SECRET, () => NOW).assemble(member.id);
 
@@ -739,10 +746,278 @@ describe("PrismaLoyaltyCardAssembler: the member's tier benefits", () => {
     const findUnique = vi.fn(async () => memberOf("Plata"));
 
     await new PrismaLoyaltyCardAssembler(
-      { member: { findUnique } } as unknown as PrismaClient,
+      { member: { findUnique }, ...NO_REFERRAL } as unknown as PrismaClient,
       SECRET
     ).assemble(member.id);
 
     expect(findUnique).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("PrismaLoyaltyCardAssembler: the pending boost (x2)", () => {
+  const NOW = new Date("2026-10-27T10:00:00Z");
+  const programOutput = (() => {
+    const result = run(catalogFixture as CatalogItem[], {
+      ticket: null,
+      freq: null,
+      objective: "equilibrado",
+      investment: "equilibrado",
+      occupancy: "o2",
+      members: "m3"
+    });
+
+    if (isEngineError(result)) throw new Error(result.error);
+
+    return result;
+  })();
+
+  const perk = (expiresAt: string, extra: Record<string, unknown> = {}) => ({
+    title: "Puntos dobles en tu próxima visita",
+    kind: "VENTAJA",
+    detail: { perk: "doble" },
+    issuedAt: new Date("2026-09-01T09:00:00Z"),
+    expiresAt: new Date(expiresAt),
+    ...extra
+  });
+
+  const programmeMember = (extra: Record<string, unknown> = {}) => ({
+    ...member,
+    tier: "Bronce",
+    lifetimePoints: 175,
+    clinic: { ...member.clinic, onboardingPrograms: [{ output: programOutput }] },
+    rewards: [],
+    referredBy: null,
+    paidVisits: [],
+    ...extra
+  });
+
+  const lookups = { referral: vi.fn(), paidVisit: vi.fn() };
+  const prismaFor = (value: unknown) => {
+    const row = value as { referredBy?: { id: string } | null; paidVisits?: Array<{ id: string }> };
+
+    lookups.referral.mockReset().mockImplementation(async () => row.referredBy ?? null);
+    lookups.paidVisit.mockReset().mockImplementation(async () => row.paidVisits?.[0] ?? null);
+
+    return {
+      member: { findUnique: vi.fn(async () => value) },
+      referral: { findUnique: lookups.referral },
+      paidVisit: { findFirst: lookups.paidVisit }
+    } as unknown as PrismaClient;
+  };
+
+  const build = (value: unknown) =>
+    new PrismaLoyaltyCardAssembler(prismaFor(value), SECRET, () => NOW).assemble(member.id);
+
+  it("costs a clinic with no programme no extra query, and asks the paid visit only of a referred member", async () => {
+    const findUnique = vi.fn(async () => ({ ...member }));
+
+    await new PrismaLoyaltyCardAssembler(
+      { member: { findUnique } } as unknown as PrismaClient,
+      SECRET,
+      () => NOW
+    ).assemble(member.id);
+
+    expect(findUnique).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(findUnique.mock.calls[0])).not.toMatch(/referredBy|paidVisits/);
+
+    await build(programmeMember());
+
+    expect(lookups.referral).toHaveBeenCalledTimes(1);
+    expect(lookups.paidVisit).not.toHaveBeenCalled();
+
+    await build(programmeMember({ referredBy: { id: "r1" } }));
+
+    expect(lookups.paidVisit).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a waiting x2 perk with the date it lapses", async () => {
+    const card = await build(programmeMember({ rewards: [perk("2026-11-30T10:00:00Z")] }));
+
+    expect(card.boost).toEqual({ kind: "perk", until: "2026-11-30T10:00:00.000Z" });
+    // The perk is still not offered as a gift to present.
+    expect(card.rewards?.available).toEqual([]);
+  });
+
+  it("shows a referred member with no payment yet, with no end date", async () => {
+    const card = await build(programmeMember({ referredBy: { id: "r1" } }));
+
+    expect(card.boost).toEqual({ kind: "referral" });
+    expect(card.boost).not.toHaveProperty("until");
+  });
+
+  it("shows nothing once the referred member has paid", async () => {
+    const card = await build(
+      programmeMember({ referredBy: { id: "r1" }, paidVisits: [{ id: "v" }] })
+    );
+
+    expect(card.boost).toBeUndefined();
+  });
+
+  it("names the referral when both are waiting: the same call as the visit credit makes", async () => {
+    const card = await build(
+      programmeMember({ referredBy: { id: "r1" }, rewards: [perk("2026-11-30T10:00:00Z")] })
+    );
+
+    expect(card.boost).toEqual({ kind: "referral" });
+  });
+
+  it("ignores a perk that has lapsed", async () => {
+    const card = await build(programmeMember({ rewards: [perk("2026-10-27T10:00:00Z")] }));
+
+    expect(card.boost).toBeUndefined();
+  });
+
+  it("has no boost for a clinic with no programme", async () => {
+    const card = await build({ ...member, referredBy: { id: "r1" }, paidVisits: [] });
+
+    expect(card.boost).toBeUndefined();
+  });
+
+  it("finds the perk even when twenty other rewards fill the card's list", async () => {
+    const base = prismaFor(programmeMember());
+    const full = Array.from({ length: 20 }, (_, i) => ({
+      title: `Premio ${i}`,
+      kind: "PREMIO",
+      detail: {},
+      issuedAt: new Date("2026-09-01T09:00:00Z"),
+      expiresAt: new Date(`2026-11-${String(i + 1).padStart(2, "0")}T10:00:00Z`)
+    }));
+    const memberRewardFindFirst = vi.fn(async () => ({
+      id: "p",
+      expiresAt: new Date("2026-12-20T10:00:00Z")
+    }));
+    const card = await new PrismaLoyaltyCardAssembler(
+      {
+        ...base,
+        member: { findUnique: vi.fn(async () => programmeMember({ rewards: full })) },
+        memberReward: { findFirst: memberRewardFindFirst }
+      } as unknown as PrismaClient,
+      SECRET,
+      () => NOW
+    ).assemble(member.id);
+
+    expect(card.boost).toEqual({ kind: "perk", until: "2026-12-20T10:00:00.000Z" });
+    expect(memberRewardFindFirst).toHaveBeenCalledTimes(1);
+  });
+
+  it("is byte-equal on a second build and passes the card schema", async () => {
+    const value = programmeMember({ rewards: [perk("2026-11-30T10:00:00Z")] });
+    const first = await build(value);
+    const second = await build(value);
+
+    expect(loyaltyCardSchema.safeParse(first).success).toBe(true);
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+  });
+
+  it("rejects an unknown kind in the schema", () => {
+    const card = { ...aureaGoldPass, boost: { kind: "other" } };
+
+    expect(loyaltyCardSchema.safeParse(card).success).toBe(false);
+  });
+});
+
+describe("PrismaLoyaltyCardAssembler: the referral share", () => {
+  const programOutput = (() => {
+    const result = run(catalogFixture as CatalogItem[], {
+      ticket: null,
+      freq: null,
+      objective: "equilibrado",
+      investment: "equilibrado",
+      occupancy: "o2",
+      members: "m3"
+    });
+
+    if (isEngineError(result)) throw new Error(result.error);
+
+    return result;
+  })();
+
+  const programmeMember = (clinicExtra: Record<string, unknown> = { slug: "clinica-aurea" }) => ({
+    ...member,
+    tier: "Bronce",
+    lifetimePoints: 175,
+    clinic: {
+      ...member.clinic,
+      ...clinicExtra,
+      onboardingPrograms: [{ output: programOutput }]
+    }
+  });
+
+  const build = (value: unknown, base: string | undefined = "https://voone.app") =>
+    new PrismaLoyaltyCardAssembler(
+      {
+        member: { findUnique: vi.fn(async () => value) },
+        ...NO_REFERRAL
+      } as unknown as PrismaClient,
+      SECRET,
+      undefined,
+      base
+    ).assemble(member.id);
+
+  it("carries the member's own code and the signup link of their clinic", async () => {
+    const card = await build(programmeMember());
+
+    expect(card.referral).toEqual({
+      code: "K7M2Q",
+      url: "https://voone.app/alta/clinica-aurea?ref=K7M2Q"
+    });
+  });
+
+  it("does not double the slash of a base that ends with one, and escapes the slug", async () => {
+    const card = await build(programmeMember({ slug: "clínica aurea" }), "https://voone.app/");
+
+    expect(card.referral?.url).toBe("https://voone.app/alta/cl%C3%ADnica%20aurea?ref=K7M2Q");
+  });
+
+  it.each([
+    ["a blank base URL", programmeMember(), "  "],
+    ["no clinic slug", programmeMember({}), "https://voone.app"],
+    ["an empty slug", programmeMember({ slug: "" }), "https://voone.app"]
+  ])("omits the referral entirely with %s", async (_label, value, base) => {
+    const card = await build(value, base);
+
+    expect(card).not.toHaveProperty("referral");
+  });
+
+  it("omits it when the assembler was built with no base URL at all", async () => {
+    const card = await new PrismaLoyaltyCardAssembler(
+      {
+        member: { findUnique: vi.fn(async () => programmeMember()) },
+        ...NO_REFERRAL
+      } as unknown as PrismaClient,
+      SECRET
+    ).assemble(member.id);
+
+    expect(card).not.toHaveProperty("referral");
+  });
+
+  it("omits it for a member with no code, and for a clinic with no programme", async () => {
+    expect(await build({ ...programmeMember(), code: null })).not.toHaveProperty("referral");
+    expect(
+      await build({ ...member, clinic: { ...member.clinic, slug: "clinica-aurea" } })
+    ).not.toHaveProperty("referral");
+  });
+
+  it("is byte-equal on a second build and passes the card schema", async () => {
+    const first = await build(programmeMember());
+    const second = await build(programmeMember());
+
+    expect(loyaltyCardSchema.safeParse(first).success).toBe(true);
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+  });
+
+  it("rejects a referral with a code that is not five characters, or a url that is not a url", () => {
+    expect(
+      loyaltyCardSchema.safeParse({
+        ...aureaGoldPass,
+        referral: { code: "AB", url: "https://voone.app/alta/x?ref=AB" }
+      }).success
+    ).toBe(false);
+    expect(
+      loyaltyCardSchema.safeParse({
+        ...aureaGoldPass,
+        referral: { code: "K7M2Q", url: "not a url" }
+      }).success
+    ).toBe(false);
   });
 });

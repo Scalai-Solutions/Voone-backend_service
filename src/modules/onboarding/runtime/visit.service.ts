@@ -9,6 +9,12 @@ import {
 } from "@prisma/client";
 
 import { POST_CHANGE_SYNC_DELAY_MS } from "../../../wallet/engine/wallet-sync.queue";
+import {
+  doubleOfVisit,
+  pendingDouble,
+  REFERRAL_DOUBLE_REASON,
+  type DoubleReason
+} from "./double-points";
 import { toPoints } from "./points-unit";
 import type { PointsService } from "../../points/points.service";
 import { toCents } from "../catalog.repository";
@@ -21,6 +27,7 @@ import {
   bonoSessionCents,
   discountAllowance,
   discountWindowStart,
+  earnsProgress,
   earningCents,
   includesTreatment,
   milestonesCrossed,
@@ -80,6 +87,12 @@ export interface RecordVisitInput {
    * milestones and the pass see one number — never multiplied, never doubled by a perk.
    */
   bonusPoints?: number;
+  /**
+   * Set by reception when `bonusPoints` is the x2/x3/x5/x10 slider's flat extra rather than a
+   * typed gift. While a x2 applies (a waiting perk or a referred client's first payment) the
+   * visit is already x2 in total, so that extra is ignored: the visit is NOT refused.
+   */
+  boostMultiplier?: number;
   /** Cosmetics bought at the tier discount in this visit. */
   discountedProducts?: number;
   /** Minted by the caller, so a double tap cannot pay a client twice. */
@@ -104,9 +117,16 @@ export interface VisitOutcome {
   progress: number;
   /** The same progress as the client sees it: ten points per euro. */
   points: number;
-  /** Total progress after this visit, in points. */
+  /**
+   * The member's SPENDABLE balance now, in points: the number her card shows. Not the lifetime
+   * total (see lifetimePoints), which only drives the tier and diverges once anything was spent.
+   */
   pointsTotal: number;
+  /** Lifetime progress after this visit, in points. Internal to tiers; the card does not show it. */
+  lifetimePoints: number;
   doubled: boolean;
+  /** Why it was doubled (also on a retry); null when it was not. */
+  doubleReason: DoubleReason | null;
   lifetimeBefore: number;
   lifetimeAfter: number;
   /** The tier held after this visit, as shown on the pass. */
@@ -119,8 +139,6 @@ export interface VisitOutcome {
   /** Whole points the progress gained from the bonus field, 0 when there was none. */
   bonusPoints: number;
 }
-
-const DOUBLE_PERK = "doble";
 
 /** The bono a BONO_SESSION visit consumes, resolved behind the member lock. */
 interface ResolvedBono {
@@ -155,7 +173,7 @@ export class VisitService {
       select: { id: true }
     });
 
-    if (!member) throw new OnboardingError("No existe esa clienta en este centro.", 404);
+    if (!member) throw new OnboardingError("No existe esa persona en este centro.", 404);
 
     const existing = await this.prisma.paidVisit.findUnique({
       where: {
@@ -166,14 +184,18 @@ export class VisitService {
     if (existing && existing.memberId !== input.memberId) {
       // The key is the whole idempotency guarantee. Reusing one for a different person would
       // either credit the wrong client or silently drop a real payment.
-      throw new OnboardingError("Esa clave de operación ya se usó para otra clienta.", 409);
+      throw new OnboardingError("Esa clave de operación ya se usó para otra persona.", 409);
     }
 
     const opened = existing
-      ? { visit: existing, created: false, doubled: false }
+      ? { visit: existing, created: false as const }
       : await this.open(input, active.view);
 
     const visit = opened.visit;
+    // A first call answers from the decision it just took in open(), which is also what was
+    // credited. Only a replay reads it back from the rows (see doubleOfVisit).
+    const doubleReason: DoubleReason | null =
+      "doubleReason" in opened ? opened.doubleReason : await doubleOfVisit(this.prisma, visit);
     const progress = visit.progressAwarded ?? 0;
     const before = visit.lifetimeBefore ?? 0;
     const after = visit.lifetimeAfter ?? before + progress;
@@ -194,7 +216,12 @@ export class VisitService {
             clinicId: input.clinicId,
             points: progress,
             kind: PointsTransactionKind.EARN,
-            reason: visit.kind === VisitKind.PAYMENT ? "Visita de pago" : "Sesión de bono",
+            reason:
+              visit.kind !== VisitKind.PAYMENT
+                ? "Sesión de bono"
+                : doubleReason === "referral"
+                  ? REFERRAL_DOUBLE_REASON
+                  : "Visita de pago",
             sourceRef: visit.id,
             idempotencyKey: `visit:${visit.id}`,
             createdBy: input.createdBy
@@ -222,6 +249,14 @@ export class VisitService {
       await this.countReferral(visit, active.id, active.view);
     }
 
+    // The card's number: the cached spendable balance, read after the credit above settled it.
+    // Read here rather than taken from the visit, so a retry of an old visit answers with what
+    // the card shows now.
+    const balance = await this.prisma.member.findUnique({
+      where: { id: input.memberId },
+      select: { pointsBalance: true }
+    });
+
     const window = discountWindowStart(this.now());
     const used = await this.prisma.paidVisit.aggregate({
       where: { memberId: input.memberId, occurredAt: { gte: window } },
@@ -237,8 +272,10 @@ export class VisitService {
       duplicate: !opened.created,
       progress,
       points: toPoints(progress),
-      pointsTotal: toPoints(after),
-      doubled: Boolean(opened.doubled),
+      pointsTotal: toPoints(balance?.pointsBalance ?? 0),
+      lifetimePoints: toPoints(after),
+      doubled: doubleReason !== null,
+      doubleReason,
       lifetimeBefore: before,
       lifetimeAfter: after,
       tier,
@@ -301,7 +338,7 @@ export class VisitService {
       throw new OnboardingError(BONUS_POINTS_MESSAGE, 400);
     }
 
-    const bonusEuros = (input.bonusPoints ?? 0) / BONUS_STEP;
+    const typedBonusEuros = (input.bonusPoints ?? 0) / BONUS_STEP;
 
     // Generous timeouts: the bono path runs several queries inside this transaction and
     // the database can be a hosted pooler far away — Prisma's 5-second default expires it
@@ -321,7 +358,7 @@ export class VisitService {
           }
         });
 
-        if (dup) return { visit: dup, created: false, doubled: false };
+        if (dup) return { visit: dup, created: false as const };
 
         const member = await tx.member.findUniqueOrThrow({
           where: { id: input.memberId },
@@ -367,26 +404,26 @@ export class VisitService {
         });
         const before = Math.max(ledger.lifetime, last?.lifetimeAfter ?? 0);
 
-        // A waiting double-points perk applies to the next visit in which money changes hands
-        // (RUNTIME_DECISIONS.doublePointsAppliesTo). A package session in between does not
-        // use it up, because that session's value was fixed when the package was bought.
-        const perk =
-          input.kind === "PAYMENT"
-            ? await tx.memberReward.findFirst({
-                where: {
-                  memberId: input.memberId,
-                  kind: MemberRewardKind.VENTAJA,
-                  redeemedAt: null,
-                  expiresAt: { gt: occurredAt },
-                  detail: { path: ["perk"], equals: DOUBLE_PERK }
-                },
-                orderBy: { issuedAt: "asc" }
-              })
+        // The visit is doubled by a waiting double-points perk (the next payment in which money
+        // changes hands, RUNTIME_DECISIONS.doublePointsAppliesTo) or by a referred client's first
+        // payment; see double-points.ts, which the reception lookup shares. x2 in total, never x4.
+        // A package session in between does not use either up, and neither does a payment that
+        // earns no progress (a medicine-only basket): there is nothing to double, so nothing is
+        // spent. When both are present the REFERRAL doubles the visit and the perk is KEPT for
+        // the next one.
+        const double =
+          input.kind === "PAYMENT" && earnsProgress(cents)
+            ? await pendingDouble(tx, input.memberId, occurredAt)
             : null;
+        const perk = double?.reason === "perk" ? double.perkId : null;
 
         // The bonus is flat: no multiplier, no double-points perk, added before the single
-        // credit so the milestones this visit crosses are judged on the whole number.
-        const progress = purchaseProgress({ cents, tier, doubled: Boolean(perk) }) + bonusEuros;
+        // credit so the milestones this visit crosses are judged on the whole number. The
+        // slider's extra (flagged by reception) adds nothing while a x2 applies.
+        const bonusEuros =
+          double?.applies && input.boostMultiplier !== undefined ? 0 : typedBonusEuros;
+        const progress =
+          purchaseProgress({ cents, tier, doubled: Boolean(double?.applies) }) + bonusEuros;
 
         const visit = await tx.paidVisit.create({
           data: {
@@ -430,12 +467,16 @@ export class VisitService {
 
         if (perk) {
           await tx.memberReward.update({
-            where: { id: perk.id },
+            where: { id: perk },
             data: { redeemedAt: occurredAt, redeemedVisitId: visit.id, redeemedBy: input.createdBy }
           });
         }
 
-        return { visit, created: true, doubled: Boolean(perk) };
+        return {
+          visit,
+          created: true as const,
+          doubleReason: (double?.applies ? double.reason : null) as DoubleReason | null
+        };
       },
       { timeout: 30_000, maxWait: 15_000 }
     );

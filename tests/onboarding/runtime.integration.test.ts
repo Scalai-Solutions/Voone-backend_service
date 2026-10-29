@@ -5,7 +5,7 @@ import {
   VisitKind,
   type Clinic
 } from "@prisma/client";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   PrismaMemberPointsCache,
@@ -14,6 +14,7 @@ import {
 import { PointsService } from "../../src/modules/points/points.service";
 import { PrismaCatalogRepository } from "../../src/modules/onboarding/catalog.repository";
 import type { Answers, CatalogItem } from "../../src/modules/onboarding/engine.types";
+import { toPoints } from "../../src/modules/onboarding/runtime/points-unit";
 import { OnboardingService } from "../../src/modules/onboarding/onboarding.service";
 import { PrismaProgramTierPort } from "../../src/modules/onboarding/runtime/program-tier.port";
 import { programView } from "../../src/modules/onboarding/runtime/program-view";
@@ -255,7 +256,10 @@ describe("recording a visit", () => {
     const b = await makeMember();
 
     await pay(a.id, 65, "shared");
-    await expect(pay(b.id, 65, "shared")).rejects.toMatchObject({ statusCode: 409 });
+    await expect(pay(b.id, 65, "shared")).rejects.toMatchObject({
+      statusCode: 409,
+      message: "Esa clave de operación ya se usó para otra persona."
+    });
   });
 
   it("issues EVERY milestone a big purchase crosses", async () => {
@@ -316,6 +320,42 @@ describe("recording a visit", () => {
     });
 
     await expect(pay(other.id, 60, "x")).rejects.toMatchObject({ statusCode: 404 });
+  });
+});
+
+describe("the visit result's balance", () => {
+  it("states the SPENDABLE balance, as the card does, with lifetime kept apart", async () => {
+    const m = await makeMember();
+
+    await seed(m.id, 100);
+    // Spent 30 progress euros (a legacy redemption, say): spendable 70, lifetime still 100.
+    await points.redeem({
+      memberId: m.id,
+      clinicId: clinic.id,
+      points: 30,
+      idempotencyKey: `redeem-${m.id}`
+    });
+
+    const out = await pay(m.id, 20, "spendable-1");
+    const row = await memberRow(m.id);
+
+    expect(row.pointsBalance).toBe(90);
+    expect(out.pointsTotal).toBe(900); // spendable 90 euros, in points
+    expect(out.pointsTotal).toBe(toPoints(row.pointsBalance));
+    expect(out.lifetimePoints).toBe(1200); // lifetime 120 euros, in points
+    expect(out.lifetimeAfter).toBe(120);
+  });
+
+  it("answers a retried visit with the current spendable balance", async () => {
+    const m = await makeMember();
+
+    await pay(m.id, 20, "spendable-retry");
+    await pay(m.id, 10, "spendable-later");
+
+    const retry = await pay(m.id, 20, "spendable-retry");
+
+    expect(retry.duplicate).toBe(true);
+    expect(retry.pointsTotal).toBe(300);
   });
 });
 
@@ -739,7 +779,10 @@ describe("redeeming", () => {
 
     await expect(
       rewards.redeem({ clinicId: clinic.id, rewardId: reward.id, visitId: otherVisit.visitId })
-    ).rejects.toMatchObject({ statusCode: 409, message: expect.stringMatching(/no corresponde/) });
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      message: "Esa visita no corresponde a este cliente."
+    });
   });
 
   it("refuses a second redemption", async () => {
@@ -824,6 +867,301 @@ describe("redeeming", () => {
   });
 });
 
+describe("double points: a waiting perk and a referred client's first payment", () => {
+  const perkFor = async (memberId: string, key: string) =>
+    db.memberReward.create({
+      data: {
+        clinicId: clinic.id,
+        memberId,
+        programId: (
+          await db.onboardingProgram.findFirstOrThrow({
+            where: { clinicId: clinic.id, status: "ACTIVO" }
+          })
+        ).id,
+        kind: MemberRewardKind.VENTAJA,
+        sourceKey: key,
+        title: "Puntos dobles en tu próxima visita",
+        detail: { perk: "doble" },
+        expiresAt: new Date("2026-12-12T10:00:00Z")
+      }
+    });
+
+  const referred = async () => {
+    await makeMember({ code: "ABCDE" });
+    const newcomer = await makeMember();
+
+    await referrals.register({ clinicId: clinic.id, referredMemberId: newcomer.id, code: "ABCDE" });
+
+    return newcomer;
+  };
+
+  const lookup = (memberId: string) => rewards.doublePoints(clinic.id, memberId);
+
+  const earnRows = (memberId: string) =>
+    db.pointsTransaction.findMany({
+      where: { memberId, kind: PointsTransactionKind.EARN }
+    });
+
+  it("C1: a visit that earns nothing leaves the perk waiting", async () => {
+    const m = await makeMember();
+    const perk = await perkFor(m.id, "m:90");
+    const out = await visits.record({
+      clinicId: clinic.id,
+      memberId: m.id,
+      kind: "PAYMENT",
+      lines: [{ category: "MFA", amountEuro: 300 }],
+      idempotencyKey: "c1-med"
+    });
+
+    expect(out).toMatchObject({ progress: 0, doubled: false });
+    expect(
+      (await db.memberReward.findUniqueOrThrow({ where: { id: perk.id } })).redeemedAt
+    ).toBeNull();
+    expect(await pay(m.id, 20, "c1-next")).toMatchObject({ progress: 40, doubled: true });
+  });
+
+  it("C3: a retried doubled visit answers doubled, with the reason", async () => {
+    const m = await makeMember();
+    await perkFor(m.id, "m:91");
+
+    const first = await pay(m.id, 20, "c3");
+    const retry = await pay(m.id, 20, "c3");
+
+    expect(first).toMatchObject({ doubled: true, doubleReason: "perk", duplicate: false });
+    expect(retry).toMatchObject({
+      doubled: true,
+      doubleReason: "perk",
+      duplicate: true,
+      progress: 40
+    });
+    expect(await earnRows(m.id)).toHaveLength(1);
+  });
+
+  it("B4: a referred client's first payment is doubled, on top of the welcome credit", async () => {
+    const newcomer = await referred();
+
+    expect(await lookup(newcomer.id)).toEqual({ applies: true, reason: "referral", until: null });
+
+    const first = await pay(newcomer.id, 20, "r1");
+
+    expect(first).toMatchObject({ progress: 40, doubled: true, doubleReason: "referral" });
+    expect(first.lifetimeAfter - first.lifetimeBefore).toBe(40);
+    // The welcome credit is untouched and is still there.
+    expect(
+      await db.pointsTransaction.count({
+        where: { memberId: newcomer.id, kind: PointsTransactionKind.REFERRAL }
+      })
+    ).toBe(1);
+
+    const rows = await earnRows(newcomer.id);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      points: 40,
+      reason: "Visita de pago (doble por recomendación)"
+    });
+
+    // Only the first one.
+    expect(await lookup(newcomer.id)).toEqual({ applies: false, reason: null, until: null });
+    expect(await pay(newcomer.id, 20, "r2")).toMatchObject({ progress: 20, doubled: false });
+  });
+
+  it("B4: a retried first visit stays doubled and does not mark a second first visit", async () => {
+    const newcomer = await referred();
+
+    await pay(newcomer.id, 20, "r-retry");
+    const retry = await pay(newcomer.id, 20, "r-retry");
+
+    expect(retry).toMatchObject({
+      duplicate: true,
+      progress: 40,
+      doubled: true,
+      doubleReason: "referral"
+    });
+    expect(await earnRows(newcomer.id)).toHaveLength(1);
+    expect(await pay(newcomer.id, 20, "r-second")).toMatchObject({ progress: 20, doubled: false });
+  });
+
+  it("B4: x2 in total when a perk is also waiting, and the perk is kept", async () => {
+    const newcomer = await referred();
+    const perk = await perkFor(newcomer.id, "m:92");
+
+    expect(await lookup(newcomer.id)).toMatchObject({ applies: true, reason: "referral" });
+
+    const first = await pay(newcomer.id, 20, "both");
+
+    expect(first).toMatchObject({ progress: 40, doubled: true, doubleReason: "referral" });
+    expect(
+      (await db.memberReward.findUniqueOrThrow({ where: { id: perk.id } })).redeemedAt
+    ).toBeNull();
+
+    // The client keeps what they earned: the perk doubles the next visit.
+    expect(await lookup(newcomer.id)).toMatchObject({
+      applies: true,
+      reason: "perk",
+      until: "2026-12-12T10:00:00.000Z"
+    });
+    expect(await pay(newcomer.id, 20, "both-2")).toMatchObject({
+      progress: 40,
+      doubled: true,
+      doubleReason: "perk"
+    });
+  });
+
+  it("B4: a first visit that earns nothing, or a prepaid session, is not the first payment", async () => {
+    const newcomer = await referred();
+
+    const med = await visits.record({
+      clinicId: clinic.id,
+      memberId: newcomer.id,
+      kind: "PAYMENT",
+      lines: [{ category: "MFA", amountEuro: 300 }],
+      idempotencyKey: "r-med"
+    });
+    const session = await visits.record({
+      clinicId: clinic.id,
+      memberId: newcomer.id,
+      kind: "BONO_SESSION",
+      package: { priceEuro: 120, sessions: 4 },
+      idempotencyKey: "r-session"
+    });
+
+    expect(med).toMatchObject({ progress: 0, doubled: false });
+    expect(session).toMatchObject({ progress: 30, doubled: false });
+    expect(await pay(newcomer.id, 20, "r-real")).toMatchObject({ progress: 40, doubled: true });
+  });
+
+  it("a 10-cent first payment earns nothing, so it is not the first payment and spends no perk", async () => {
+    const newcomer = await referred();
+    const tiny = await visits.record({
+      clinicId: clinic.id,
+      memberId: newcomer.id,
+      kind: "PAYMENT",
+      lines: [{ amountEuro: 0.1 }],
+      idempotencyKey: "tiny-1"
+    });
+
+    expect(tiny).toMatchObject({ progress: 0, doubled: false, doubleReason: null });
+    expect(await lookup(newcomer.id)).toMatchObject({ applies: true, reason: "referral" });
+    expect(await pay(newcomer.id, 20, "tiny-real")).toMatchObject({
+      progress: 40,
+      doubled: true,
+      doubleReason: "referral"
+    });
+
+    const m = await makeMember();
+    const perk = await perkFor(m.id, "m:95");
+    const out = await visits.record({
+      clinicId: clinic.id,
+      memberId: m.id,
+      kind: "PAYMENT",
+      lines: [{ amountEuro: 0.1 }],
+      idempotencyKey: "tiny-2"
+    });
+
+    expect(out).toMatchObject({ progress: 0, doubled: false });
+    expect(
+      (await db.memberReward.findUniqueOrThrow({ where: { id: perk.id } })).redeemedAt
+    ).toBeNull();
+    expect(await pay(m.id, 20, "tiny-next")).toMatchObject({ progress: 40, doubled: true });
+  });
+
+  it("each visit's answer and ledger reason match the credit applied, whatever the createdAt order", async () => {
+    const newcomer = await referred();
+    const a = await pay(newcomer.id, 20, "order-a");
+    const b = await pay(newcomer.id, 20, "order-b");
+
+    // Clock skew: the second visit now looks older than the first.
+    const first = await db.paidVisit.findUniqueOrThrow({ where: { id: a.visitId } });
+
+    await db.paidVisit.update({
+      where: { id: b.visitId },
+      data: { createdAt: new Date(first.createdAt.getTime() - 5000) }
+    });
+
+    const replayA = await pay(newcomer.id, 20, "order-a");
+    const replayB = await pay(newcomer.id, 20, "order-b");
+
+    expect(a).toMatchObject({ progress: 40, doubled: true, doubleReason: "referral" });
+    expect(b).toMatchObject({ progress: 20, doubled: false, doubleReason: null });
+    expect(replayA).toMatchObject({ duplicate: true, doubled: true, doubleReason: "referral" });
+    expect(replayB).toMatchObject({ duplicate: true, doubled: false, doubleReason: null });
+
+    const reasons = await db.pointsTransaction.findMany({
+      where: { memberId: newcomer.id, kind: PointsTransactionKind.EARN },
+      select: { sourceRef: true, reason: true }
+    });
+
+    expect(reasons.find((r) => r.sourceRef === a.visitId)?.reason).toBe(
+      "Visita de pago (doble por recomendación)"
+    );
+    expect(reasons.find((r) => r.sourceRef === b.visitId)?.reason).toBe("Visita de pago");
+  });
+
+  it("B4: a client nobody referred is never doubled by this rule", async () => {
+    const m = await makeMember();
+
+    expect(await lookup(m.id)).toEqual({ applies: false, reason: null, until: null });
+    expect(await pay(m.id, 20, "plain")).toMatchObject({ progress: 20, doubled: false });
+  });
+
+  it("C4: the lookup says when a perk lapses, and not for an expired one", async () => {
+    const m = await makeMember();
+
+    await perkFor(m.id, "m:93");
+
+    expect(await lookup(m.id)).toEqual({
+      applies: true,
+      reason: "perk",
+      until: "2026-12-12T10:00:00.000Z"
+    });
+
+    setClock("2026-12-13T10:00:00Z");
+
+    expect(await lookup(m.id)).toEqual({ applies: false, reason: null, until: null });
+  });
+
+  it("C4: the slider's extra adds nothing while a double applies, and counts otherwise", async () => {
+    const newcomer = await referred();
+    const slider = (memberId: string, key: string) =>
+      visits.record({
+        clinicId: clinic.id,
+        memberId,
+        kind: "PAYMENT",
+        lines: [{ amountEuro: 20 }],
+        bonusPoints: 200,
+        boostMultiplier: 2,
+        idempotencyKey: key
+      });
+
+    // Doubling applies: the 20 extra euros are ignored, the visit is not refused.
+    expect(await slider(newcomer.id, "s1")).toMatchObject({
+      progress: 40,
+      doubled: true,
+      bonusPoints: 0
+    });
+    // No double any more: the slider works as it always did.
+    expect(await slider(newcomer.id, "s2")).toMatchObject({ progress: 40, doubled: false });
+  });
+
+  it("C4: a typed bonus with no slider flag still stacks, as staff typed it", async () => {
+    const m = await makeMember();
+
+    await perkFor(m.id, "m:94");
+
+    const out = await visits.record({
+      clinicId: clinic.id,
+      memberId: m.id,
+      kind: "PAYMENT",
+      lines: [{ amountEuro: 20 }],
+      bonusPoints: 50,
+      idempotencyKey: "typed"
+    });
+
+    expect(out).toMatchObject({ progress: 45, doubled: true, bonusPoints: 50 });
+  });
+});
+
 describe("referrals", () => {
   it("links a new member to their referrer by code, case-insensitively", async () => {
     const referrer = await makeMember({ code: "ABCDE" });
@@ -835,6 +1173,17 @@ describe("referrals", () => {
     });
 
     expect(out).toEqual({ registered: true, referrerId: referrer.id });
+  });
+
+  it("asks for the referred client's card to catch up, so the pending x2 shows on it", async () => {
+    await makeMember({ code: "ABCDE" });
+    const newcomer = await makeMember();
+    const sync = vi.spyOn(points, "requestCardSync");
+
+    await referrals.register({ clinicId: clinic.id, referredMemberId: newcomer.id, code: "ABCDE" });
+
+    expect(sync).toHaveBeenCalledWith(newcomer.id, expect.anything());
+    sync.mockRestore();
   });
 
   it("gives the referred client their welcome progress, once", async () => {

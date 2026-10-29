@@ -707,7 +707,7 @@ describe("a centre's own staff", () => {
     });
 
     expect(r.status).toBe(404);
-    expect(r.body.message).toBe("No existe esa clienta en este centro.");
+    expect(r.body.message).toBe("No existe esa persona en este centro.");
   });
 
   it("records a prepaid package session", async () => {
@@ -745,6 +745,61 @@ describe("a centre's own staff", () => {
 
     expect(redeemed.status).toBe(200);
     expect(redeemed.body.status).toBe("canjeado");
+  });
+
+  it("C4: the rewards lookup carries doublePoints, computed where the credit is decided", async () => {
+    await goLive();
+    const referrer = await newMember();
+    const m = await newMember();
+    const path = `/clinics/${SLUG}/members/${m.id}`;
+
+    expect((await call("GET", `${path}/rewards`)).body.doublePoints).toEqual({
+      applies: false,
+      reason: null,
+      until: null
+    });
+
+    await db.referral.create({
+      data: { clinicId: clinic.id, referrerId: referrer.id, referredId: m.id }
+    });
+
+    expect((await call("GET", `${path}/rewards`)).body.doublePoints).toEqual({
+      applies: true,
+      reason: "referral",
+      until: null
+    });
+
+    // The slider's flag is accepted, ignored while the double applies, and the visit is not refused.
+    const visit = await call("POST", `${path}/visits`, {
+      kind: "PAYMENT",
+      lines: [{ amountEuro: 20 }],
+      bonusPoints: 200,
+      boostMultiplier: 2,
+      idempotencyKey: "route-slider-1"
+    });
+
+    expect(visit.status).toBe(200);
+    expect(visit.body).toMatchObject({
+      progress: 40,
+      doubled: true,
+      doubleReason: "referral",
+      bonusPoints: 0
+    });
+    expect((await call("GET", `${path}/rewards`)).body.doublePoints.applies).toBe(false);
+  });
+
+  it("rejects a slider multiplier that is not one the slider offers", async () => {
+    await goLive();
+    const m = await newMember();
+    const r = await call("POST", `/clinics/${SLUG}/members/${m.id}/visits`, {
+      kind: "PAYMENT",
+      lines: [{ amountEuro: 20 }],
+      bonusPoints: 10,
+      boostMultiplier: 7,
+      idempotencyKey: "route-slider-bad"
+    });
+
+    expect(r.status).toBe(422);
   });
 
   it("refuses a redemption with no visit named, and a repeat, with the reason", async () => {
@@ -872,8 +927,9 @@ describe("adding points by hand, at a clinic on a programme", () => {
   });
 
   it("still allows a correction, which is how a mistake gets undone", async () => {
+    // In points, the unit the screens show: 50 points is 5 euros of progress.
     const r = await post(pointsApp(true), "/members/m1/points/claw-back", {
-      points: 5,
+      points: 50,
       idempotencyKey: "key-123456",
       reason: "Error"
     });

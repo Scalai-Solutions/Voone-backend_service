@@ -52,6 +52,15 @@ export const startOfMonthIn = (timeZone: string, now: Date = new Date()): Date =
 };
 
 /**
+ * The start of the month after the current one, as a UTC instant: the exclusive end of
+ * `startOfMonthIn`. Measured with the same technique, from an instant that is surely in the
+ * next month (32 days past the 1st is the 2nd to the 5th of the following month), so a
+ * month that ends on the other side of a DST change still closes at Madrid midnight.
+ */
+export const startOfNextMonthIn = (timeZone: string, now: Date = new Date()): Date =>
+  startOfMonthIn(timeZone, new Date(startOfMonthIn(timeZone, now).getTime() + 32 * 86_400_000));
+
+/**
  * The start of the current calendar year in a given time zone, as a UTC instant.
  *
  * Needed for "3 products per year": a clinic in Madrid thinks of the year as starting at

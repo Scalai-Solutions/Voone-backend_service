@@ -1,5 +1,6 @@
 import { PointsTransactionKind, type PrismaClient } from "@prisma/client";
 
+import { POST_CHANGE_SYNC_DELAY_MS } from "../../../wallet/engine/wallet-sync.queue";
 import type { PointsService } from "../../points/points.service";
 import { activeProgramView } from "./program-tier.port";
 import { sameIdentity } from "./rules";
@@ -100,6 +101,11 @@ export class ReferralService {
         idempotencyKey: `welcome:${referred.id}`
       });
     }
+
+    // The card now says "your first visit earns double" (and, for the referrer's own card, nothing
+    // changes). The welcome credit above syncs too, but only when there is one, and before the
+    // referral is the whole story; asking again is cheap and never fails the sign-up.
+    await this.points.requestCardSync(referred.id, POST_CHANGE_SYNC_DELAY_MS);
 
     return { registered: true, referrerId: referrer.id };
   }

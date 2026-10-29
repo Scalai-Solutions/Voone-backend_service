@@ -60,6 +60,7 @@ import {
   InstallArtifact,
   ProgramTemplate
 } from "../../wallet/engine/wallet-pass-provider.interface";
+import { tierLabelFor } from "../../modules/members/member-tier";
 import { deriveRedemptionCode } from "../../wallet/engine/redemption-code";
 import { PrismaLoyaltyCardAssembler } from "../../wallet/prisma-loyalty-card.assembler";
 import {
@@ -120,7 +121,11 @@ const toMemberSummary = (member: Awaited<ReturnType<typeof findMemberForSummary>
       : member.pointsBalance,
   moneySpent: 0,
   lastVisitedAt: null,
-  tier: member.tier ?? "Nuevo",
+  tier: tierLabelFor(
+    member.tier,
+    member.clinic.template?.tierRewards,
+    member.clinic.onboardingPrograms.length > 0
+  ),
   walletStatus: member.walletObjects.reduce(
     (statuses, walletObject) => ({
       ...statuses,
@@ -313,7 +318,12 @@ const issueWalletPasses = async (memberId: string) => {
 
   const code = deriveRedemptionCode(member.id, config.CARD_REDEMPTION_SECRET);
   const registry = buildWalletRegistry(prisma);
-  const assembler = new PrismaLoyaltyCardAssembler(prisma, config.CARD_REDEMPTION_SECRET);
+  const assembler = new PrismaLoyaltyCardAssembler(
+    prisma,
+    config.CARD_REDEMPTION_SECRET,
+    undefined,
+    config.FRONTEND_URL
+  );
   const card = await assembler.assemble(member.id);
   const program = toProgramTemplate(card, template.id);
   const passes = {
@@ -692,7 +702,12 @@ membersRouter.get(
       return;
     }
 
-    const assembler = new PrismaLoyaltyCardAssembler(prisma, config.CARD_REDEMPTION_SECRET);
+    const assembler = new PrismaLoyaltyCardAssembler(
+      prisma,
+      config.CARD_REDEMPTION_SECRET,
+      undefined,
+      config.FRONTEND_URL
+    );
     const card = await assembler.assemble(member.id);
     const programRef = await provider.provisionProgram(
       toProgramTemplate(card, member.clinic.template.id)

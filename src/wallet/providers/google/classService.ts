@@ -363,9 +363,15 @@ export const PRODUCTION_DETAILS_TEMPLATE_FIELD_PATHS = [
   "object.textModulesData['member_id']",
   "object.textModulesData['member_since']",
   "object.textModulesData['rewards']",
+  // Per member: a pending x2 (a waiting perk, or a referred member's first visit). Absent from the
+  // object when nothing is pending, where the item simply does not render.
+  "object.textModulesData['boost']",
   // Per member: the benefits of their current tier, for a clinic whose programme owns them.
   // Absent from the object of any other clinic, where the item simply does not render.
   "object.textModulesData['tierbenefits']",
+  // Per member: the code and sign-up link to recommend the clinic. Absent from the object when
+  // the card has no share link, where the item simply does not render.
+  "object.textModulesData['referral']",
   "class.textModulesData['benefits']",
   "object.accountName",
   "object.accountId",
