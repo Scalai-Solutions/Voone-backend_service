@@ -707,7 +707,7 @@ describe("a centre's own staff", () => {
     });
 
     expect(r.status).toBe(404);
-    expect(r.body.message).toBe("No existe esa clienta en este centro.");
+    expect(r.body.message).toBe("No existe esa persona en este centro.");
   });
 
   it("records a prepaid package session", async () => {

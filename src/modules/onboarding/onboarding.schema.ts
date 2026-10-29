@@ -160,7 +160,7 @@ export const visitSchema = z.discriminatedUnion("kind", [
       idempotencyKey: key
     })
     .refine((body) => Boolean(body.planId || body.memberBonoId || body.package), {
-      message: "Indica el bono: elige un plan o un bono de la clienta, o su precio y sesiones."
+      message: "Indica el bono: elige un plan o un bono del cliente, o su precio y sesiones."
     })
 ]);
 

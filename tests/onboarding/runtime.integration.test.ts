@@ -256,7 +256,10 @@ describe("recording a visit", () => {
     const b = await makeMember();
 
     await pay(a.id, 65, "shared");
-    await expect(pay(b.id, 65, "shared")).rejects.toMatchObject({ statusCode: 409 });
+    await expect(pay(b.id, 65, "shared")).rejects.toMatchObject({
+      statusCode: 409,
+      message: "Esa clave de operación ya se usó para otra persona."
+    });
   });
 
   it("issues EVERY milestone a big purchase crosses", async () => {
@@ -776,7 +779,10 @@ describe("redeeming", () => {
 
     await expect(
       rewards.redeem({ clinicId: clinic.id, rewardId: reward.id, visitId: otherVisit.visitId })
-    ).rejects.toMatchObject({ statusCode: 409, message: expect.stringMatching(/no corresponde/) });
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      message: "Esa visita no corresponde a este cliente."
+    });
   });
 
   it("refuses a second redemption", async () => {

@@ -552,7 +552,7 @@ system does not do. Up to 6 per tier, 80 characters each.
 ### G4. Questions and referral copy (G 24, 25, 29, 30)
 
 - **Referral copy (G 29).** The feedback says the referred person gets ×1.5 points on her first
-  treatment. The engine does something different: she starts with a **welcome amount already
+  treatment. (Superseded by the ×2 rule in G6, 2026-10-29.) The engine does something different: she starts with a **welcome amount already
   earned** (half the first milestone), and the referrer's reward is unlocked by her first paid
   treatment. The copy now states what the engine does. **Question for Sergio:** is ×1.5 the intended
   rule? If so it is a rule change, and the reference fixtures pin the current behaviour.
@@ -577,6 +577,28 @@ system does not do. Up to 6 per tier, 80 characters each.
   and flagged. This supersedes the "Question for Sergio" in G5.
 - **Referral (G 29): keep the engine's rule.** The referred person starts with a welcome amount
   already earned; no ×1.5. The copy already says this.
+  **Update 2026-10-29: this is reversed.** The product owner decided that a referred client earns
+  ×2 on their FIRST payment visit, on top of the welcome credit (not ×1.5, and not instead of the
+  welcome). The rules, as implemented (`runtime/double-points.ts`, the one place that decides):
+  - "First payment visit" means the first PAYMENT visit that earns progress (earning cents > 0). A
+    medicine-only basket, a prepaid-package session and a visit that earns nothing are not it, so
+    the ×2 waits for the next real payment.
+  - ×2 in total, never ×4: if a double-points perk is also waiting at that visit the visit is
+    still ×2, the REFERRAL is what doubles it, and the perk is NOT consumed. The client keeps what
+    they earned; the perk doubles their next payment.
+  - Idempotent: a retried visit answers the same (`doubled: true`, `doubleReason: "referral"`) and
+    is not a second "first visit". The ledger row reads "Visita de pago (doble por recomendación)".
+  - A double-points perk is no longer spent by a visit that earns 0 progress (it stays waiting),
+    and a retried perk-doubled visit answers `doubled: true, doubleReason: "perk"`.
+  - Reception's manual ×2/×3/×5/×10 slider adds nothing while a ×2 applies. The backend cannot see
+    the slider, so `GET /clinics/:slug/members/:memberId/rewards` also returns
+    `doublePoints: { applies, reason: "perk" | "referral" | null, until: ISO | null }`, decided by
+    the very code that credits the visit, and a visit request may carry `boostMultiplier`
+    (2, 3, 5 or 10) to flag that its `bonusPoints` are the slider's extra: it is then ignored
+    while a ×2 applies (the visit is not refused). A typed bonus without the flag still adds.
+  - The client sees it: the wallet card carries `boost` ("PUNTOS DOBLES" back field on Apple, a
+    `boost` text module on Google) and the member's own code and sign-up link (`referral`,
+    "RECOMIENDA"; `<FRONTEND_URL>/alta/<slug>?ref=<code>`).
 - **Legal text (C): Sergio does not know where to get it.** Needs a Spanish data-protection lawyer
   or the centres' gestoría; the pages stay marked provisional.
 - **Money spent (B 48): products count.** They already do: retail earns progress like a

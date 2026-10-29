@@ -349,7 +349,7 @@ const REFUSALS: Record<RedemptionRefusal, string> = {
   caducado: "Este premio ha caducado: se puede usar durante 60 días desde que se consigue.",
   sin_visita_de_pago:
     "Solo se puede canjear en una visita con un pago o con una sesión de un bono ya pagado.",
-  visita_ajena: "Esa visita no corresponde a esta clienta.",
+  visita_ajena: "Esa visita no corresponde a este cliente.",
   visita_de_otro_dia: "Esa visita no es de hoy. Registra el pago de esta visita para canjear."
 };
 

@@ -172,7 +172,7 @@ export class VisitService {
       select: { id: true }
     });
 
-    if (!member) throw new OnboardingError("No existe esa clienta en este centro.", 404);
+    if (!member) throw new OnboardingError("No existe esa persona en este centro.", 404);
 
     const existing = await this.prisma.paidVisit.findUnique({
       where: {
@@ -183,7 +183,7 @@ export class VisitService {
     if (existing && existing.memberId !== input.memberId) {
       // The key is the whole idempotency guarantee. Reusing one for a different person would
       // either credit the wrong client or silently drop a real payment.
-      throw new OnboardingError("Esa clave de operación ya se usó para otra clienta.", 409);
+      throw new OnboardingError("Esa clave de operación ya se usó para otra persona.", 409);
     }
 
     const opened = existing

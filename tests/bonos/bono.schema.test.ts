@@ -83,6 +83,9 @@ describe("visitSchema BONO_SESSION", () => {
     expect(parsed.success).toBe(false);
     if (!parsed.success) {
       expect(parsed.error.issues[0].message).toContain("Indica el bono");
+      // Read at reception for any client: not feminine-only.
+      expect(parsed.error.issues[0].message).not.toMatch(/clienta/i);
+      expect(parsed.error.issues[0].message).toContain("un bono del cliente");
     }
   });
 
