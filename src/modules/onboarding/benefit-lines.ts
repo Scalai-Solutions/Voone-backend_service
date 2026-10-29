@@ -107,6 +107,13 @@ export const benefitLinesFor = (key: TierCode, program: Program): PresentedBenef
   return [...generated, ...custom];
 };
 
+/** The refusal for any change that would leave a tier with nothing to show. */
+export const NO_VISIBLE_LINE = "Cada nivel debe mostrar al menos un beneficio.";
+
+/** How many lines of the tier a client would read, generated and added ones together. */
+export const visibleLineCount = (key: TierCode, program: Program): number =>
+  benefitLinesFor(key, program).filter((l) => !l.hidden).length;
+
 /** What a client reads: the visible lines' words, in order. */
 export const visibleBenefits = (lines: PresentedBenefitLine[]): string[] =>
   lines.filter((l) => !l.hidden).map((l) => l.text);
@@ -141,7 +148,11 @@ export const applyBenefitOverrides = (
 
   const lines = new Map(generatedLines(tier, program).map((line) => [line.key, line]));
   const seen = new Set<string>();
-  const next: Record<string, BenefitOverride> = { ...(program.benefitOverrides?.[tier] ?? {}) };
+  // Overrides saved against a line this programme no longer generates could never be cleared
+  // (an entry for an unknown key is refused), so they are dropped whenever the tier is changed.
+  const next: Record<string, BenefitOverride> = Object.fromEntries(
+    Object.entries(program.benefitOverrides?.[tier] ?? {}).filter(([key]) => lines.has(key))
+  );
 
   for (const entry of entries) {
     if (entry.key.startsWith("custom:")) {
@@ -178,6 +189,11 @@ export const applyBenefitOverrides = (
 
   if (Object.keys(overrides).length === 0) delete result.benefitOverrides;
   else result.benefitOverrides = overrides;
+
+  // A tier with no visible line makes the wallets disagree (Apple falls back to the template's
+  // hand-typed text, Google shows nothing), so it is never stored. A request that leaves the
+  // tier no better off than it was is judged the same: only showing a line again gets through.
+  if (visibleLineCount(tier, result) === 0) return fail(NO_VISIBLE_LINE);
 
   return { ok: true, program: result };
 };

@@ -8,7 +8,12 @@ import {
 
 import { AppError } from "../../common/errors/app-error";
 import { refreshClinicCards } from "../wallet-refresh/clinic-card-refresh";
-import { applyBenefitOverrides, type BenefitOverrideEntry } from "./benefit-lines";
+import {
+  NO_VISIBLE_LINE,
+  applyBenefitOverrides,
+  visibleLineCount,
+  type BenefitOverrideEntry
+} from "./benefit-lines";
 import { toEngineCatalog, type CatalogRepository } from "./catalog.repository";
 import { run } from "./engine";
 import {
@@ -336,6 +341,10 @@ export class OnboardingService {
       ...output,
       customBenefits: { ...(output.customBenefits ?? {}), [tier]: benefits }
     };
+
+    // Removing the last line the centre wrote while every generated one is hidden would leave the
+    // tier with nothing to show: see NO_VISIBLE_LINE.
+    if (visibleLineCount(tier, next) === 0) throw new OnboardingError(NO_VISIBLE_LINE, 422);
 
     const updated = await this.prisma.onboardingProgram.updateMany({
       where: { id: row.id, updatedAt: row.updatedAt },

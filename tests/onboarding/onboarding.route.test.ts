@@ -89,13 +89,16 @@ const call = async (method: string, path: string, body?: unknown): Promise<Reply
     const port = typeof address === "object" && address ? address.port : 0;
     const response = await fetch(`http://127.0.0.1:${port}/api/v1${path}`, {
       method,
-      headers: { "content-type": "application/json" },
+      // One server per call: a pooled keep-alive socket would outlive its server, and the next
+      // call (new server, sometimes the same port) could reuse it and fail with "fetch failed".
+      headers: { "content-type": "application/json", connection: "close" },
       body: body === undefined ? undefined : JSON.stringify(body)
     });
     const text = await response.text();
 
     return { status: response.status, body: text ? JSON.parse(text) : null };
   } finally {
+    server.closeAllConnections();
     server.close();
   }
 };
@@ -1195,7 +1198,7 @@ describe("display-only overrides of a tier's generated lines", () => {
     expect(unknown.body.message ?? unknown.body.error).toMatch(/no existe en este nivel/);
     expect((await put("oro", { overrides: [{ key: "custom:0", text: "X" }] })).status).toBe(422);
     expect((await put("oro", { overrides: [{ key: "mult", text: " " }] })).status).toBe(422);
-    expect((await put("oro", { overrides: [{ key: "mult", text: "x".repeat(81) }] })).status).toBe(
+    expect((await put("oro", { overrides: [{ key: "mult", text: "x".repeat(121) }] })).status).toBe(
       422
     );
     expect((await put("oro", { overrides: [] })).status).toBe(422);
@@ -1247,6 +1250,37 @@ describe("display-only overrides of a tier's generated lines", () => {
 
     expect(r.status).toBe(409);
     expect(r.body.message ?? r.body.error).toMatch(/borrador/);
+  });
+
+  it("never leaves a tier with no visible line, whether hidden or removed", async () => {
+    const id = await draftId();
+    const bronce = tierOf((await call("GET", admin(`/programs/${id}`))).body, "bronce");
+    const hideAll = bronce.benefitLines.map((l) => ({ key: l.key, hidden: true }));
+    const refused = await call("PUT", overridesPath(id, "bronce"), { overrides: hideAll });
+
+    expect(refused.status).toBe(422);
+    expect(refused.body.message ?? refused.body.error).toBe(
+      "Cada nivel debe mostrar al menos un beneficio."
+    );
+
+    // With a line of its own the centre may hide every generated one...
+    await call("PUT", admin(`/programs/${id}/tiers/bronce/benefits`), { benefits: ["Café"] });
+    expect((await call("PUT", overridesPath(id, "bronce"), { overrides: hideAll })).status).toBe(
+      200
+    );
+
+    // ...but then it cannot remove that last line.
+    const removal = await call("PUT", admin(`/programs/${id}/tiers/bronce/benefits`), {
+      benefits: []
+    });
+
+    expect(removal.status).toBe(422);
+    expect(removal.body.message ?? removal.body.error).toBe(
+      "Cada nivel debe mostrar al menos un beneficio."
+    );
+    expect(
+      tierOf((await call("GET", admin(`/programs/${id}`))).body, "bronce").customBenefits
+    ).toEqual(["Café"]);
   });
 
   it("carries the overrides through publishing, to the centre's own view of the programme", async () => {

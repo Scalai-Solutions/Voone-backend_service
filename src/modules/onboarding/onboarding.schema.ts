@@ -257,10 +257,21 @@ export const textsSchema = z
   );
 
 /**
+ * Characters that show nothing or change how the text around them reads: zero-width and
+ * direction marks (U+200B-200F), bidi embeddings and overrides (U+202A-202E, U+2066-2069), the
+ * word joiner (U+2060) and the byte-order mark (U+FEFF). A line a member reads on her pass could
+ * otherwise say one thing and display another, or look blank.
+ */
+const INVISIBLE = /[\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/;
+
+/** The longest an overridden line may be: the longest line a card carries (TIER_BENEFIT_LINE_MAX). */
+export const MAX_OVERRIDE_TEXT = 120;
+
+/**
  * Display-only changes to the lines the engine generates for a tier. Each entry replaces that
  * line's override as a whole: a `null` or absent `text` clears the edit, a `null`, `false` or
  * absent `hidden` shows the line, and an entry with neither clears the override. The text has the
- * limits of a line the centre adds itself (80, trimmed, no control characters).
+ * limits of a line the centre adds itself (trimmed, no control or invisible characters), up to 120 so a generated line can be reworded at its own length.
  */
 export const benefitOverridesSchema = z.object({
   overrides: z
@@ -271,7 +282,11 @@ export const benefitOverridesSchema = z.object({
           .trim()
           .min(1, "key: indica el beneficio")
           .max(64, "key: indica el beneficio"),
-        text: text(80, "El texto del beneficio").nullish(),
+        text: text(MAX_OVERRIDE_TEXT, "El texto del beneficio")
+          .refine((value) => !INVISIBLE.test(value), {
+            message: "El texto del beneficio: contiene caracteres no permitidos"
+          })
+          .nullish(),
         hidden: z.boolean({ message: "hidden: tiene que ser verdadero o falso" }).nullish()
       })
     )

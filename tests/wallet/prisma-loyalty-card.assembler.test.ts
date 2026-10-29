@@ -700,7 +700,7 @@ describe("PrismaLoyaltyCardAssembler: the member's tier benefits", () => {
     expect(loyaltyCardSchema.safeParse(card).success).toBe(true);
   });
 
-  it("falls back to the template's text when every line of the tier is hidden", async () => {
+  it("has no tier benefits for a stored programme that leaves the tier no visible line (the API refuses to store one), so Apple shows the template text and Google nothing", async () => {
     const hideAll = {
       ...output,
       benefitOverrides: {
@@ -714,6 +714,9 @@ describe("PrismaLoyaltyCardAssembler: the member's tier benefits", () => {
     const card = await assemblerFor(memberOf("Bronce", hideAll)).assemble(member.id);
 
     expect(card.tierBenefits).toBeUndefined();
+    // The one field both wallets read: undefined, so Apple's back field falls back to the
+    // template's benefits text and Google's per-member module is removed.
+    expect(tierBenefitsText(card)).toBeUndefined();
   });
 
   it("gives a member of another tier that tier's benefits, not Plata's", async () => {

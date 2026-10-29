@@ -4,7 +4,7 @@ import { run } from "../../src/modules/onboarding/engine";
 import { TIERS } from "../../src/modules/onboarding/engine.config";
 import type { Answers, CatalogItem, Program } from "../../src/modules/onboarding/engine.types";
 import { isEngineError } from "../../src/modules/onboarding/engine.types";
-import { applyBenefitOverrides } from "../../src/modules/onboarding/benefit-lines";
+import { NO_VISIBLE_LINE, applyBenefitOverrides } from "../../src/modules/onboarding/benefit-lines";
 import { benefitOverridesSchema } from "../../src/modules/onboarding/onboarding.schema";
 import { presentProgram } from "../../src/modules/onboarding/presentation";
 import catalog from "./reference/sapphira.catalogo.json";
@@ -281,10 +281,110 @@ describe("benefitOverridesSchema", () => {
 
     expect(parsed.success && parsed.data.overrides[0].text).toBe("Más");
     expect(parse({ overrides: [{ key: "mult", text: "   " }] }).success).toBe(false);
-    expect(parse({ overrides: [{ key: "mult", text: "x".repeat(81) }] }).success).toBe(false);
+    expect(parse({ overrides: [{ key: "mult", text: "x".repeat(121) }] }).success).toBe(false);
     expect(parse({ overrides: [{ key: "mult", text: "a\nb" }] }).success).toBe(false);
+    expect(parse({ overrides: [{ key: "mult", text: "x".repeat(120) }] }).success).toBe(true);
     expect(parse({ overrides: [] }).success).toBe(false);
     expect(parse({}).success).toBe(false);
     expect(parse({ overrides: [{ text: "sin clave" }] }).success).toBe(false);
+  });
+
+  it("refuses invisible and direction-changing characters in the text", () => {
+    for (const ch of [
+      "\u200b",
+      "\u200e",
+      "\u200f",
+      "\u202a",
+      "\u202e",
+      "\u2060",
+      "\u2066",
+      "\u2069",
+      "\ufeff"
+    ]) {
+      expect(parse({ overrides: [{ key: "mult", text: `Más${ch}progreso` }] }).success).toBe(false);
+      // String.prototype.trim already removes a BOM at either end, so only the middle counts.
+      if (ch !== "\ufeff") {
+        expect(parse({ overrides: [{ key: "mult", text: `${ch}Más` }] }).success).toBe(false);
+      }
+    }
+
+    expect(parse({ overrides: [{ key: "mult", text: "Más ×1,1 de progreso ✨" }] }).success).toBe(
+      true
+    );
+  });
+});
+
+describe("a tier always shows at least one line", () => {
+  const hideAll = (tier: (typeof TIERS)[number], program: Program) =>
+    presentProgram(program)
+      .tiers.find((t) => t.key === tier)!
+      .benefitLines.filter((l) => l.kind === "generated")
+      .map((l) => ({ key: l.key, hidden: true as const }));
+
+  it("refuses a request that would hide every line of a tier, and stores nothing", () => {
+    const p = fresh();
+    const result = applyBenefitOverrides(p, "bronce", hideAll("bronce", p));
+
+    expect(result).toEqual({ ok: false, reason: NO_VISIBLE_LINE });
+    expect(NO_VISIBLE_LINE).toBe("Cada nivel debe mostrar al menos un beneficio.");
+  });
+
+  it("allows hiding all but one, and everything when the centre wrote a line of its own", () => {
+    const p = fresh();
+    const [, ...rest] = hideAll("oro", p);
+
+    expect(applyBenefitOverrides(p, "oro", rest).ok).toBe(true);
+
+    const withCustom = { ...p, customBenefits: { oro: ["Café"] } };
+
+    expect(applyBenefitOverrides(withCustom, "oro", hideAll("oro", p)).ok).toBe(true);
+  });
+
+  it("counts lines hidden by an earlier request", () => {
+    const p = fresh();
+    const [first, second] = hideAll("bronce", p);
+    const once = ok(p, "bronce", [first]);
+
+    expect(applyBenefitOverrides(once, "bronce", [second])).toEqual({
+      ok: false,
+      reason: NO_VISIBLE_LINE
+    });
+  });
+
+  it("lets a request that shows a line again through, even for a tier already left empty", () => {
+    const p = fresh();
+    const empty: Program = {
+      ...p,
+      benefitOverrides: {
+        bronce: Object.fromEntries(hideAll("bronce", p).map((e) => [e.key, { hidden: true }]))
+      }
+    };
+
+    expect(applyBenefitOverrides(empty, "bronce", [{ key: "card", hidden: null }]).ok).toBe(true);
+  });
+});
+
+describe("overrides saved against a line that no longer exists", () => {
+  it("are dropped when the tier's overrides are next applied, so they cannot linger", () => {
+    const p: Program = {
+      ...fresh(),
+      benefitOverrides: { oro: { gone: { hidden: true }, mult: { text: "Más" } } }
+    };
+    const next = ok(p, "oro", [{ key: "tests", hidden: true }]);
+
+    expect(next.benefitOverrides?.oro).toEqual({
+      mult: { text: "Más" },
+      tests: { hidden: true }
+    });
+  });
+
+  it("leave nothing behind when the only override left is cleared", () => {
+    const p: Program = {
+      ...fresh(),
+      benefitOverrides: { oro: { gone: { hidden: true }, mult: { text: "Más" } } }
+    };
+    const next = ok(p, "oro", [{ key: "mult" }]);
+
+    expect(next.benefitOverrides).toBeUndefined();
   });
 });
