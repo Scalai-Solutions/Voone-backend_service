@@ -1,3 +1,4 @@
+import { TIERS, TIER_NAMES } from "../onboarding/engine.config";
 import { normaliseScale } from "../points/tier-engine";
 import { tierRewardsSchema } from "../templates/templates.schema";
 
@@ -25,10 +26,22 @@ export const baseTierFromTemplate = (tierRewards: unknown): string => {
   }
 };
 
+/** The lowest rung of every programme ladder (Bronce), which does not depend on the centre. */
+const PROGRAMME_FIRST_TIER = TIER_NAMES[TIERS[0]];
+
 /**
- * The tier a screen shows for a member: the one she holds, else the template's lowest, else
- * "Nuevo". The single place that decides, so the members list and detail, the scan/pass
- * lookup and the admin list cannot disagree about a member who has no tier yet.
+ * The tier a staff surface shows for a member (members list and detail, scan/pass lookup, admin
+ * list). The single place that decides, so they cannot disagree about a member with no tier.
+ *
+ * FINAL RULE: the tier she holds; if none, at a centre with a live programme the programme's
+ * FIRST rung ("Bronce"), at any other centre the template's lowest tier; if there is no usable
+ * scale, "Nuevo". The wallet card is separate on purpose: it shows no tier for a tierless member.
  */
-export const tierLabelFor = (tier: string | null, templateTierRewards: unknown): string =>
-  tier || baseTierFromTemplate(templateTierRewards) || NEW_MEMBER_TIER;
+export const tierLabelFor = (
+  tier: string | null,
+  templateTierRewards: unknown,
+  programmeCentre = false
+): string =>
+  tier ||
+  (programmeCentre ? PROGRAMME_FIRST_TIER : baseTierFromTemplate(templateTierRewards)) ||
+  NEW_MEMBER_TIER;

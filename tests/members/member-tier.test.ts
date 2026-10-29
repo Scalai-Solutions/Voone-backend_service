@@ -27,4 +27,14 @@ describe("tierLabelFor", () => {
     expect(tierLabelFor(null, "not a scale")).toBe(NEW_MEMBER_TIER);
     expect(NEW_MEMBER_TIER).toBe("Nuevo");
   });
+
+  it("at a programme centre falls back to the programme's first rung, not the template's old scale", () => {
+    expect(tierLabelFor(null, scale, true)).toBe("Bronce");
+    expect(tierLabelFor(null, [], true)).toBe("Bronce");
+    expect(tierLabelFor("Oro", scale, true)).toBe("Oro");
+  });
+
+  it("keeps the template fallback at a centre without a programme", () => {
+    expect(tierLabelFor(null, scale, false)).toBe("Bronze");
+  });
 });

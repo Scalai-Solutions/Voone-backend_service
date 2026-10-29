@@ -249,7 +249,11 @@ const toAdminMemberSummary = (
     : member.pointsBalance,
   moneySpent: 0,
   lastVisitedAt: null,
-  tier: tierLabelFor(member.tier, member.clinic.template?.tierRewards),
+  tier: tierLabelFor(
+    member.tier,
+    member.clinic.template?.tierRewards,
+    programmeCentres.has(member.clinicId)
+  ),
   walletStatus: member.walletObjects.reduce(
     (statuses, walletObject) => ({
       ...statuses,

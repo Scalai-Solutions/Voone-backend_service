@@ -121,7 +121,11 @@ const toMemberSummary = (member: Awaited<ReturnType<typeof findMemberForSummary>
       : member.pointsBalance,
   moneySpent: 0,
   lastVisitedAt: null,
-  tier: tierLabelFor(member.tier, member.clinic.template?.tierRewards),
+  tier: tierLabelFor(
+    member.tier,
+    member.clinic.template?.tierRewards,
+    member.clinic.onboardingPrograms.length > 0
+  ),
   walletStatus: member.walletObjects.reduce(
     (statuses, walletObject) => ({
       ...statuses,
