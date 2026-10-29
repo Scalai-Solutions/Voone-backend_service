@@ -14,6 +14,7 @@ import {
 import { PointsService } from "../../src/modules/points/points.service";
 import { PrismaCatalogRepository } from "../../src/modules/onboarding/catalog.repository";
 import type { Answers, CatalogItem } from "../../src/modules/onboarding/engine.types";
+import { toPoints } from "../../src/modules/onboarding/runtime/points-unit";
 import { OnboardingService } from "../../src/modules/onboarding/onboarding.service";
 import { PrismaProgramTierPort } from "../../src/modules/onboarding/runtime/program-tier.port";
 import { programView } from "../../src/modules/onboarding/runtime/program-view";
@@ -316,6 +317,42 @@ describe("recording a visit", () => {
     });
 
     await expect(pay(other.id, 60, "x")).rejects.toMatchObject({ statusCode: 404 });
+  });
+});
+
+describe("the visit result's balance", () => {
+  it("states the SPENDABLE balance, as the card does, with lifetime kept apart", async () => {
+    const m = await makeMember();
+
+    await seed(m.id, 100);
+    // Spent 30 progress euros (a legacy redemption, say): spendable 70, lifetime still 100.
+    await points.redeem({
+      memberId: m.id,
+      clinicId: clinic.id,
+      points: 30,
+      idempotencyKey: `redeem-${m.id}`
+    });
+
+    const out = await pay(m.id, 20, "spendable-1");
+    const row = await memberRow(m.id);
+
+    expect(row.pointsBalance).toBe(90);
+    expect(out.pointsTotal).toBe(900); // spendable 90 euros, in points
+    expect(out.pointsTotal).toBe(toPoints(row.pointsBalance));
+    expect(out.lifetimePoints).toBe(1200); // lifetime 120 euros, in points
+    expect(out.lifetimeAfter).toBe(120);
+  });
+
+  it("answers a retried visit with the current spendable balance", async () => {
+    const m = await makeMember();
+
+    await pay(m.id, 20, "spendable-retry");
+    await pay(m.id, 10, "spendable-later");
+
+    const retry = await pay(m.id, 20, "spendable-retry");
+
+    expect(retry.duplicate).toBe(true);
+    expect(retry.pointsTotal).toBe(300);
   });
 });
 

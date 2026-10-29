@@ -104,8 +104,13 @@ export interface VisitOutcome {
   progress: number;
   /** The same progress as the client sees it: ten points per euro. */
   points: number;
-  /** Total progress after this visit, in points. */
+  /**
+   * The member's SPENDABLE balance now, in points: the number her card shows. Not the lifetime
+   * total (see lifetimePoints), which only drives the tier and diverges once anything was spent.
+   */
   pointsTotal: number;
+  /** Lifetime progress after this visit, in points. Internal to tiers; the card does not show it. */
+  lifetimePoints: number;
   doubled: boolean;
   lifetimeBefore: number;
   lifetimeAfter: number;
@@ -222,6 +227,14 @@ export class VisitService {
       await this.countReferral(visit, active.id, active.view);
     }
 
+    // The card's number: the cached spendable balance, read after the credit above settled it.
+    // Read here rather than taken from the visit, so a retry of an old visit answers with what
+    // the card shows now.
+    const balance = await this.prisma.member.findUnique({
+      where: { id: input.memberId },
+      select: { pointsBalance: true }
+    });
+
     const window = discountWindowStart(this.now());
     const used = await this.prisma.paidVisit.aggregate({
       where: { memberId: input.memberId, occurredAt: { gte: window } },
@@ -237,7 +250,8 @@ export class VisitService {
       duplicate: !opened.created,
       progress,
       points: toPoints(progress),
-      pointsTotal: toPoints(after),
+      pointsTotal: toPoints(balance?.pointsBalance ?? 0),
+      lifetimePoints: toPoints(after),
       doubled: Boolean(opened.doubled),
       lifetimeBefore: before,
       lifetimeAfter: after,
