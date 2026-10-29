@@ -506,6 +506,7 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
               ...(body.startAtSession !== undefined ? { startAtSession: body.startAtSession } : {})
             }),
         ...(body.bonusPoints !== undefined ? { bonusPoints: body.bonusPoints } : {}),
+        ...(body.boostMultiplier !== undefined ? { boostMultiplier: body.boostMultiplier } : {}),
         idempotencyKey: body.idempotencyKey
       });
 
@@ -521,7 +522,14 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
     asyncHandler(async (req, res) => {
       const clinic = await deps.findClinic(req.params.slug);
 
-      res.json({ rewards: await requireRewards().listForMember(clinic.id, req.params.memberId) });
+      const rewards = requireRewards();
+
+      // `doublePoints` comes from the code that decides the doubling at the visit, so what the
+      // screen previews is what the credit will do.
+      res.json({
+        rewards: await rewards.listForMember(clinic.id, req.params.memberId),
+        doublePoints: await rewards.doublePoints(clinic.id, req.params.memberId)
+      });
     })
   );
 
