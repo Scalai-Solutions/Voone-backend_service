@@ -61,6 +61,11 @@ export interface LoyaltyTierBenefitsInput {
   text: string;
 }
 
+/** The text of a per-member module that exists only while it has something to say. */
+export interface LoyaltyOptionalModuleInput {
+  text: string;
+}
+
 export interface LoyaltyObjectInput {
   objectId: string;
   classId: string;
@@ -76,6 +81,8 @@ export interface LoyaltyObjectInput {
   rewards?: LoyaltyRewardsInput;
   /** Absent for a clinic with no live programme: the object then carries no such module. */
   tierBenefits?: LoyaltyTierBenefitsInput;
+  /** Absent when no x2 is pending: the object then carries no `boost` module. */
+  boost?: LoyaltyOptionalModuleInput;
 }
 
 export type LoyaltyObjectPatch = Partial<
@@ -83,5 +90,7 @@ export type LoyaltyObjectPatch = Partial<
 > & {
   /** The module's text; `null` REMOVES a stale module (a card with no tier benefits). */
   tierBenefits?: LoyaltyTierBenefitsInput | null;
+  /** The module's text; `null` REMOVES a stale module (nothing pending any more). */
+  boost?: LoyaltyOptionalModuleInput | null;
   notify?: boolean;
 };

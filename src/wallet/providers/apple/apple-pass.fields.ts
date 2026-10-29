@@ -1,3 +1,4 @@
+import { boostText } from "../../engine/boost-text";
 import { LoyaltyCard } from "../../engine/loyalty-card";
 import { availableRewardCount, availableRewardsText } from "../../engine/rewards-text";
 import { tierBenefitsText } from "../../engine/tier-benefits-text";
@@ -131,6 +132,14 @@ export const buildStoreCardFields = (data: LoyaltyCard): StoreCardFields => {
       label: PASS_LABELS.availableRewards,
       value: rewardsText
     });
+  }
+
+  // A pending x2, right after the rewards: it is the next thing the member can act on. No
+  // changeMessage: appearing and disappearing must not buzz the phone.
+  const boost = boostText(data);
+
+  if (boost !== undefined) {
+    backFields.push({ key: "boost", label: PASS_LABELS.boost, value: boost });
   }
 
   const tierText = tierBenefitsText(data);

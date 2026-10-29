@@ -9,6 +9,7 @@ import { isEngineError } from "../../src/modules/onboarding/engine.types";
 import catalogFixture from "../onboarding/reference/sapphira.catalogo.json";
 import { presentProgram } from "../../src/modules/onboarding/presentation";
 import { loyaltyCardSchema } from "../../src/wallet/engine/loyalty-card";
+import { aureaGoldPass } from "../fixtures/loyalty-card.fixture";
 import { tierBenefitsText } from "../../src/wallet/engine/tier-benefits-text";
 import { PrismaLoyaltyCardAssembler } from "../../src/wallet/prisma-loyalty-card.assembler";
 
@@ -744,5 +745,133 @@ describe("PrismaLoyaltyCardAssembler: the member's tier benefits", () => {
     ).assemble(member.id);
 
     expect(findUnique).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("PrismaLoyaltyCardAssembler: the pending boost (x2)", () => {
+  const NOW = new Date("2026-10-27T10:00:00Z");
+  const programOutput = (() => {
+    const result = run(catalogFixture as CatalogItem[], {
+      ticket: null,
+      freq: null,
+      objective: "equilibrado",
+      investment: "equilibrado",
+      occupancy: "o2",
+      members: "m3"
+    });
+
+    if (isEngineError(result)) throw new Error(result.error);
+
+    return result;
+  })();
+
+  const perk = (expiresAt: string, extra: Record<string, unknown> = {}) => ({
+    title: "Puntos dobles en tu próxima visita",
+    kind: "VENTAJA",
+    detail: { perk: "doble" },
+    issuedAt: new Date("2026-09-01T09:00:00Z"),
+    expiresAt: new Date(expiresAt),
+    ...extra
+  });
+
+  const programmeMember = (extra: Record<string, unknown> = {}) => ({
+    ...member,
+    tier: "Bronce",
+    lifetimePoints: 175,
+    clinic: { ...member.clinic, onboardingPrograms: [{ output: programOutput }] },
+    rewards: [],
+    referredBy: null,
+    paidVisits: [],
+    ...extra
+  });
+
+  const build = (value: unknown) =>
+    new PrismaLoyaltyCardAssembler(
+      { member: { findUnique: vi.fn(async () => value) } } as unknown as PrismaClient,
+      SECRET,
+      () => NOW
+    ).assemble(member.id);
+
+  it("shows a waiting x2 perk with the date it lapses", async () => {
+    const card = await build(programmeMember({ rewards: [perk("2026-11-30T10:00:00Z")] }));
+
+    expect(card.boost).toEqual({ kind: "perk", until: "2026-11-30T10:00:00.000Z" });
+    // The perk is still not offered as a gift to present.
+    expect(card.rewards?.available).toEqual([]);
+  });
+
+  it("shows a referred member with no payment yet, with no end date", async () => {
+    const card = await build(programmeMember({ referredBy: { id: "r1" } }));
+
+    expect(card.boost).toEqual({ kind: "referral" });
+    expect(card.boost).not.toHaveProperty("until");
+  });
+
+  it("shows nothing once the referred member has paid", async () => {
+    const card = await build(
+      programmeMember({ referredBy: { id: "r1" }, paidVisits: [{ id: "v" }] })
+    );
+
+    expect(card.boost).toBeUndefined();
+  });
+
+  it("names the referral when both are waiting: the same call as the visit credit makes", async () => {
+    const card = await build(
+      programmeMember({ referredBy: { id: "r1" }, rewards: [perk("2026-11-30T10:00:00Z")] })
+    );
+
+    expect(card.boost).toEqual({ kind: "referral" });
+  });
+
+  it("ignores a perk that has lapsed", async () => {
+    const card = await build(programmeMember({ rewards: [perk("2026-10-27T10:00:00Z")] }));
+
+    expect(card.boost).toBeUndefined();
+  });
+
+  it("has no boost for a clinic with no programme", async () => {
+    const card = await build({ ...member, referredBy: { id: "r1" }, paidVisits: [] });
+
+    expect(card.boost).toBeUndefined();
+  });
+
+  it("finds the perk even when twenty other rewards fill the card's list", async () => {
+    const full = Array.from({ length: 20 }, (_, i) => ({
+      title: `Premio ${i}`,
+      kind: "PREMIO",
+      detail: {},
+      issuedAt: new Date("2026-09-01T09:00:00Z"),
+      expiresAt: new Date(`2026-11-${String(i + 1).padStart(2, "0")}T10:00:00Z`)
+    }));
+    const memberRewardFindFirst = vi.fn(async () => ({
+      id: "p",
+      expiresAt: new Date("2026-12-20T10:00:00Z")
+    }));
+    const card = await new PrismaLoyaltyCardAssembler(
+      {
+        member: { findUnique: vi.fn(async () => programmeMember({ rewards: full })) },
+        memberReward: { findFirst: memberRewardFindFirst }
+      } as unknown as PrismaClient,
+      SECRET,
+      () => NOW
+    ).assemble(member.id);
+
+    expect(card.boost).toEqual({ kind: "perk", until: "2026-12-20T10:00:00.000Z" });
+    expect(memberRewardFindFirst).toHaveBeenCalledTimes(1);
+  });
+
+  it("is byte-equal on a second build and passes the card schema", async () => {
+    const value = programmeMember({ rewards: [perk("2026-11-30T10:00:00Z")] });
+    const first = await build(value);
+    const second = await build(value);
+
+    expect(loyaltyCardSchema.safeParse(first).success).toBe(true);
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+  });
+
+  it("rejects an unknown kind in the schema", () => {
+    const card = { ...aureaGoldPass, boost: { kind: "other" } };
+
+    expect(loyaltyCardSchema.safeParse(card).success).toBe(false);
   });
 });

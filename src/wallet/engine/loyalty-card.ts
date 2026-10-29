@@ -143,6 +143,19 @@ export const loyaltyCardSchema = z
       .optional(),
 
     /**
+     * A x2 waiting for the member's next visit, for a clinic on a programme: a double-points perk
+     * (`until` is its stored expiry) or a referred member who has not paid yet (no end date). It
+     * comes from the same decision the visit credit takes, so the card never promises what the
+     * credit will not do. Absent when nothing is waiting.
+     */
+    boost: z
+      .object({
+        kind: z.enum(["perk", "referral"]),
+        until: z.string().datetime().optional()
+      })
+      .optional(),
+
+    /**
      * The benefits of the member's CURRENT tier as the clinic's live onboarding programme defines
      * them: the single source of truth, which replaces the hand-typed `template.benefitsText` on the
      * pass. Absent for a clinic with no live programme, and when the tier has none, so the pass then

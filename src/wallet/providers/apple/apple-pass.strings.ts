@@ -30,6 +30,7 @@ export const PASS_LABELS = {
   lastMessage: "ÚLTIMO MENSAJE",
   rewards: "REGALOS",
   availableRewards: "RECOMPENSAS DISPONIBLES",
+  boost: "PUNTOS DOBLES",
   rewardsChangeMessage: "Tus regalos disponibles: %@",
   // The bare format: the lock-screen notification is the field's own value, which already
   // carries the date, the title and the text of the clinic's message.
@@ -59,6 +60,7 @@ export const PASS_TRANSLATIONS: Record<string, Record<string, string>> = {
     "ÚLTIMO MENSAJE": "LAST MESSAGE",
     REGALOS: "GIFTS",
     "RECOMPENSAS DISPONIBLES": "AVAILABLE REWARDS",
+    "PUNTOS DOBLES": "DOUBLE POINTS",
     "Tus regalos disponibles: %@": "Your available gifts: %@",
     "%@": "%@"
   }

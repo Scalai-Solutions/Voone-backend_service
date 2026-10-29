@@ -40,6 +40,25 @@ type Db = Pick<Prisma.TransactionClient, "memberReward" | "referral" | "paidVisi
 /** A payment that earned progress: the only kind that can be a referred client's first. */
 const earningPayment = { kind: VisitKind.PAYMENT, amountCents: { gt: 0 } } as const;
 
+/**
+ * The decision itself, from the two facts it depends on. Pure, so the visit credit, the rewards
+ * lookup and the wallet card all go through it: a referred member with no earning payment yet is
+ * doubled by the REFERRAL (the perk, if any, is kept); otherwise a waiting perk doubles it.
+ */
+export const chooseDouble = (
+  referralPending: boolean,
+  perk: { id: string; expiresAt: Date } | null
+): DoublePoints & { perkId: string | null } => {
+  if (referralPending) return { applies: true, reason: "referral", until: null, perkId: null };
+
+  return perk
+    ? { applies: true, reason: "perk", until: perk.expiresAt.toISOString(), perkId: perk.id }
+    : { ...NO_DOUBLE, perkId: null };
+};
+
+/** The order a member's waiting perks are spent in; the wallet card lists them the same way. */
+export const PERK_ORDER = [{ expiresAt: "asc" }, { issuedAt: "asc" }, { id: "asc" }] as const;
+
 const waitingPerk = (db: Db, memberId: string, at: Date) =>
   db.memberReward.findFirst({
     where: {
@@ -49,7 +68,7 @@ const waitingPerk = (db: Db, memberId: string, at: Date) =>
       expiresAt: { gt: at },
       detail: { path: ["perk"], equals: DOUBLE_PERK }
     },
-    orderBy: { issuedAt: "asc" }
+    orderBy: [...PERK_ORDER]
   });
 
 /**
@@ -66,17 +85,16 @@ export const pendingDouble = async (
     select: { id: true }
   });
 
-  if (referral) {
-    const paid = await db.paidVisit.count({ where: { memberId, ...earningPayment } });
+  const referralPending =
+    referral !== null &&
+    (await db.paidVisit.count({ where: { memberId, ...earningPayment } })) === 0;
 
-    if (paid === 0) return { applies: true, reason: "referral", until: null, perkId: null };
-  }
-
-  const perk = await waitingPerk(db, memberId, at);
-
-  return perk
-    ? { applies: true, reason: "perk", until: perk.expiresAt.toISOString(), perkId: perk.id }
-    : { ...NO_DOUBLE, perkId: null };
+  // Nothing to spend the perk on when the referral already doubles the visit, but the lookup
+  // still reports the referral first, so the perk is only read when it can matter.
+  return chooseDouble(
+    referralPending,
+    referralPending ? null : await waitingPerk(db, memberId, at)
+  );
 };
 
 export const publicDouble = ({ applies, reason, until }: DoublePoints): DoublePoints => ({

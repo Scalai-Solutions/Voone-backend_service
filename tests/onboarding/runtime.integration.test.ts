@@ -5,7 +5,7 @@ import {
   VisitKind,
   type Clinic
 } from "@prisma/client";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   PrismaMemberPointsCache,
@@ -1100,6 +1100,17 @@ describe("referrals", () => {
     });
 
     expect(out).toEqual({ registered: true, referrerId: referrer.id });
+  });
+
+  it("asks for the referred client's card to catch up, so the pending x2 shows on it", async () => {
+    await makeMember({ code: "ABCDE" });
+    const newcomer = await makeMember();
+    const sync = vi.spyOn(points, "requestCardSync");
+
+    await referrals.register({ clinicId: clinic.id, referredMemberId: newcomer.id, code: "ABCDE" });
+
+    expect(sync).toHaveBeenCalledWith(newcomer.id, expect.anything());
+    sync.mockRestore();
   });
 
   it("gives the referred client their welcome progress, once", async () => {
