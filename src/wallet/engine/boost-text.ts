@@ -13,6 +13,12 @@ export const BOOST_FIRST_VISIT_TEXT = "Tu primera visita suma el doble de puntos
 
 const NEXT_VISIT_TEXT = "Tu próxima visita suma el doble de puntos.";
 
+/** Undefined for a card with no `referral`: nothing to say. Plain text; Apple makes the link tappable. */
+export const referralText = (card: Pick<LoyaltyCard, "referral">): string | undefined =>
+  card.referral
+    ? `Tu código: ${card.referral.code}. Comparte este enlace: ${card.referral.url}`
+    : undefined;
+
 /** Undefined for a card with no `boost`: nothing to say. */
 export const boostText = (card: Pick<LoyaltyCard, "boost">): string | undefined => {
   const { boost } = card;

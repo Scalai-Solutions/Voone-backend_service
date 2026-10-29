@@ -8,7 +8,7 @@ import {
 import { MemberNotFoundError } from "../common/errors/membership.errors";
 import { WalletConfigurationError } from "../common/errors/wallet.errors";
 import { LoyaltyCardAssembler } from "./engine/loyalty-card-assembler";
-import { LoyaltyCard, loyaltyCardSchema } from "./engine/loyalty-card";
+import { LoyaltyCard, loyaltyCardSchema, MEMBER_CODE_PATTERN } from "./engine/loyalty-card";
 import { formatCardMessage } from "./engine/card-message";
 import { clipCardText } from "./engine/card-text";
 import { clipText } from "./engine/rewards-text";
@@ -191,6 +191,31 @@ const boostFor = async (
     : { kind: "perk", until: decided.until ?? undefined };
 };
 
+/**
+ * What the member shares to recommend the clinic: their own code and the public sign-up link that
+ * carries it. Undefined (so the card has no `referral` at all) when the base URL, the clinic's slug
+ * or a usable code is missing: a broken link on a card is worse than none.
+ */
+const referralFor = (
+  signupBaseUrl: string | undefined,
+  slug: string | null | undefined,
+  code: string | null
+): LoyaltyCard["referral"] => {
+  const base = signupBaseUrl?.trim().replace(/\/+$/, "");
+
+  if (!base || !slug || !code || !MEMBER_CODE_PATTERN.test(code)) return undefined;
+
+  return {
+    code,
+    url: `${base}/alta/${encodeURIComponent(slug)}?ref=${encodeURIComponent(code)}`
+  };
+};
+
+/** The key is left off the card altogether, not set to undefined, when there is no referral. */
+const referralField = (
+  referral: LoyaltyCard["referral"]
+): { referral?: LoyaltyCard["referral"] } => (referral ? { referral } : {});
+
 /** The most rewards a card shows; the pass only ever lists a handful and counts the rest. */
 const AVAILABLE_REWARDS_LIMIT = 20;
 
@@ -198,7 +223,12 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
   constructor(
     private readonly prisma: PrismaClient,
     private readonly redemptionSecret: string,
-    private readonly now: () => Date = () => new Date()
+    private readonly now: () => Date = () => new Date(),
+    /**
+     * The public frontend's origin, for the referral link on the card (`config.FRONTEND_URL`).
+     * Without it no card carries a referral.
+     */
+    private readonly signupBaseUrl?: string
   ) {}
 
   async assemble(memberId: string): Promise<LoyaltyCard> {
@@ -311,6 +341,10 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
             (member.rewards ?? []).length >= AVAILABLE_REWARDS_LIMIT
           )
         : undefined,
+      // Referrals need an ACTIVO programme, so only a programme centre shows the share.
+      ...(live
+        ? referralField(referralFor(this.signupBaseUrl, member.clinic.slug, member.code))
+        : {}),
       // The programme's benefits for the member's tier replace the hand-typed text on the pass.
       tierBenefits: live ? tierBenefitsFor(live.output, member.tier) : undefined,
       message: member.walletMessage ? { text: formatCardMessage(member.walletMessage) } : undefined,

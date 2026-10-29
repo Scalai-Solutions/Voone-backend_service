@@ -112,7 +112,12 @@ if (config.APPLE_PASS_WEB_SERVICE_URL && config.CARD_REDEMPTION_SECRET) {
         config.APPLE_PASS_WEB_SERVICE_URL
       ),
       devices,
-      assembler: new PrismaLoyaltyCardAssembler(prisma, config.CARD_REDEMPTION_SECRET)
+      assembler: new PrismaLoyaltyCardAssembler(
+        prisma,
+        config.CARD_REDEMPTION_SECRET,
+        undefined,
+        config.FRONTEND_URL
+      )
     })
   );
 }
@@ -226,7 +231,12 @@ if (config.CARD_REDEMPTION_SECRET) {
       issuer: new CardIssuer(
         buildWalletRegistry(prisma),
         cards,
-        new PrismaLoyaltyCardAssembler(prisma, config.CARD_REDEMPTION_SECRET),
+        new PrismaLoyaltyCardAssembler(
+          prisma,
+          config.CARD_REDEMPTION_SECRET,
+          undefined,
+          config.FRONTEND_URL
+        ),
         async (memberId) => {
           const member = await prisma.member.findUnique({
             where: { id: memberId },

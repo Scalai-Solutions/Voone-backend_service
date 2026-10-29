@@ -1,4 +1,4 @@
-import { boostText } from "../../engine/boost-text";
+import { boostText, referralText } from "../../engine/boost-text";
 import { LoyaltyCard } from "../../engine/loyalty-card";
 import { availableRewardCount, availableRewardsText } from "../../engine/rewards-text";
 import { tierBenefitsText } from "../../engine/tier-benefits-text";
@@ -153,6 +153,20 @@ export const buildStoreCardFields = (data: LoyaltyCard): StoreCardFields => {
       key: "benefits",
       label: PASS_LABELS.benefits,
       value: data.template.benefitsText
+    });
+  }
+
+  // Recommending the clinic: the member's code and the sign-up link that carries it, the link
+  // tappable (the url is built already percent-encoded, so it is not encoded again). No
+  // changeMessage: it is always there and never news.
+  const referral = referralText(data);
+
+  if (referral !== undefined && data.referral) {
+    backFields.push({
+      key: "referral",
+      label: PASS_LABELS.referral,
+      value: referral,
+      attributedValue: `Tu código: ${data.referral.code}. Comparte este enlace: <a href='${data.referral.url}'>${data.referral.url}</a>`
     });
   }
 

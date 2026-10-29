@@ -318,7 +318,12 @@ const issueWalletPasses = async (memberId: string) => {
 
   const code = deriveRedemptionCode(member.id, config.CARD_REDEMPTION_SECRET);
   const registry = buildWalletRegistry(prisma);
-  const assembler = new PrismaLoyaltyCardAssembler(prisma, config.CARD_REDEMPTION_SECRET);
+  const assembler = new PrismaLoyaltyCardAssembler(
+    prisma,
+    config.CARD_REDEMPTION_SECRET,
+    undefined,
+    config.FRONTEND_URL
+  );
   const card = await assembler.assemble(member.id);
   const program = toProgramTemplate(card, template.id);
   const passes = {
@@ -697,7 +702,12 @@ membersRouter.get(
       return;
     }
 
-    const assembler = new PrismaLoyaltyCardAssembler(prisma, config.CARD_REDEMPTION_SECRET);
+    const assembler = new PrismaLoyaltyCardAssembler(
+      prisma,
+      config.CARD_REDEMPTION_SECRET,
+      undefined,
+      config.FRONTEND_URL
+    );
     const card = await assembler.assemble(member.id);
     const programRef = await provider.provisionProgram(
       toProgramTemplate(card, member.clinic.template.id)

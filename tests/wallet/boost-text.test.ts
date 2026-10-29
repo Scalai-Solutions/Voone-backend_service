@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { boostText } from "../../src/wallet/engine/boost-text";
+import { boostText, referralText } from "../../src/wallet/engine/boost-text";
 import { buildStoreCardFields } from "../../src/wallet/providers/apple/apple-pass.fields";
 import {
   PASS_LABELS,
@@ -69,6 +69,55 @@ describe("the boost on the back of the Apple pass", () => {
 
   it("keeps every key unique", () => {
     const keys = buildStoreCardFields(referral).backFields.map((f) => f.key);
+
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+});
+
+const shared: LoyaltyCard = {
+  ...rewardsPass,
+  referral: { code: "AB2CD", url: "https://voone.app/alta/clinica-aurea?ref=AB2CD" }
+};
+
+describe("the referral text, shared by both wallets", () => {
+  it("names the code and the link", () => {
+    expect(referralText(shared)).toBe(
+      "Tu código: AB2CD. Comparte este enlace: https://voone.app/alta/clinica-aurea?ref=AB2CD"
+    );
+  });
+
+  it("has no text without a referral", () => {
+    expect(referralText(rewardsPass)).toBeUndefined();
+  });
+});
+
+describe("the referral on the back of the Apple pass", () => {
+  const field = (card: LoyaltyCard) =>
+    buildStoreCardFields(card).backFields.find((f) => f.key === "referral");
+
+  it("is a back field labelled RECOMIENDA, with the link tappable", () => {
+    expect(field(shared)).toMatchObject({
+      key: "referral",
+      label: "RECOMIENDA",
+      value:
+        "Tu código: AB2CD. Comparte este enlace: https://voone.app/alta/clinica-aurea?ref=AB2CD",
+      attributedValue:
+        "Tu código: AB2CD. Comparte este enlace: <a href='https://voone.app/alta/clinica-aurea?ref=AB2CD'>https://voone.app/alta/clinica-aurea?ref=AB2CD</a>"
+    });
+    expect(field(shared)).not.toHaveProperty("changeMessage");
+  });
+
+  it("is translated to English", () => {
+    expect(PASS_LABELS.referral).toBe("RECOMIENDA");
+    expect(PASS_TRANSLATIONS.en.RECOMIENDA).toBe("REFER A FRIEND");
+  });
+
+  it("is absent for a card with no referral, and keeps every key unique with all the fields", () => {
+    expect(field(rewardsPass)).toBeUndefined();
+
+    const keys = buildStoreCardFields({ ...shared, boost: { kind: "referral" } }).backFields.map(
+      (f) => f.key
+    );
 
     expect(new Set(keys).size).toBe(keys.length);
   });

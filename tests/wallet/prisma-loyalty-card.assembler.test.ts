@@ -875,3 +875,103 @@ describe("PrismaLoyaltyCardAssembler: the pending boost (x2)", () => {
     expect(loyaltyCardSchema.safeParse(card).success).toBe(false);
   });
 });
+
+describe("PrismaLoyaltyCardAssembler: the referral share", () => {
+  const programOutput = (() => {
+    const result = run(catalogFixture as CatalogItem[], {
+      ticket: null,
+      freq: null,
+      objective: "equilibrado",
+      investment: "equilibrado",
+      occupancy: "o2",
+      members: "m3"
+    });
+
+    if (isEngineError(result)) throw new Error(result.error);
+
+    return result;
+  })();
+
+  const programmeMember = (clinicExtra: Record<string, unknown> = { slug: "clinica-aurea" }) => ({
+    ...member,
+    tier: "Bronce",
+    lifetimePoints: 175,
+    clinic: {
+      ...member.clinic,
+      ...clinicExtra,
+      onboardingPrograms: [{ output: programOutput }]
+    }
+  });
+
+  const build = (value: unknown, base: string | undefined = "https://voone.app") =>
+    new PrismaLoyaltyCardAssembler(
+      { member: { findUnique: vi.fn(async () => value) } } as unknown as PrismaClient,
+      SECRET,
+      undefined,
+      base
+    ).assemble(member.id);
+
+  it("carries the member's own code and the signup link of their clinic", async () => {
+    const card = await build(programmeMember());
+
+    expect(card.referral).toEqual({
+      code: "K7M2Q",
+      url: "https://voone.app/alta/clinica-aurea?ref=K7M2Q"
+    });
+  });
+
+  it("does not double the slash of a base that ends with one, and escapes the slug", async () => {
+    const card = await build(programmeMember({ slug: "clínica aurea" }), "https://voone.app/");
+
+    expect(card.referral?.url).toBe("https://voone.app/alta/cl%C3%ADnica%20aurea?ref=K7M2Q");
+  });
+
+  it.each([
+    ["a blank base URL", programmeMember(), "  "],
+    ["no clinic slug", programmeMember({}), "https://voone.app"],
+    ["an empty slug", programmeMember({ slug: "" }), "https://voone.app"]
+  ])("omits the referral entirely with %s", async (_label, value, base) => {
+    const card = await build(value, base);
+
+    expect(card).not.toHaveProperty("referral");
+  });
+
+  it("omits it when the assembler was built with no base URL at all", async () => {
+    const card = await new PrismaLoyaltyCardAssembler(
+      { member: { findUnique: vi.fn(async () => programmeMember()) } } as unknown as PrismaClient,
+      SECRET
+    ).assemble(member.id);
+
+    expect(card).not.toHaveProperty("referral");
+  });
+
+  it("omits it for a member with no code, and for a clinic with no programme", async () => {
+    expect(await build({ ...programmeMember(), code: null })).not.toHaveProperty("referral");
+    expect(
+      await build({ ...member, clinic: { ...member.clinic, slug: "clinica-aurea" } })
+    ).not.toHaveProperty("referral");
+  });
+
+  it("is byte-equal on a second build and passes the card schema", async () => {
+    const first = await build(programmeMember());
+    const second = await build(programmeMember());
+
+    expect(loyaltyCardSchema.safeParse(first).success).toBe(true);
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+  });
+
+  it("rejects a referral with a code that is not five characters, or a url that is not a url", () => {
+    expect(
+      loyaltyCardSchema.safeParse({
+        ...aureaGoldPass,
+        referral: { code: "AB", url: "https://voone.app/alta/x?ref=AB" }
+      }).success
+    ).toBe(false);
+    expect(
+      loyaltyCardSchema.safeParse({
+        ...aureaGoldPass,
+        referral: { code: "K7M2Q", url: "not a url" }
+      }).success
+    ).toBe(false);
+  });
+});

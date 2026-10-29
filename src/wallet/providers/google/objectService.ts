@@ -18,6 +18,9 @@ export const TIER_BENEFITS_MODULE_HEADER = "Beneficios de tu nivel";
 /** The per-member module that says the next visit earns double. Present only while it does. */
 export const BOOST_MODULE_ID = "boost";
 export const BOOST_MODULE_HEADER = "Puntos dobles";
+/** The per-member module with the member's code and sign-up link, to recommend the clinic. */
+export const REFERRAL_MODULE_ID = "referral";
+export const REFERRAL_MODULE_HEADER = "Recomienda";
 
 interface GoogleSecondaryLoyaltyPoints {
   label: string;
@@ -160,7 +163,8 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
     patch.tier !== undefined ||
     patch.rewards !== undefined ||
     patch.tierBenefits !== undefined ||
-    patch.boost !== undefined
+    patch.boost !== undefined ||
+    patch.referral !== undefined
   ) {
     // A PATCH of textModulesData REPLACES the whole array, so the object is read first and the
     // changed modules are merged into what it holds: nothing the object already carries is lost.
@@ -198,12 +202,16 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
         : []),
       ...(patch.boost
         ? [{ id: BOOST_MODULE_ID, header: BOOST_MODULE_HEADER, body: patch.boost.text }]
+        : []),
+      ...(patch.referral
+        ? [{ id: REFERRAL_MODULE_ID, header: REFERRAL_MODULE_HEADER, body: patch.referral.text }]
         : [])
     ]);
     // The merge keeps modules it does not know, so a stale optional module is dropped by name.
     const staleIds = [
       ...(patch.tierBenefits === null ? [TIER_BENEFITS_MODULE_ID] : []),
-      ...(patch.boost === null ? [BOOST_MODULE_ID] : [])
+      ...(patch.boost === null ? [BOOST_MODULE_ID] : []),
+      ...(patch.referral === null ? [REFERRAL_MODULE_ID] : [])
     ];
     const next = merged.filter((module) => !staleIds.includes(module.id));
     const onlyRemoval =
@@ -400,6 +408,9 @@ const toGoogleLoyaltyObjectBody = (input: LoyaltyObjectInput): GoogleLoyaltyObje
         : []),
       ...(input.boost
         ? [{ id: BOOST_MODULE_ID, header: BOOST_MODULE_HEADER, body: input.boost.text }]
+        : []),
+      ...(input.referral
+        ? [{ id: REFERRAL_MODULE_ID, header: REFERRAL_MODULE_HEADER, body: input.referral.text }]
         : [])
     ],
     // TODO: Verify object-level tier support against https://developers.google.com/wallet/retail/loyalty-cards/rest/v1/loyaltyclass before relying on this field in production.

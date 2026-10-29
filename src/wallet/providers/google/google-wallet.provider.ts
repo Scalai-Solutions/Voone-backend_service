@@ -3,7 +3,7 @@ import { WalletProviderType } from "@prisma/client";
 import { config } from "../../../config/env";
 import { DEFAULT_WALLET_BENEFIT_CTA } from "../../../modules/templates/default-voone-template";
 import { availableRewardCount, availableRewardsText } from "../../engine/rewards-text";
-import { boostText } from "../../engine/boost-text";
+import { boostText, referralText } from "../../engine/boost-text";
 import { tierBenefitsText } from "../../engine/tier-benefits-text";
 import { BaseWalletProvider } from "../../engine/base-wallet-provider";
 import type { LoyaltyCard } from "../../engine/loyalty-card";
@@ -91,7 +91,7 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       // The rewards and the tier benefits are additions to the card: if Google refuses them the
       // member still gets a card, and the next sync tries them again on their own.
       if (
-        (!input.rewards && !input.tierBenefits && !input.boost) ||
+        (!input.rewards && !input.tierBenefits && !input.boost && !input.referral) ||
         !(error instanceof GoogleWalletApiError) ||
         error.status !== 400
       ) {
@@ -109,7 +109,8 @@ export class GoogleWalletProvider extends BaseWalletProvider {
         ...input,
         rewards: undefined,
         tierBenefits: undefined,
-        boost: undefined
+        boost: undefined,
+        referral: undefined
       });
     }
 
@@ -137,13 +138,15 @@ export class GoogleWalletProvider extends BaseWalletProvider {
     const rewards = this.toRewards(card);
     const tierBenefits = this.toTierBenefits(card);
     const boost = this.toBoost(card);
+    const referral = this.toReferral(card);
 
     try {
       await patchObject(ref.externalId, {
         ...(rewards ? { rewards } : {}),
         tierBenefits: tierBenefits ?? null,
         // Nothing pending removes a stale module, exactly as for the tier benefits.
-        boost: boost ?? null
+        boost: boost ?? null,
+        referral: referral ?? null
       });
     } catch (error) {
       console.error("[wallet] Google card rewards and tier benefits were not updated", {
@@ -331,8 +334,16 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       rewards: this.toRewards(card),
       tierBenefits: this.toTierBenefits(card),
       boost: this.toBoost(card),
+      referral: this.toReferral(card),
       state: "ACTIVE"
     };
+  }
+
+  /** The same words the Apple back field carries (the link plain here), so the wallets agree. */
+  private toReferral(card: LoyaltyCard): LoyaltyOptionalModuleInput | undefined {
+    const text = referralText(card);
+
+    return text === undefined ? undefined : { text };
   }
 
   /** The same words the Apple back field carries, so the two wallets never disagree. */

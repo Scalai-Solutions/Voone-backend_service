@@ -20,6 +20,9 @@ export const hexColorSchema = z
   .string()
   .regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, "must be a hex colour such as #ead0bd");
 
+/** Exactly MEMBER_CODE_ALPHABET: no I, L, O, 0 or 1, because it gets read aloud. */
+export const MEMBER_CODE_PATTERN = /^[A-HJ-KM-NP-Z2-9]{5}$/;
+
 /**
  * Appearance and copy for one clinic's programme, mirroring ClinicTemplate.
  *
@@ -87,7 +90,7 @@ export const loyaltyCardSchema = z
       // provider- or infrastructure-specific reaches the domain shape.
       code: z
         .string()
-        .regex(/^[A-HJ-KM-NP-Z2-9]{5}$/, "must be five unambiguous uppercase characters")
+        .regex(MEMBER_CODE_PATTERN, "must be five unambiguous uppercase characters")
         .optional(),
       // Member stores only createdAt, so the year is derived and may be absent.
       memberSince: z
@@ -152,6 +155,20 @@ export const loyaltyCardSchema = z
       .object({
         kind: z.enum(["perk", "referral"]),
         until: z.string().datetime().optional()
+      })
+      .optional(),
+
+    /**
+     * What the member shares to recommend the clinic, for a clinic on a programme: their own member
+     * code and the public sign-up link that carries it (`<base>/alta/<clinic>?ref=<code>`). Absent
+     * when any part of the link is unknown, rather than a card with a broken link on it.
+     */
+    referral: z
+      .object({
+        code: z
+          .string()
+          .regex(MEMBER_CODE_PATTERN, "must be five unambiguous uppercase characters"),
+        url: z.string().url().max(2048)
       })
       .optional(),
 

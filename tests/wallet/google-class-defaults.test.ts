@@ -322,6 +322,7 @@ describe("the details template on the Google class", () => {
       "object.textModulesData['rewards']",
       "object.textModulesData['boost']",
       "object.textModulesData['tierbenefits']",
+      "object.textModulesData['referral']",
       "class.textModulesData['benefits']",
       "object.accountName",
       "object.accountId",
