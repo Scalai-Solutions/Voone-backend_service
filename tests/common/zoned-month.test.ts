@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { CLINIC_TIME_ZONE, startOfMonthIn } from "../../src/common/utils/zoned-month";
+import {
+  CLINIC_TIME_ZONE,
+  startOfMonthIn,
+  startOfNextMonthIn
+} from "../../src/common/utils/zoned-month";
 
 /**
  * "Points issued this month" is read by a clinic in Madrid, so the month has to begin at
@@ -51,5 +55,31 @@ describe("startOfMonthIn", () => {
     const start = startOfMonthIn("UTC", new Date("2026-05-20T09:00:00Z"));
 
     expect(start.toISOString()).toBe("2026-05-01T00:00:00.000Z");
+  });
+});
+
+describe("startOfNextMonthIn", () => {
+  it("closes an October that straddles the autumn clock change at winter midnight", () => {
+    const end = startOfNextMonthIn(CLINIC_TIME_ZONE, new Date("2026-10-15T12:00:00Z"));
+
+    // 1 November in Madrid is UTC+1.
+    expect(end.toISOString()).toBe("2026-10-31T23:00:00.000Z");
+  });
+
+  it("closes a June at summer midnight, and rolls a December into January", () => {
+    expect(
+      startOfNextMonthIn(CLINIC_TIME_ZONE, new Date("2026-06-15T12:00:00Z")).toISOString()
+    ).toBe("2026-06-30T22:00:00.000Z");
+    expect(
+      startOfNextMonthIn(CLINIC_TIME_ZONE, new Date("2026-12-15T12:00:00Z")).toISOString()
+    ).toBe("2026-12-31T23:00:00.000Z");
+  });
+
+  it("is the next month's own start, including from February", () => {
+    const end = startOfNextMonthIn(CLINIC_TIME_ZONE, new Date("2026-02-10T12:00:00Z"));
+
+    expect(end.toISOString()).toBe(
+      startOfMonthIn(CLINIC_TIME_ZONE, new Date("2026-03-10T12:00:00Z")).toISOString()
+    );
   });
 });

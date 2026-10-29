@@ -10,6 +10,11 @@ const CLINIC = "clinic-1";
 const overview = {
   activeMembers: 42,
   pointsIssuedThisMonth: 3200,
+  revenueThisMonthCents: 320000,
+  revenueAllTimeCents: 910000,
+  moneySpentTotalCents: 910000,
+  rewardsRedeemedThisMonth: 4,
+  topClientsThisMonth: [{ memberId: "m1", name: "Ana", amountCents: 50000 }],
   walletAdds: 17,
   recentActivity: [{ id: "t1", label: "Hydrafacial", date: "2026-09-26" }]
 };
