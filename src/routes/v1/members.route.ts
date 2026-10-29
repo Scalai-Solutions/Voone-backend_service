@@ -60,6 +60,7 @@ import {
   InstallArtifact,
   ProgramTemplate
 } from "../../wallet/engine/wallet-pass-provider.interface";
+import { tierLabelFor } from "../../modules/members/member-tier";
 import { deriveRedemptionCode } from "../../wallet/engine/redemption-code";
 import { PrismaLoyaltyCardAssembler } from "../../wallet/prisma-loyalty-card.assembler";
 import {
@@ -120,7 +121,7 @@ const toMemberSummary = (member: Awaited<ReturnType<typeof findMemberForSummary>
       : member.pointsBalance,
   moneySpent: 0,
   lastVisitedAt: null,
-  tier: member.tier ?? "Nuevo",
+  tier: tierLabelFor(member.tier, member.clinic.template?.tierRewards),
   walletStatus: member.walletObjects.reduce(
     (statuses, walletObject) => ({
       ...statuses,
