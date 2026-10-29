@@ -27,6 +27,7 @@ import {
   bonoSessionCents,
   discountAllowance,
   discountWindowStart,
+  earnsProgress,
   earningCents,
   includesTreatment,
   milestonesCrossed,
@@ -187,13 +188,14 @@ export class VisitService {
     }
 
     const opened = existing
-      ? { visit: existing, created: false }
+      ? { visit: existing, created: false as const }
       : await this.open(input, active.view);
 
     const visit = opened.visit;
-    // Read from the rows, for a first call and a retry alike, so a retried doubled visit answers
-    // exactly as the original did.
-    const doubleReason = await doubleOfVisit(this.prisma, visit);
+    // A first call answers from the decision it just took in open(), which is also what was
+    // credited. Only a replay reads it back from the rows (see doubleOfVisit).
+    const doubleReason: DoubleReason | null =
+      "doubleReason" in opened ? opened.doubleReason : await doubleOfVisit(this.prisma, visit);
     const progress = visit.progressAwarded ?? 0;
     const before = visit.lifetimeBefore ?? 0;
     const after = visit.lifetimeAfter ?? before + progress;
@@ -356,7 +358,7 @@ export class VisitService {
           }
         });
 
-        if (dup) return { visit: dup, created: false };
+        if (dup) return { visit: dup, created: false as const };
 
         const member = await tx.member.findUniqueOrThrow({
           where: { id: input.memberId },
@@ -410,7 +412,7 @@ export class VisitService {
         // spent. When both are present the REFERRAL doubles the visit and the perk is KEPT for
         // the next one.
         const double =
-          input.kind === "PAYMENT" && cents > 0
+          input.kind === "PAYMENT" && earnsProgress(cents)
             ? await pendingDouble(tx, input.memberId, occurredAt)
             : null;
         const perk = double?.reason === "perk" ? double.perkId : null;
@@ -470,7 +472,11 @@ export class VisitService {
           });
         }
 
-        return { visit, created: true };
+        return {
+          visit,
+          created: true as const,
+          doubleReason: (double?.applies ? double.reason : null) as DoubleReason | null
+        };
       },
       { timeout: 30_000, maxWait: 15_000 }
     );

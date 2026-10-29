@@ -1,5 +1,7 @@
 import { MemberRewardKind, VisitKind, type Prisma } from "@prisma/client";
 
+import { earnsProgress, MIN_EARNING_CENTS } from "./rules";
+
 /**
  * Who earns double on a payment visit, decided in ONE place.
  *
@@ -35,10 +37,16 @@ export const NO_DOUBLE: DoublePoints = { applies: false, reason: null, until: nu
 /** The reason the ledger row for a referral-doubled visit carries. */
 export const REFERRAL_DOUBLE_REASON = "Visita de pago (doble por recomendación)";
 
-type Db = Pick<Prisma.TransactionClient, "memberReward" | "referral" | "paidVisit">;
+type Db = Pick<
+  Prisma.TransactionClient,
+  "memberReward" | "referral" | "paidVisit" | "pointsTransaction"
+>;
 
 /** A payment that earned progress: the only kind that can be a referred client's first. */
-const earningPayment = { kind: VisitKind.PAYMENT, amountCents: { gt: 0 } } as const;
+const earningPayment = {
+  kind: VisitKind.PAYMENT,
+  amountCents: { gte: MIN_EARNING_CENTS }
+} as const;
 
 /**
  * The decision itself, from the two facts it depends on. Pure, so the visit credit, the rewards
@@ -72,6 +80,31 @@ const waitingPerk = (db: Db, memberId: string, at: Date) =>
   });
 
 /**
+ * Was the member referred and has no payment that earned progress yet: the referral's x2 is still
+ * waiting. The referral is looked up first and the paid visit only when there is one, so a member
+ * nobody referred costs a single indexed read. Shared by the visit credit, the reception lookup and
+ * the wallet card.
+ */
+export const isReferralPending = async (
+  db: Pick<Db, "referral" | "paidVisit">,
+  memberId: string
+): Promise<boolean> => {
+  const referral = await db.referral.findUnique({
+    where: { referredId: memberId },
+    select: { id: true }
+  });
+
+  if (!referral) return false;
+
+  const paid = await db.paidVisit.findFirst({
+    where: { memberId, ...earningPayment },
+    select: { id: true }
+  });
+
+  return paid === null;
+};
+
+/**
  * The double that the member's NEXT payment would get, as of `at`. `perkId` is the perk to spend
  * when the reason is "perk"; it is internal and `publicDouble` strips it.
  */
@@ -80,14 +113,7 @@ export const pendingDouble = async (
   memberId: string,
   at: Date
 ): Promise<DoublePoints & { perkId: string | null }> => {
-  const referral = await db.referral.findUnique({
-    where: { referredId: memberId },
-    select: { id: true }
-  });
-
-  const referralPending =
-    referral !== null &&
-    (await db.paidVisit.count({ where: { memberId, ...earningPayment } })) === 0;
+  const referralPending = await isReferralPending(db, memberId);
 
   // Nothing to spend the perk on when the referral already doubles the visit, but the lookup
   // still reports the referral first, so the perk is only read when it can matter.
@@ -104,8 +130,13 @@ export const publicDouble = ({ applies, reason, until }: DoublePoints): DoublePo
 });
 
 /**
- * How an ALREADY RECORDED visit was doubled, read from the rows: a retried visit answers the
- * same as the original without a flag having to be stored.
+ * How an ALREADY RECORDED visit was doubled, for a replay (a retried request). The first call
+ * answers from the decision it took, never from here.
+ *
+ * The truth is what was actually credited, so the ledger row's own reason text is read first. A
+ * perk shows on its row (`redeemedVisitId`). Only a visit whose credit was never written (a crash
+ * between the visit and the credit) falls back to "is this the member's first earning payment",
+ * which is the same rule the decision used.
  */
 export const doubleOfVisit = async (
   db: Db,
@@ -124,7 +155,14 @@ export const doubleOfVisit = async (
 
   if (perk) return "perk";
 
-  if (visit.amountCents <= 0) return null;
+  const credited = await db.pointsTransaction.findFirst({
+    where: { memberId: visit.memberId, idempotencyKey: `visit:${visit.id}` },
+    select: { reason: true }
+  });
+
+  if (credited) return credited.reason === REFERRAL_DOUBLE_REASON ? "referral" : null;
+
+  if (!earnsProgress(visit.amountCents)) return null;
 
   const referral = await db.referral.findUnique({
     where: { referredId: visit.memberId },

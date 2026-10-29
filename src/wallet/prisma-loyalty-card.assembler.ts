@@ -1,9 +1,4 @@
-import {
-  MemberRewardKind,
-  OnboardingProgramStatus,
-  VisitKind,
-  type PrismaClient
-} from "@prisma/client";
+import { MemberRewardKind, OnboardingProgramStatus, type PrismaClient } from "@prisma/client";
 
 import { MemberNotFoundError } from "../common/errors/membership.errors";
 import { WalletConfigurationError } from "../common/errors/wallet.errors";
@@ -19,7 +14,12 @@ import type { Program } from "../modules/onboarding/engine.types";
 import { presentProgram } from "../modules/onboarding/presentation";
 import { programView } from "../modules/onboarding/runtime/program-view";
 import { toPoints } from "../modules/onboarding/runtime/points-unit";
-import { chooseDouble, DOUBLE_PERK, PERK_ORDER } from "../modules/onboarding/runtime/double-points";
+import {
+  chooseDouble,
+  DOUBLE_PERK,
+  isReferralPending,
+  PERK_ORDER
+} from "../modules/onboarding/runtime/double-points";
 import { isDoublePointsPerk, nextRewardFor } from "../modules/onboarding/runtime/rules";
 import { tierRewardsSchema } from "../modules/templates/templates.schema";
 
@@ -141,23 +141,22 @@ const tierBenefitsFor = (
  * The x2 waiting for the member's next visit, decided by the SAME function the visit credit and the
  * reception lookup use (double-points.ts), so the card never promises what the credit will not do.
  *
- * Read from what the member query already loaded: the waiting perk is among the member's open
- * rewards, and the referral and "has paid yet" come from two small relations. Only when the card's
- * list is full (20 rewards) and shows no perk is the perk asked for on its own, so a perk is never
- * lost behind a long list. No clock but the expiry filter's `now`.
+ * Called for a programme centre only, so a legacy clinic pays no extra query. The waiting perk is
+ * among the open rewards the member query already loaded; the referral is looked up first and the
+ * paid visit only when there is one. Only when the card's list is full (20 rewards) and shows no
+ * perk is the perk asked for on its own, so a perk is never lost behind a long list. No clock but
+ * the expiry filter's `now`.
  */
 const boostFor = async (
   prisma: PrismaClient,
   member: {
     id: string;
     rewards?: Array<{ kind: string; detail: unknown; expiresAt: Date }>;
-    referredBy?: { id: string } | null;
-    paidVisits?: Array<{ id: string }>;
   },
   now: Date,
   listFull: boolean
 ): Promise<LoyaltyCard["boost"]> => {
-  const referralPending = Boolean(member.referredBy) && (member.paidVisits ?? []).length === 0;
+  const referralPending = await isReferralPending(prisma, member.id);
   let perk: { id: string; expiresAt: Date } | null = null;
 
   if (!referralPending) {
@@ -247,14 +246,6 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
         },
         // The latest clinic message, in the same round trip for the same reason as the programme.
         walletMessage: true,
-        // For the pending x2: was the member referred, and have they had a payment that earned
-        // progress yet. One row at most each, in the same round trip.
-        referredBy: { select: { id: true } },
-        paidVisits: {
-          where: { kind: VisitKind.PAYMENT, amountCents: { gt: 0 } },
-          take: 1,
-          select: { id: true }
-        },
         clinic: {
           include: {
             template: true,

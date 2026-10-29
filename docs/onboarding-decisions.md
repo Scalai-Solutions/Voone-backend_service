@@ -596,6 +596,9 @@ system does not do. Up to 6 per tier, 80 characters each.
     the very code that credits the visit, and a visit request may carry `boostMultiplier`
     (2, 3, 5 or 10) to flag that its `bonusPoints` are the slider's extra: it is then ignored
     while a ×2 applies (the visit is not refused). A typed bonus without the flag still adds.
+  - 2026-10-29: x2 for a referred client applies to the first payment that earns progress,
+    retail-only included; the referrer's REFERIDO reward still waits for a treatment payment
+    (product to confirm).
   - The client sees it: the wallet card carries `boost` ("PUNTOS DOBLES" back field on Apple, a
     `boost` text module on Google) and the member's own code and sign-up link (`referral`,
     "RECOMIENDA"; `<FRONTEND_URL>/alta/<slug>?ref=<code>`).
