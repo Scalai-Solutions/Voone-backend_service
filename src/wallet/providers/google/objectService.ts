@@ -217,7 +217,10 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
     const onlyRemoval =
       patch.loyaltyPointsBalance === undefined &&
       patch.tier === undefined &&
-      patch.rewards === undefined;
+      patch.rewards === undefined &&
+      !patch.tierBenefits &&
+      !patch.boost &&
+      !patch.referral;
 
     // A removal with nothing to remove writes nothing: most clinics have no such module.
     if (!onlyRemoval || next.length !== existingTextModules.length) {

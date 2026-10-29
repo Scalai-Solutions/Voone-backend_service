@@ -195,6 +195,26 @@ describe("Google card: the pending double points", () => {
   });
 });
 
+describe("Google optional modules: a patch that only changes their text", () => {
+  it.each([
+    ["tierBenefits", "tierbenefits"],
+    ["boost", "boost"],
+    ["referral", "referral"]
+  ])("writes a changed %s text even though the module count is the same", async (key, id) => {
+    await issue({
+      ...rewardsPass,
+      tier: "Plata",
+      tierBenefits: { tier: "Plata", lines: ["A"] },
+      boost: { kind: "referral" },
+      referral: { code: "AB2CD", url: "https://voone.app/alta/x?ref=AB2CD" }
+    });
+
+    await patchObject(OBJECT_ID, { [key]: { text: "texto nuevo" } });
+
+    expect(moduleOf(id)?.body).toBe("texto nuevo");
+  });
+});
+
 describe("Google card: a stale boost module", () => {
   it("is removed by a sync whose card has no boost, keeping every other module", async () => {
     await issue(withBoost);
