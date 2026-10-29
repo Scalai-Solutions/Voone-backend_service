@@ -1,4 +1,5 @@
-import { MIN_TENURE, P, TIERS, TIER_BENEFITS, TIER_NAMES } from "./engine.config";
+import { benefitLinesFor, visibleBenefits, type PresentedBenefitLine } from "./benefit-lines";
+import { MIN_TENURE, TIERS, TIER_BENEFITS, TIER_NAMES } from "./engine.config";
 import type { Program, TierCode } from "./engine.types";
 import { itemsTitle, rewardTitle } from "./reward-title";
 
@@ -60,9 +61,19 @@ export interface PresentedTier {
   /** What a client has paid when she enters this tier. */
   threshold: number;
   minTenureMonths: number;
+  /**
+   * What a client reads, in order: the generated lines with the centre's display-only edits
+   * applied and the hidden ones left out, then the lines the centre wrote. The card, the pass and
+   * every other reader take this.
+   */
   benefits: string[];
-  /** The ones the centre wrote itself: the only ones it can add or remove. */
+  /** The ones the centre wrote itself, in its own list (the benefits route replaces this list). */
   customBenefits: string[];
+  /**
+   * Every line of the tier with its stable key, hidden ones included and flagged, so the admin
+   * screen can edit, hide, show and restore any of them. `benefits` is its visible texts.
+   */
+  benefitLines: PresentedBenefitLine[];
 }
 
 export interface PresentedProgram {
@@ -95,40 +106,6 @@ const COST_NOTE_PREFIX = "Algunos premios usan algo más de su presupuesto indiv
 const itemsOf = (items: Array<{ name: string }>): PresentedItem[] =>
   items.map((i) => ({ name: i.name }));
 
-const pct = (share: number): string => `${Math.round(share * 100)}%`;
-
-/** Benefits a tier carries permanently, in the order a client would care about them. */
-const benefitsFor = (key: TierCode, program: Program): string[] => {
-  const b = TIER_BENEFITS[key];
-  const out: string[] = [];
-
-  if (b.mult > 1) {
-    out.push(`Cada euro suma ×${String(b.mult).replace(".", ",")} de progreso`);
-  }
-
-  if (b.discount > 0) {
-    out.push(
-      `Descuento del ${pct(b.discount)} en cosmética, hasta ${P.discountMaxProducts} productos al año`
-    );
-  }
-
-  const gift = program.gifts[key]?.birthday;
-
-  if (gift) out.push(`Regalo de cumpleaños: ${itemsTitle(gift.items)}`);
-
-  if (b.events > 0) {
-    out.push(
-      b.events === 1 ? "Un evento exclusivo al año" : `${b.events} eventos exclusivos al año`
-    );
-  }
-
-  if (b.tests) out.push("Prueba de nuevos tratamientos y aparatología");
-
-  out.push(...b.extra);
-
-  return out;
-};
-
 export const presentProgram = (program: Program): PresentedProgram => {
   const levels = program.lad.ms.filter((m) => m.type === "nivel");
   // Whole euros: a centre reads "826 €", and an unrounded real spend is a long float whose last
@@ -146,14 +123,19 @@ export const presentProgram = (program: Program): PresentedProgram => {
       annualSpend: program.est.A
     },
 
-    tiers: TIERS.map((key, i) => ({
-      key,
-      label: TIER_NAMES[key],
-      threshold: floors[i] ?? 0,
-      minTenureMonths: MIN_TENURE[key],
-      benefits: [...benefitsFor(key, program), ...(program.customBenefits?.[key] ?? [])],
-      customBenefits: program.customBenefits?.[key] ?? []
-    })),
+    tiers: TIERS.map((key, i) => {
+      const benefitLines = benefitLinesFor(key, program);
+
+      return {
+        key,
+        label: TIER_NAMES[key],
+        threshold: floors[i] ?? 0,
+        minTenureMonths: MIN_TENURE[key],
+        benefits: visibleBenefits(benefitLines),
+        customBenefits: program.customBenefits?.[key] ?? [],
+        benefitLines
+      };
+    }),
 
     ladder: program.lad.ms.map((m): PresentedMilestone => {
       const real = program.realTh[m.n];

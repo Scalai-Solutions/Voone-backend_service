@@ -1103,6 +1103,194 @@ describe("benefits the centre writes for a tier (founders' E2E item 27)", () => 
   });
 });
 
+describe("display-only overrides of a tier's generated lines", () => {
+  const overridesPath = (programId: string, tier: string) =>
+    admin(`/programs/${programId}/tiers/${tier}/benefit-overrides`);
+
+  const tierOf = (body: { program: { tiers: Array<{ key: string }> } }, key: string) =>
+    body.program.tiers.find((t) => t.key === key) as unknown as {
+      benefits: string[];
+      customBenefits: string[];
+      benefitLines: Array<{
+        key: string;
+        text: string;
+        original: string;
+        kind: string;
+        edited: boolean;
+        hidden: boolean;
+      }>;
+    };
+
+  const draftId = async (): Promise<string> => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+
+    return (await call("POST", admin("/programs"), ANSWERS)).body.id as string;
+  };
+
+  it("edits and hides generated lines on a draft, and the benefits are the visible texts", async () => {
+    const id = await draftId();
+    const before = tierOf((await call("GET", admin(`/programs/${id}`))).body, "plata");
+    const r = await call("PUT", overridesPath(id, "plata"), {
+      overrides: [
+        { key: "discount", text: "  Ventaja en cosmética  " },
+        { key: "priority", hidden: true }
+      ]
+    });
+
+    expect(r.status).toBe(200);
+
+    const plata = tierOf(r.body, "plata");
+    const discount = plata.benefitLines.find((l) => l.key === "discount")!;
+    const priority = plata.benefitLines.find((l) => l.key === "priority")!;
+
+    expect(discount).toMatchObject({
+      text: "Ventaja en cosmética",
+      kind: "generated",
+      edited: true,
+      hidden: false
+    });
+    expect(discount.original).toBe(before.benefitLines.find((l) => l.key === "discount")!.original);
+    expect(priority).toMatchObject({ hidden: true, edited: false });
+    expect(plata.benefits).toEqual(plata.benefitLines.filter((l) => !l.hidden).map((l) => l.text));
+    expect(plata.benefits).toContain("Ventaja en cosmética");
+    expect(plata.benefits).not.toContain(priority.original);
+    expect(JSON.stringify(r.body.program)).not.toMatch(/"cost|costPct/i);
+    // The engine's real numbers are untouched.
+    expect(r.body.internal.costPct).toBe(
+      (await call("GET", admin(`/programs/${id}`))).body.internal.costPct
+    );
+  });
+
+  it("restores a line by clearing its override, and the draft returns to what it was", async () => {
+    const id = await draftId();
+    const before = (await call("GET", admin(`/programs/${id}`))).body.program;
+
+    await call("PUT", overridesPath(id, "oro"), {
+      overrides: [
+        { key: "mult", text: "Más progreso" },
+        { key: "tests", hidden: true }
+      ]
+    });
+    const r = await call("PUT", overridesPath(id, "oro"), {
+      overrides: [{ key: "mult" }, { key: "tests", text: null, hidden: false }]
+    });
+
+    expect(r.status).toBe(200);
+    expect(r.body.program).toEqual(before);
+  });
+
+  it("refuses a key the tier does not have, a custom line, and a bad body, storing nothing", async () => {
+    const id = await draftId();
+    const before = (await call("GET", admin(`/programs/${id}`))).body.program;
+    const put = (tier: string, body: unknown) => call("PUT", overridesPath(id, tier), body);
+
+    const unknown = await put("bronce", {
+      overrides: [
+        { key: "birthday", text: "Bien" },
+        { key: "discount", hidden: true }
+      ]
+    });
+
+    expect(unknown.status).toBe(422);
+    expect(unknown.body.message ?? unknown.body.error).toMatch(/no existe en este nivel/);
+    expect((await put("oro", { overrides: [{ key: "custom:0", text: "X" }] })).status).toBe(422);
+    expect((await put("oro", { overrides: [{ key: "mult", text: " " }] })).status).toBe(422);
+    expect((await put("oro", { overrides: [{ key: "mult", text: "x".repeat(81) }] })).status).toBe(
+      422
+    );
+    expect((await put("oro", { overrides: [] })).status).toBe(422);
+    expect((await put("mitico", { overrides: [{ key: "mult", hidden: true }] })).status).toBe(422);
+    expect((await call("GET", admin(`/programs/${id}`))).body.program).toEqual(before);
+  });
+
+  it("answers 404 for another clinic's programme and for an unknown clinic", async () => {
+    const id = await draftId();
+    const other = await db.clinic.upsert({
+      where: { slug: `${SLUG}-other` },
+      update: {},
+      create: {
+        slug: `${SLUG}-other`,
+        name: "Otro centro",
+        addressLine: "Calle Cuatro 4",
+        pincode: "28004"
+      }
+    });
+    const body = { overrides: [{ key: "mult", hidden: true }] };
+
+    try {
+      const wrong = await call(
+        "PUT",
+        `/admin/clinics/${other.id}/onboarding/programs/${id}/tiers/oro/benefit-overrides`,
+        body
+      );
+
+      expect(wrong.status).toBe(404);
+      expect(wrong.body.message ?? wrong.body.error).toMatch(/No existe ese programa/);
+    } finally {
+      await db.clinic.deleteMany({ where: { id: other.id } });
+    }
+
+    const missing = await call(
+      "PUT",
+      `/admin/clinics/no-such-clinic/onboarding/programs/${id}/tiers/oro/benefit-overrides`,
+      body
+    );
+
+    expect(missing.status).toBe(404);
+  });
+
+  it("refuses to edit a programme that is already live", async () => {
+    const id = await goLive();
+    const r = await call("PUT", overridesPath(id, "oro"), {
+      overrides: [{ key: "mult", hidden: true }]
+    });
+
+    expect(r.status).toBe(409);
+    expect(r.body.message ?? r.body.error).toMatch(/borrador/);
+  });
+
+  it("carries the overrides through publishing, to the centre's own view of the programme", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const draft = await call("POST", admin("/programs"), ANSWERS);
+
+    await call("PUT", overridesPath(draft.body.id, "plata"), {
+      overrides: [
+        { key: "discount", text: "Ventaja en cosmética" },
+        { key: "priority", hidden: true }
+      ]
+    });
+    expect((await call("POST", admin(`/programs/${draft.body.id}/publish`))).status).toBe(200);
+
+    const live = await call("GET", `/clinics/${SLUG}/program`);
+    const plata = tierOf(live.body, "plata");
+
+    expect(plata.benefits).toContain("Ventaja en cosmética");
+    expect(plata.benefits.some((b) => b.startsWith("Prioridad en huecos"))).toBe(false);
+    expect(plata.benefitLines.find((l) => l.key === "priority")?.hidden).toBe(true);
+  });
+
+  it("is carried by a clone of the programme, and the clone can restore it", async () => {
+    const id = await draftId();
+
+    await call("PUT", overridesPath(id, "oro"), {
+      overrides: [{ key: "happyhour", text: "Happy Hour para ti" }]
+    });
+    await call("POST", admin(`/programs/${id}/publish`));
+
+    const clone = await call("POST", admin(`/programs/${id}/draft`));
+
+    expect(clone.status).toBe(201);
+    expect(tierOf(clone.body, "oro").benefits).toContain("Happy Hour para ti");
+
+    const restored = await call("PUT", overridesPath(clone.body.id, "oro"), {
+      overrides: [{ key: "happyhour" }]
+    });
+
+    expect(restored.status).toBe(200);
+    expect(tierOf(restored.body, "oro").benefits).not.toContain("Happy Hour para ti");
+  });
+});
+
 describe("giving a milestone any catalogue item (founders' E2E item 28)", () => {
   it("accepts a catalogue item the engine did not propose, and refuses one that cannot be a reward", async () => {
     await call("PUT", admin("/catalog"), { items: fixtureItems });

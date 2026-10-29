@@ -26,6 +26,7 @@ import {
   calculatorSchema,
   swapSchema,
   textsSchema,
+  benefitOverridesSchema,
   tierBenefitsSchema,
   visitSchema
 } from "../../modules/onboarding/onboarding.schema";
@@ -385,6 +386,34 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
       res.json(
         forAdmin(
           await deps.onboarding.setTierBenefits(clinicId, req.params.programId, tier, benefits)
+        )
+      );
+    })
+  );
+
+  /**
+   * Changes the words of, or hides, the lines the engine generates for a tier, on a DRAFT:
+   * `{ overrides: [{ key, text?, hidden? }] }` (see benefitOverridesSchema). The keys are the
+   * `benefitLines[].key` of the presented tier. Display only: the real multiplier, discount and
+   * gift are untouched. Answers 200 with the same body as `GET /programs/:programId`; 409 when the
+   * programme is not a draft or changed under the editor; 422 for invalid text or a key the tier
+   * does not have (nothing is stored).
+   */
+  router.put(
+    "/admin/clinics/:clinicId/onboarding/programs/:programId/tiers/:tier/benefit-overrides",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const clinicId = await clinicOr404(req.params.clinicId);
+      const { overrides } = parse(benefitOverridesSchema, req.body);
+      const tier = req.params.tier as TierCode;
+
+      if (!TIERS.includes(tier)) {
+        throw new MembershipValidationError("tier: indica un nivel válido");
+      }
+
+      res.json(
+        forAdmin(
+          await deps.onboarding.setBenefitOverrides(clinicId, req.params.programId, tier, overrides)
         )
       );
     })

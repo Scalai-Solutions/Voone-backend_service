@@ -256,4 +256,27 @@ export const textsSchema = z
     { message: "No hay nada que cambiar" }
   );
 
+/**
+ * Display-only changes to the lines the engine generates for a tier. Each entry replaces that
+ * line's override as a whole: a `null` or absent `text` clears the edit, a `null`, `false` or
+ * absent `hidden` shows the line, and an entry with neither clears the override. The text has the
+ * limits of a line the centre adds itself (80, trimmed, no control characters).
+ */
+export const benefitOverridesSchema = z.object({
+  overrides: z
+    .array(
+      z.object({
+        key: z
+          .string({ message: "key: indica el beneficio" })
+          .trim()
+          .min(1, "key: indica el beneficio")
+          .max(64, "key: indica el beneficio"),
+        text: text(80, "El texto del beneficio").nullish(),
+        hidden: z.boolean({ message: "hidden: tiene que ser verdadero o falso" }).nullish()
+      })
+    )
+    .min(1, "No hay nada que cambiar")
+    .max(20, "Demasiados cambios a la vez")
+});
+
 export type VisitBody = z.infer<typeof visitSchema>;

@@ -308,7 +308,13 @@ export interface TierBenefit {
   discount: number;
   events: number;
   tests: boolean;
-  extra: string[];
+  /**
+   * The remaining lines, each with a STABLE key. The key is what a centre's display-only edit of
+   * the line is stored under, so it is derived from what the line IS and never from its position
+   * or its words: rewording a line here must not orphan the overrides already saved, and no two
+   * lines of a tier may share one.
+   */
+  extra: Array<{ key: string; text: string }>;
 }
 
 export const TIER_BENEFITS: Record<TierCode, TierBenefit> = {
@@ -318,7 +324,7 @@ export const TIER_BENEFITS: Record<TierCode, TierBenefit> = {
     discount: 0,
     events: 0,
     tests: false,
-    extra: ["Tarjeta con su nombre y escalera de premios"]
+    extra: [{ key: "card", text: "Tarjeta con su nombre y escalera de premios" }]
   },
   plata: {
     mult: 1.0,
@@ -326,7 +332,7 @@ export const TIER_BENEFITS: Record<TierCode, TierBenefit> = {
     discount: 0.03,
     events: 0,
     tests: false,
-    extra: ["Prioridad en huecos de última hora y lista de espera"]
+    extra: [{ key: "priority", text: "Prioridad en huecos de última hora y lista de espera" }]
   },
   oro: {
     mult: 1.1,
@@ -335,7 +341,10 @@ export const TIER_BENEFITS: Record<TierCode, TierBenefit> = {
     events: 0,
     tests: true,
     extra: [
-      "Acceso preferente a la Happy Hour: huecos que el centro quiere llenar rápido, con un 30% de descuento"
+      {
+        key: "happyhour",
+        text: "Acceso preferente a la Happy Hour: huecos que el centro quiere llenar rápido, con un 30% de descuento"
+      }
     ]
   },
   platino: {
@@ -345,8 +354,11 @@ export const TIER_BENEFITS: Record<TierCode, TierBenefit> = {
     events: 1,
     tests: true,
     extra: [
-      "Acceso preferente a la Happy Hour: huecos que el centro quiere llenar rápido, con un 30% de descuento",
-      "Acceso 48 horas antes a tratamientos y productos nuevos"
+      {
+        key: "happyhour",
+        text: "Acceso preferente a la Happy Hour: huecos que el centro quiere llenar rápido, con un 30% de descuento"
+      },
+      { key: "access48", text: "Acceso 48 horas antes a tratamientos y productos nuevos" }
     ]
   },
   diamante: {
@@ -356,9 +368,12 @@ export const TIER_BENEFITS: Record<TierCode, TierBenefit> = {
     events: 2,
     tests: true,
     extra: [
-      "Acceso preferente a la Happy Hour: huecos que el centro quiere llenar rápido, con un 30% de descuento",
-      "Cita garantizada en 48 horas",
-      "Plan anual personalizado"
+      {
+        key: "happyhour",
+        text: "Acceso preferente a la Happy Hour: huecos que el centro quiere llenar rápido, con un 30% de descuento"
+      },
+      { key: "guaranteed48", text: "Cita garantizada en 48 horas" },
+      { key: "plan", text: "Plan anual personalizado" }
     ]
   }
 };
