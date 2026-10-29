@@ -71,6 +71,7 @@ export interface NotificationActor {
 
 export interface PointsCreditNotificationJob {
   memberId: string;
+  /** The balance when the job was queued. Informational: the job pushes the CURRENT balance. */
   newBalance: number;
   milestoneReached: boolean;
   tierChanged: boolean;
@@ -1193,10 +1194,13 @@ export class NotificationService {
 
     if (!member) return;
 
-    // The job carries the ledger's balance. A programme centre keeps progress in euros and shows
-    // points (ten per euro), the unit the pass was built with; sending the raw figure here would
-    // overwrite the card with the money spent.
-    const shownBalance = await displayPoints(this.prisma, member.clinicId, job.newBalance);
+    // The member's balance AS OF NOW, not the one the job was queued with. A delayed or retried
+    // job can run after a later credit has already synced the card; pushing its snapshot
+    // (job.newBalance) would put an older number back on it. The cached balance is written before
+    // the job is enqueued, so reading it here is never behind the credit that queued the job.
+    // A programme centre keeps progress in euros and shows points (ten per euro), the unit the
+    // pass was built with; sending the raw figure would overwrite the card with the money spent.
+    const shownBalance = await displayPoints(this.prisma, member.clinicId, member.pointsBalance);
 
     const object = member.walletObjects.find(
       (walletObject) =>

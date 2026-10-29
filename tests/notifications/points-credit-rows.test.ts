@@ -40,6 +40,7 @@ const build = (setup: Setup = {}) => {
         id: "member-1",
         clinicId: "clinic-1",
         tier: null,
+        pointsBalance: 120,
         walletObjects:
           setup.synced === false
             ? []

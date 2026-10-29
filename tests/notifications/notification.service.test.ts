@@ -31,7 +31,10 @@ const queuedDelivery = {
 
 describe("NotificationService", () => {
   describe("points credit", () => {
-    const creditedPoints = async (programmeCentre: boolean) => {
+    const creditedPoints = async (
+      programmeCentre: boolean,
+      balances: { job: number; current: number } = { job: 120, current: 120 }
+    ) => {
       const patches: Array<{ points: number }> = [];
       const bodies: string[] = [];
       const headers: string[] = [];
@@ -41,6 +44,7 @@ describe("NotificationService", () => {
             id: "member-1",
             clinicId: "clinic-1",
             tier: null,
+            pointsBalance: balances.current,
             walletObjects: [
               {
                 provider: WalletProviderType.GOOGLE,
@@ -85,7 +89,7 @@ describe("NotificationService", () => {
 
       await service.processPointsCredit({
         memberId: "member-1",
-        newBalance: 120,
+        newBalance: balances.job,
         milestoneReached: false,
         tierChanged: false
       });
@@ -98,6 +102,19 @@ describe("NotificationService", () => {
         points: [1200],
         bodies: ["Tu saldo ahora es 1200"],
         headers: ["Puntos actualizados"]
+      });
+    });
+
+    it("pushes the member's CURRENT balance, so a delayed job cannot send an older number", async () => {
+      // The job was queued at 120 (12 euros) but a later credit has since made it 150.
+      expect(await creditedPoints(true, { job: 120, current: 150 })).toEqual({
+        points: [1500],
+        bodies: ["Tu saldo ahora es 1500"],
+        headers: ["Puntos actualizados"]
+      });
+      expect(await creditedPoints(false, { job: 120, current: 150 })).toMatchObject({
+        points: [150],
+        bodies: ["Tu saldo ahora es 150"]
       });
     });
 
