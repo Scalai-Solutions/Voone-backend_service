@@ -68,6 +68,7 @@ model Clinic {
   referrals             Referral[]
   bonoPlans             BonoPlan[]
   memberBonos           MemberBono[]
+  clinicAudiences       ClinicAudience[]
 }
 
 model User {
@@ -1029,5 +1030,22 @@ model Referral {
   countedAt DateTime?
 
   @@index([referrerId, countedAt])
+  @@index([clinicId])
+}
+
+/// A named, saved audience (the Audiencias tab): the segment criteria a centre reuses,
+/// stored on the clinic so they survive a browser and the whole team sees the same list.
+model ClinicAudience {
+  id        String   @id @default(uuid())
+  clinicId  String
+  name      String
+  /// The same criteria a segment send accepts (tier, activeBono, inactiveDays, ...), kept as
+  /// JSON so what a centre saves is exactly what a send can target.
+  criteria  Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  clinic Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
   @@index([clinicId])
 }

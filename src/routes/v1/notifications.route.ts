@@ -8,11 +8,13 @@ import {
   NotificationForbiddenError,
   NotificationValidationError
 } from "../../modules/notifications/notification.errors";
+import type { AudienceService } from "../../modules/notifications/audience.service";
 import type {
   NotificationActor,
   NotificationService
 } from "../../modules/notifications/notification.service";
 import {
+  audienceCreateSchema,
   clinicLocationsSchema,
   notificationListQuerySchema,
   notificationMessageSchema,
@@ -22,6 +24,8 @@ import {
 
 export interface NotificationsRouterDeps {
   notifications: NotificationService;
+  /** Saved audiences (Audiencias): same surface, same clinic scoping and guard. */
+  audiences: Pick<AudienceService, "list" | "create" | "remove">;
 }
 
 const parse = <T>(schema: ZodType<T>, value: unknown): T => {
@@ -191,6 +195,38 @@ export const createNotificationsRouter = (deps: NotificationsRouterDeps): Router
         ),
         note: "Nearby alerts are shown by Google Wallet; text and timing are not configurable."
       });
+    })
+  );
+
+  // The centre's saved audiences (Audiencias): named segment criteria, persisted so they
+  // survive a browser. Same scoping as the notification routes above: a clinic's own staff.
+  router.get(
+    "/clinics/:clinicId/audiences",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      res.json(await deps.audiences.list(actorFrom(req), req.params.clinicId));
+    })
+  );
+
+  router.post(
+    "/clinics/:clinicId/audiences",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const input = parse(audienceCreateSchema, req.body);
+
+      res.status(201).json(await deps.audiences.create(actorFrom(req), req.params.clinicId, input));
+    })
+  );
+
+  // A JSON body, not 204: the frontend proxy parses the body of every 2xx response, and an
+  // empty body would make an honest delete look like a network failure on the dashboard.
+  router.delete(
+    "/clinics/:clinicId/audiences/:audienceId",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      res.json(
+        await deps.audiences.remove(actorFrom(req), req.params.clinicId, req.params.audienceId)
+      );
     })
   );
 
