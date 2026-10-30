@@ -28,6 +28,12 @@ export const segmentNotificationSchema = notificationMessageSchema.extend({
   segment: notificationSegmentSchema
 });
 
+/** A saved audience (the Audiencias tab): a name plus the same criteria a segment send accepts. */
+export const audienceCreateSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  criteria: notificationSegmentSchema
+});
+
 export const notificationListQuerySchema = z.object({
   status: z.string().trim().min(1).optional(),
   type: z.string().trim().min(1).optional(),
@@ -60,5 +66,6 @@ export const clinicLocationsSchema = z.object({
 export type NotificationMessageInput = z.infer<typeof notificationMessageSchema>;
 export type SegmentNotificationInput = z.infer<typeof segmentNotificationSchema>;
 export type NotificationSegmentInput = z.infer<typeof notificationSegmentSchema>;
+export type AudienceCreateInput = z.infer<typeof audienceCreateSchema>;
 export type NotificationSettingsInput = z.infer<typeof notificationSettingsSchema>;
 export type ClinicLocationInput = z.infer<typeof clinicLocationSchema>;

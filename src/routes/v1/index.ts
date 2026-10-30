@@ -61,6 +61,7 @@ import { clinicsRouter } from "./clinics.route";
 import { healthRouter } from "./health.route";
 import { membersRouter } from "./members.route";
 import { createNotificationsRouter } from "./notifications.route";
+import { AudienceService } from "../../modules/notifications/audience.service";
 import { templatesRouter } from "./templates.route";
 import { walletTestRouter } from "./wallet-test.route";
 
@@ -78,7 +79,13 @@ v1Router.use(clinicUsersRouter);
 v1Router.use(clinicsRouter);
 v1Router.use(membersRouter);
 v1Router.use(templatesRouter);
-v1Router.use(createNotificationsRouter({ notifications: notificationService }));
+v1Router.use(
+  createNotificationsRouter({
+    notifications: notificationService,
+    // Saved audiences count through the same resolveSegment a send uses, so the two agree.
+    audiences: new AudienceService(prisma, notificationService)
+  })
+);
 
 /**
  * Logo and hero uploads. Always mounted: with no Bunny configuration the routes answer 503
