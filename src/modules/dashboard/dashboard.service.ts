@@ -72,6 +72,38 @@ const RECENT_ACTIVITY = 10;
 const TOP_CLIENTS = 5;
 
 /**
+ * How many of the overview's queries run at once. Four, not ten: see `inRounds`.
+ */
+const OVERVIEW_QUERY_ROUND = 4;
+
+/**
+ * Runs the overview's queries in rounds rather than all at once.
+ *
+ * The pooler behind Supabase's session port caps concurrent client sessions (pool_size: 15 in
+ * session mode, shared with every other client of the database — other machines included), and
+ * this overview was the one place that fired ten queries in a single Promise.all: Prisma opened
+ * ten connections together, the pooler refused the ones that did not fit with EMAXCONNSESSION,
+ * and the dashboard died with a 500 while every one-at-a-time endpoint kept working. A round runs
+ * on the connections the pool already has open, and the next round waits for them to idle.
+ */
+const inRounds = async <T extends readonly unknown[]>(
+  thunks: { [K in keyof T]: () => Promise<T[K]> }
+): Promise<T> => {
+  const queue = thunks as unknown as Array<() => Promise<unknown>>;
+  const out: unknown[] = [];
+
+  for (let start = 0; start < queue.length; start += OVERVIEW_QUERY_ROUND) {
+    out.push(
+      ...(await Promise.all(
+        queue.slice(start, start + OVERVIEW_QUERY_ROUND).map((thunk) => thunk())
+      ))
+    );
+  }
+
+  return out as unknown as T;
+};
+
+/**
  * Ledger kinds that are a credit when positive. A negative ADJUSTMENT is a claw-back and is
  * never counted; EXPIRY and REDEEM only ever subtract.
  */
@@ -123,74 +155,83 @@ export class DashboardService {
       ledgerRedeemed,
       topSpenders,
       programme
-    ] = await Promise.all([
-      this.prisma.member.count({ where: { clinicId, erasedAt: null } }),
+    ] = await inRounds([
+      () =>
+        this.prisma.member.count({ where: { clinicId, erasedAt: null } }),
 
-      this.prisma.paidVisit.aggregate({
-        where: { clinicId },
-        _sum: { amountCents: true }
-      }),
+      () =>
+        this.prisma.paidVisit.aggregate({
+          where: { clinicId },
+          _sum: { amountCents: true }
+        }),
 
-      this.prisma.paidVisit.aggregate({
-        where: { clinicId, occurredAt: inMonth },
-        _sum: { amountCents: true }
-      }),
+      () =>
+        this.prisma.paidVisit.aggregate({
+          where: { clinicId, occurredAt: inMonth },
+          _sum: { amountCents: true }
+        }),
 
       // Cards that reached the provider. PENDING is issued-but-unconfirmed and counting
       // it would overstate adoption, which is the one number nobody should flatter.
-      this.prisma.walletObject.count({
-        where: { status: WalletSyncStatus.SYNCED, member: { clinicId } }
-      }),
+      () =>
+        this.prisma.walletObject.count({
+          where: { status: WalletSyncStatus.SYNCED, member: { clinicId } }
+        }),
 
-      this.prisma.pointsTransaction.findMany({
-        where: { clinicId },
-        orderBy: { createdAt: "desc" },
-        take: RECENT_ACTIVITY,
-        select: { id: true, reason: true, kind: true, createdAt: true }
-      }),
+      () =>
+        this.prisma.pointsTransaction.findMany({
+          where: { clinicId },
+          orderBy: { createdAt: "desc" },
+          take: RECENT_ACTIVITY,
+          select: { id: true, reason: true, kind: true, createdAt: true }
+        }),
 
       // Points credited this month: positive EARN (visits, with any staff bonus already
       // inside the row), REFERRAL (welcome credit) and ADJUSTMENT rows. Claw-backs (negative
       // ADJUSTMENT), EXPIRY and REDEEM are subtractions and never counted.
-      this.prisma.pointsTransaction.aggregate({
-        where: {
-          clinicId,
-          kind: { in: CREDIT_KINDS },
-          points: { gt: 0 },
-          createdAt: inMonth,
-          // Reconciliation rows written by scripts/backfill-points-ledger.ts
-          // (idempotencyKey "backfill:pre-ledger:<member>") restate points earned before the
-          // ledger existed; they are not points issued this month. A genuine staff ADJUSTMENT has
-          // no such prefix and is counted.
-          NOT: { idempotencyKey: { startsWith: "backfill:" } }
-        },
-        _sum: { points: true }
-      }),
+      () =>
+        this.prisma.pointsTransaction.aggregate({
+          where: {
+            clinicId,
+            kind: { in: CREDIT_KINDS },
+            points: { gt: 0 },
+            createdAt: inMonth,
+            // Reconciliation rows written by scripts/backfill-points-ledger.ts
+            // (idempotencyKey "backfill:pre-ledger:<member>") restate points earned before the
+            // ledger existed; they are not points issued this month. A genuine staff ADJUSTMENT has
+            // no such prefix and is counted.
+            NOT: { idempotencyKey: { startsWith: "backfill:" } }
+          },
+          _sum: { points: true }
+        }),
 
       // A double-points perk gets a redeemedAt too, when the next visit uses it up. That is the
       // visit spending it, not a reward handed over at the desk, so it is not counted (the card
       // makes the same distinction: it is "not a gift"). Filtered here, with the same predicate
       // the card uses, because a SQL NOT over a JSON path drops rows whose detail has no path.
-      this.prisma.memberReward.findMany({
-        where: { clinicId, redeemedAt: inMonth },
-        select: { kind: true, detail: true }
-      }),
+      () =>
+        this.prisma.memberReward.findMany({
+          where: { clinicId, redeemedAt: inMonth },
+          select: { kind: true, detail: true }
+        }),
 
-      this.prisma.pointsTransaction.count({
-        where: { clinicId, kind: PointsTransactionKind.REDEEM, createdAt: inMonth }
-      }),
+      () =>
+        this.prisma.pointsTransaction.count({
+          where: { clinicId, kind: PointsTransactionKind.REDEEM, createdAt: inMonth }
+        }),
 
       // Ties break on the member id so the order is stable between two requests.
-      this.prisma.paidVisit.groupBy({
-        by: ["memberId"],
-        where: { clinicId, occurredAt: inMonth, member: { erasedAt: null } },
-        _sum: { amountCents: true },
-        having: { amountCents: { _sum: { gt: 0 } } },
-        orderBy: [{ _sum: { amountCents: "desc" } }, { memberId: "asc" }],
-        take: TOP_CLIENTS
-      }),
+      () =>
+        this.prisma.paidVisit.groupBy({
+          by: ["memberId"],
+          where: { clinicId, occurredAt: inMonth, member: { erasedAt: null } },
+          _sum: { amountCents: true },
+          having: { amountCents: { _sum: { gt: 0 } } },
+          orderBy: [{ _sum: { amountCents: "desc" } }, { memberId: "asc" }],
+          take: TOP_CLIENTS
+        }),
 
-      isProgrammeCentre(this.prisma, clinicId)
+      () => isProgrammeCentre(this.prisma, clinicId)
     ]);
 
     const names = new Map(
@@ -219,7 +260,7 @@ export class DashboardService {
       topClientsThisMonth: topSpenders.map((row) => ({
         memberId: row.memberId,
         name: names.get(row.memberId) ?? "",
-        amountCents: row._sum.amountCents ?? 0
+        amountCents: row._sum?.amountCents ?? 0
       })),
       walletAdds,
       recentActivity: recent.map((row) => ({

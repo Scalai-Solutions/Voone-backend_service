@@ -43,6 +43,15 @@ model Clinic {
   notificationsMonthlyQuota  Int @default(8)
   notificationsUsedThisMonth Int @default(0)
 
+  /// Billing details for invoicing the centre: who and where the invoice goes. All optional:
+  /// a centre that never filled them in is still billable by its commercial name and address.
+  /// An empty string clears a field (null in the database).
+  billingName        String?
+  billingTaxId       String?
+  billingEmail       String?
+  billingAddressLine String?
+  billingPostalCode  String?
+
   users                 User[]
   treatments            ClinicTreatment[]
   template              ClinicTemplate?
