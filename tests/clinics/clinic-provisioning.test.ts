@@ -529,6 +529,11 @@ describe("toProvisionedSummary", () => {
         voonePlan: "starter",
         notificationsMonthlyQuota: 8,
         notificationsUsedThisMonth: 0,
+        billingName: null,
+        billingTaxId: null,
+        billingEmail: null,
+        billingAddressLine: null,
+        billingPostalCode: null,
         createdAt: new Date(),
         updatedAt: new Date()
       },
@@ -570,6 +575,11 @@ describe("toProvisionedSummary", () => {
           voonePlan: "starter",
           notificationsMonthlyQuota: 8,
           notificationsUsedThisMonth: 0,
+          billingName: null,
+          billingTaxId: null,
+          billingEmail: null,
+          billingAddressLine: null,
+          billingPostalCode: null,
           createdAt: new Date(),
           updatedAt: new Date()
         },
