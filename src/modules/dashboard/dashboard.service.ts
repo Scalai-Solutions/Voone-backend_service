@@ -86,9 +86,9 @@ const OVERVIEW_QUERY_ROUND = 4;
  * and the dashboard died with a 500 while every one-at-a-time endpoint kept working. A round runs
  * on the connections the pool already has open, and the next round waits for them to idle.
  */
-const inRounds = async <T extends readonly unknown[]>(
-  thunks: { [K in keyof T]: () => Promise<T[K]> }
-): Promise<T> => {
+const inRounds = async <T extends readonly unknown[]>(thunks: {
+  [K in keyof T]: () => Promise<T[K]>;
+}): Promise<T> => {
   const queue = thunks as unknown as Array<() => Promise<unknown>>;
   const out: unknown[] = [];
 
@@ -156,8 +156,7 @@ export class DashboardService {
       topSpenders,
       programme
     ] = await inRounds([
-      () =>
-        this.prisma.member.count({ where: { clinicId, erasedAt: null } }),
+      () => this.prisma.member.count({ where: { clinicId, erasedAt: null } }),
 
       () =>
         this.prisma.paidVisit.aggregate({

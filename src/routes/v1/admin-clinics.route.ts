@@ -118,8 +118,16 @@ const passwordChangeSchema = z
  */
 const clinicDetailsSchema = z.object({
   name: z.string().trim().min(1, "El nombre del centro no puede quedar vacío.").optional(),
-  addressLine: z.string().trim().min(1, "La dirección del centro no puede quedar vacía.").optional(),
-  pincode: z.string().trim().min(1, "El código postal del centro no puede quedar vacío.").optional(),
+  addressLine: z
+    .string()
+    .trim()
+    .min(1, "La dirección del centro no puede quedar vacía.")
+    .optional(),
+  pincode: z
+    .string()
+    .trim()
+    .min(1, "El código postal del centro no puede quedar vacío.")
+    .optional(),
   billingName: z.string().optional(),
   billingTaxId: z.string().optional(),
   billingEmail: z
@@ -783,7 +791,9 @@ adminClinicsRouter.patch(
         ...(isActive !== undefined ? { isActive } : {}),
         ...(voonePlan ? { voonePlan, notificationsMonthlyQuota } : {}),
         ...(details.data.name !== undefined ? { name: details.data.name } : {}),
-        ...(details.data.addressLine !== undefined ? { addressLine: details.data.addressLine } : {}),
+        ...(details.data.addressLine !== undefined
+          ? { addressLine: details.data.addressLine }
+          : {}),
         ...(details.data.pincode !== undefined ? { pincode: details.data.pincode } : {}),
         ...(billingName !== undefined ? { billingName } : {}),
         ...(billingTaxId !== undefined ? { billingTaxId } : {}),
