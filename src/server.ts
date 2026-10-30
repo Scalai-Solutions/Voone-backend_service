@@ -64,17 +64,35 @@ const server = app.listen(config.PORT, () => {
 
 // Jobs already running are finished rather than killed: a sync cut off midway leaves a
 // WalletObject row PENDING with no retry scheduled.
+//
+// Idempotent and registered once per signal: a second SIGINT arriving while the first
+// shutdown is still closing workers would race it through the same $disconnect. The 10s
+// ceiling exits even if closing hangs (a keep-alive socket that never closes is enough),
+// which is also what lets `tsx watch` replace the process cleanly instead of force-killing
+// it and leaving the pooler's sessions orphaned.
+let shuttingDown = false;
+
 const shutdown = async (signal: string): Promise<void> => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
   console.log(`${signal} received, shutting down`);
 
-  server.close();
-  birthdayCron?.stop();
-  await walletWorker?.close();
-  await notificationWorker?.close();
-  await prisma.$disconnect();
+  setTimeout(() => {
+    console.error("Shutdown timed out; exiting.");
+    process.exit(0);
+  }, 10_000).unref();
 
-  process.exit(0);
+  try {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    birthdayCron?.stop();
+    await walletWorker?.close();
+    await notificationWorker?.close();
+    await prisma.$disconnect();
+  } finally {
+    process.exit(0);
+  }
 };
 
-process.on("SIGTERM", () => void shutdown("SIGTERM"));
-process.on("SIGINT", () => void shutdown("SIGINT"));
+process.once("SIGTERM", () => void shutdown("SIGTERM"));
+process.once("SIGINT", () => void shutdown("SIGINT"));

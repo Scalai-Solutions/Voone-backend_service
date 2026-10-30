@@ -32,8 +32,8 @@ const main = async (): Promise<void> => {
     process.exit(0);
   };
 
-  process.on("SIGTERM", () => void shutdown("SIGTERM"));
-  process.on("SIGINT", () => void shutdown("SIGINT"));
+  process.once("SIGTERM", () => void shutdown("SIGTERM"));
+  process.once("SIGINT", () => void shutdown("SIGINT"));
 };
 
 void main();
