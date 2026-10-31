@@ -46,6 +46,8 @@ The clinic never sees `programId`, mail bookkeeping or Voone staff emails; it ge
 | `POST /admin/change-requests/:id/messages`     | `{body}`                               | 201 ticket + messages (VOONE author)                                                      |
 
 | `POST /admin/change-requests/:id/apply` | `{note?}` | `{request, applied, warnings}` |
+| `POST /admin/change-requests/:id/draft` | `{}` | `{request, programId}` |
+| `POST /admin/clinics/:clinicId/onboarding/programs/:programId/resolve-tickets` | `{note}` (required) | `{resolved: string[]}` |
 
 `q` is a case-insensitive text search on the title and the clinic's name.
 
@@ -120,3 +122,18 @@ is "Applying this will change the catalogue compared with the active programme (
 for an edited or removed treatment each live reward that uses it ("Milestone 3 reward "Bio-Pen"
 uses this treatment.", or "The recurring reward ..."). Rewards reference items by the catalogue
 row's `externalId`, matched against the programme's `output.chosen[].o.items[].id` and `output.rec`.
+
+## Drafts and resolving linked tickets (admin)
+
+`POST /admin/change-requests/:id/draft` (REWARD and LEVEL tickets only, 409 otherwise or when the
+ticket is closed): reuses the clinic's BORRADOR programme, else clones its ACTIVO one with
+`OnboardingService.cloneDraft`; with neither it is a 409 ("no active programme and no draft").
+It sets `programId` on the ticket and moves OPEN to IN_PROGRESS (firing `onStatusChanged`); it
+never pre-applies the proposed reward, the admin edits the draft. Several tickets may link one
+draft; a ticket links at most one.
+
+`POST /admin/clinics/:clinicId/onboarding/programs/:programId/resolve-tickets` (after publishing):
+resolves every OPEN / IN_PROGRESS ticket of that clinic linked to the programme, RESOLVED with the
+admin as resolver and the given note, firing `onStatusChanged` for each. Only for an ACTIVO
+programme (409 for a draft or superseded one, 404 for another clinic's), so the owners are told
+only once the change is live.

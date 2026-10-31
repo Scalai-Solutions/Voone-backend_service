@@ -9,9 +9,11 @@ import {
   ChangeRequestConflictError,
   ChangeRequestLimitError,
   ChangeRequestNotFoundError,
-  ChangeRequestValidationError
+  ChangeRequestValidationError,
+  ProgrammeNotFoundError
 } from "../../common/errors/change-request.errors";
 import { APPLICABLE_TYPES, type AppliedChange, type CatalogueChanges } from "./catalogue-changes";
+import type { ProgramDrafts } from "./program-drafts";
 import {
   noopChangeRequestNotifier,
   type ChangeRequestNotifier,
@@ -166,6 +168,13 @@ export interface ChangeRequestRepository {
    * with a transaction-bound client, then writes the patch `work` returns. Null when the ticket
    * was already closed. If `work` throws, nothing is kept, the ticket included.
    */
+  /**
+   * Links the ticket to a programme and moves OPEN to IN_PROGRESS, only while it is
+   * unresolved. Returns the status it had, or null when it was closed (or moved) meanwhile.
+   */
+  linkProgram(id: string, programId: string): Promise<ChangeRequestStatus | null>;
+  /** The clinic's OPEN or IN_PROGRESS tickets linked to the programme. */
+  findUnresolvedByProgram(clinicId: string, programId: string): Promise<ChangeRequestRecord[]>;
   resolveAtomically<T>(
     id: string,
     work: (db: PrismaClient) => Promise<{ result: T; patch: StatusPatch }>
@@ -252,6 +261,11 @@ export interface AdminRequestDetail extends AdminRequestView {
    * when there is nothing to say.
    */
   catalogueImpact: string[] | null;
+}
+
+export interface DraftResult {
+  request: AdminRequestDetail;
+  programId: string;
 }
 
 export interface ApplyResult {
@@ -359,6 +373,8 @@ export interface ChangeRequestServiceOptions {
   now?: () => Date;
   /** Applies service and bono tickets and reports their effect on the live programme. */
   changes?: CatalogueChanges;
+  /** Starts programme drafts from REWARD and LEVEL tickets. */
+  programs?: ProgramDrafts;
 }
 
 export interface ClinicListQuery {
@@ -382,17 +398,16 @@ const WINDOW_CLOSED_MESSAGE = `Esta solicitud se cerró hace más de ${REOPEN_WI
 const NOT_CLOSED_MESSAGE = "Esta solicitud ya está abierta.";
 const STALE_MESSAGE =
   "La solicitud ha cambiado mientras la editabas. Recárgala e inténtalo de nuevo.";
-const alreadyClosed = () =>
-  new ChangeRequestConflictError(
-    "CHANGE_REQUEST_ALREADY_CLOSED",
-    "This request is already resolved or rejected, so it cannot be applied."
-  );
+const alreadyClosed = (
+  message = "This request is already resolved or rejected, so it cannot be applied."
+) => new ChangeRequestConflictError("CHANGE_REQUEST_ALREADY_CLOSED", message);
 const NOTE_REQUIRED_MESSAGE = "Escribe una nota de resolución.";
 
 export class ChangeRequestService {
   private readonly notifier: ChangeRequestNotifier;
   private readonly now: () => Date;
   private readonly changes?: CatalogueChanges;
+  private readonly programs?: ProgramDrafts;
 
   constructor(
     private readonly repo: ChangeRequestRepository,
@@ -401,6 +416,7 @@ export class ChangeRequestService {
     this.notifier = options.notifier ?? noopChangeRequestNotifier;
     this.now = options.now ?? (() => new Date());
     this.changes = options.changes;
+    this.programs = options.programs;
   }
 
   /* ---- the clinic's side ---- */
@@ -667,6 +683,132 @@ export class ChangeRequestService {
     );
 
     return { request: await this.withImpact(after), ...done };
+  }
+
+  /**
+   * Starts the programme change a REWARD or LEVEL ticket asks for: reuses the clinic's draft or
+   * clones its ACTIVE programme into one (never pre-applying the proposed values; the admin
+   * edits the draft), links it to the ticket and moves OPEN to IN_PROGRESS.
+   */
+  async adminDraft(id: string): Promise<DraftResult> {
+    const programs = this.programs;
+
+    if (!programs) {
+      throw new ChangeRequestConflictError(
+        "CHANGE_REQUEST_NOT_APPLICABLE",
+        "Programme drafts are not available."
+      );
+    }
+
+    const ticket = await this.requireAny(id);
+
+    if (ticket.type !== "REWARD" && ticket.type !== "LEVEL") {
+      throw new ChangeRequestConflictError(
+        "CHANGE_REQUEST_NOT_APPLICABLE",
+        "Only REWARD and LEVEL requests can start a programme draft."
+      );
+    }
+
+    if (isClosed(ticket.status))
+      throw alreadyClosed("This request is already resolved or rejected.");
+
+    let programId = await programs.draftProgramId(ticket.clinicId);
+
+    if (!programId) {
+      const active = await programs.activeProgramId(ticket.clinicId);
+
+      if (!active) {
+        throw new ChangeRequestConflictError(
+          "CHANGE_REQUEST_NO_PROGRAMME",
+          "This clinic has no active programme and no draft to work from."
+        );
+      }
+
+      try {
+        programId = await programs.cloneDraft(ticket.clinicId, active);
+      } catch (error) {
+        // Two simultaneous clones: the loser finds the winner's draft and uses it.
+        programId = await programs.draftProgramId(ticket.clinicId);
+
+        if (!programId) throw error;
+      }
+    }
+
+    const previous = await this.repo.linkProgram(id, programId);
+
+    if (!previous) throw alreadyClosed("This request is already resolved or rejected.");
+
+    const after = await this.requireAny(id);
+
+    if (previous === "OPEN") {
+      await this.notify("onStatusChanged", () =>
+        this.notifier.onStatusChanged(after, "OPEN", "VOONE")
+      );
+    }
+
+    return { request: await this.withImpact(after), programId };
+  }
+
+  /**
+   * After the admin publishes a draft: resolves every open ticket linked to that programme,
+   * with one note. Only for the ACTIVE programme, since a draft is not yet an answer.
+   */
+  async adminResolveLinked(
+    clinicId: string,
+    programId: string,
+    actor: AdminActor,
+    note: string
+  ): Promise<{ resolved: string[] }> {
+    const text = note.trim();
+
+    if (text === "") throw new ChangeRequestValidationError(NOTE_REQUIRED_MESSAGE);
+
+    const programs = this.programs;
+
+    if (!programs) {
+      throw new ChangeRequestConflictError(
+        "CHANGE_REQUEST_NOT_APPLICABLE",
+        "Programme drafts are not available."
+      );
+    }
+
+    const status = await programs.statusOf(clinicId, programId);
+
+    if (!status) throw new ProgrammeNotFoundError();
+
+    if (status !== "ACTIVO") {
+      throw new ChangeRequestConflictError(
+        "CHANGE_REQUEST_PROGRAMME_NOT_ACTIVE",
+        "Only the published (active) programme's tickets can be resolved; publish the draft first."
+      );
+    }
+
+    const now = this.now();
+    const done: Array<{ id: string; previous: ChangeRequestStatus }> = [];
+
+    for (const ticket of await this.repo.findUnresolvedByProgram(clinicId, programId)) {
+      const moved = await this.repo.transition(ticket.id, ticket.status, {
+        status: "RESOLVED",
+        resolvedAt: now,
+        resolvedByEmail: actor.email,
+        resolutionNote: text
+      });
+
+      // A ticket someone else moved meanwhile is theirs; skip it rather than overwrite.
+      if (moved) done.push({ id: ticket.id, previous: ticket.status });
+    }
+
+    for (const { id, previous } of done) {
+      const after = await this.repo.find(id);
+
+      if (after) {
+        await this.notify("onStatusChanged", () =>
+          this.notifier.onStatusChanged(after, previous, "VOONE")
+        );
+      }
+    }
+
+    return { resolved: done.map((entry) => entry.id) };
   }
 
   /* ---- shared ---- */

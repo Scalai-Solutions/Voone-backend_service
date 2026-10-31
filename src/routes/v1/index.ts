@@ -34,6 +34,7 @@ import {
   updatePlan
 } from "../../modules/bonos/bono-plan.service";
 import { cancelMemberBono, listForMember } from "../../modules/bonos/member-bono.service";
+import { PrismaProgramDrafts } from "../../modules/change-requests/program-drafts";
 import { PrismaCatalogueChanges } from "../../modules/change-requests/catalogue-changes";
 import { EmailChangeRequestNotifier } from "../../modules/change-requests/email.notifier";
 import { PrismaChangeRequestMailStore } from "../../modules/change-requests/prisma.mail-store";
@@ -192,9 +193,11 @@ if (pointsService) {
  */
 const catalogRepository = new PrismaCatalogRepository(prisma);
 
+const onboardingService = new OnboardingService(prisma, catalogRepository);
+
 v1Router.use(
   createOnboardingRouter({
-    onboarding: new OnboardingService(prisma, catalogRepository),
+    onboarding: onboardingService,
     catalog: catalogRepository,
     visits: pointsService
       ? new VisitService(prisma, pointsService, undefined, (visit) =>
@@ -245,6 +248,7 @@ v1Router.use(
   createChangeRequestsRouter({
     service: new ChangeRequestService(new PrismaChangeRequestRepository(prisma), {
       changes: new PrismaCatalogueChanges(prisma),
+      programs: new PrismaProgramDrafts(prisma, onboardingService),
       notifier: new EmailChangeRequestNotifier({
         mailer: new SendGridMailer({
           apiKey: config.SENDGRID_API_KEY,

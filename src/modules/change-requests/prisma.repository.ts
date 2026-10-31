@@ -180,4 +180,33 @@ export class PrismaChangeRequestRepository implements ChangeRequestRepository {
       return result;
     });
   }
+
+  async linkProgram(id: string, programId: string): Promise<ChangeRequestStatus | null> {
+    return this.db.$transaction(async (tx) => {
+      const current = await tx.changeRequest.findUnique({
+        where: { id },
+        select: { status: true }
+      });
+
+      if (!current || !UNRESOLVED.includes(current.status)) return null;
+
+      const { count } = await tx.changeRequest.updateMany({
+        where: { id, status: current.status },
+        data: {
+          programId,
+          ...(current.status === "OPEN" ? { status: "IN_PROGRESS" as const } : {})
+        }
+      });
+
+      return count === 1 ? current.status : null;
+    });
+  }
+
+  findUnresolvedByProgram(clinicId: string, programId: string): Promise<ChangeRequestRecord[]> {
+    return this.db.changeRequest.findMany({
+      where: { clinicId, programId, status: { in: UNRESOLVED } },
+      include: { clinic: CLINIC },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }]
+    });
+  }
 }

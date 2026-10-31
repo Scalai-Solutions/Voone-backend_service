@@ -54,11 +54,23 @@ export type ChangeRequestConflictCode =
   | "CHANGE_REQUEST_ALREADY_CLOSED"
   | "CHANGE_REQUEST_NOT_APPLICABLE"
   | "CHANGE_REQUEST_APPLY_FAILED"
-  | "CHANGE_REQUEST_NO_PROGRAMME";
+  | "CHANGE_REQUEST_NO_PROGRAMME"
+  | "CHANGE_REQUEST_PROGRAMME_NOT_ACTIVE";
 
 /** The ticket is not in a state that allows this. The code says which rule refused. */
 export class ChangeRequestConflictError extends AppError {
   constructor(code: ChangeRequestConflictCode, message: string) {
     super(message, { statusCode: 409, code, expose: true });
+  }
+}
+
+/** No programme with that id at this clinic. One answer for "absent" and "another clinic's". */
+export class ProgrammeNotFoundError extends AppError {
+  constructor() {
+    super("Programme not found for this clinic.", {
+      statusCode: 404,
+      code: "PROGRAMME_NOT_FOUND",
+      expose: true
+    });
   }
 }

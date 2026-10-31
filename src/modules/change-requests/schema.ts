@@ -251,6 +251,14 @@ export const reopenSchema = strict({ message: lines(1, TEXT_MAX, MESSAGE_ERROR).
 /** Applying takes only an optional note for the thread's resolution; the ticket carries the change. */
 export const applySchema = strict({ note: lines(0, TEXT_MAX, MESSAGE_ERROR).optional() });
 
+/** A body that carries nothing: the ticket id in the path says it all. */
+export const strictEmptySchema = strict({});
+
+/** The note every ticket linked to a published programme is resolved with. */
+export const resolveLinkedSchema = strict({
+  note: lines(1, TEXT_MAX, "A resolution note is required (up to 2000 characters).")
+});
+
 export const statusUpdateSchema = strict({
   status: z.enum(ChangeRequestStatus, { error: "Estado no válido." }),
   resolutionNote: z

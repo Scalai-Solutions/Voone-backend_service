@@ -19,6 +19,8 @@ import {
   messageSchema,
   ownerListQuerySchema,
   reopenSchema,
+  resolveLinkedSchema,
+  strictEmptySchema,
   statusUpdateSchema
 } from "../../modules/change-requests/schema";
 import type { ChangeRequestService } from "../../modules/change-requests/service";
@@ -175,6 +177,31 @@ export const createChangeRequestsRouter = (deps: ChangeRequestsRouterDeps): Rout
       const { note } = parse(applySchema, req.body);
 
       res.json(await service.adminApply(req.params.id, actor, note));
+    })
+  );
+
+  router.post(
+    "/admin/change-requests/:id/draft",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      adminActorOf(req);
+      parse(strictEmptySchema, req.body);
+
+      res.json(await service.adminDraft(req.params.id));
+    })
+  );
+
+  // Lives under the programme's own path, which is where the admin is when they publish.
+  router.post(
+    "/admin/clinics/:clinicId/onboarding/programs/:programId/resolve-tickets",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const actor = adminActorOf(req);
+      const { note } = parse(resolveLinkedSchema, req.body);
+
+      res.json(
+        await service.adminResolveLinked(req.params.clinicId, req.params.programId, actor, note)
+      );
     })
   );
 

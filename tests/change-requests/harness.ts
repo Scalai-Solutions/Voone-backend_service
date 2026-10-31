@@ -5,6 +5,9 @@ import { afterAll, beforeAll, beforeEach, expect } from "vitest";
 import { errorHandler } from "../../src/common/middleware/error-handler";
 import { findClinicBySlug } from "../../src/modules/clinics/clinic.service";
 import { PrismaCatalogueChanges } from "../../src/modules/change-requests/catalogue-changes";
+import { PrismaProgramDrafts } from "../../src/modules/change-requests/program-drafts";
+import { PrismaCatalogRepository } from "../../src/modules/onboarding/catalog.repository";
+import { OnboardingService } from "../../src/modules/onboarding/onboarding.service";
 import { PrismaChangeRequestRepository } from "../../src/modules/change-requests/prisma.repository";
 import { ChangeRequestService } from "../../src/modules/change-requests/service";
 import { createChangeRequestsRouter } from "../../src/routes/v1/change-requests.route";
@@ -38,7 +41,11 @@ export const useRouteHarness = (prefix: string) => {
   const slugs = [slugA, slugB];
   const db = new PrismaClient();
   const service = new ChangeRequestService(new PrismaChangeRequestRepository(db), {
-    changes: new PrismaCatalogueChanges(db)
+    changes: new PrismaCatalogueChanges(db),
+    programs: new PrismaProgramDrafts(
+      db,
+      new OnboardingService(db, new PrismaCatalogRepository(db))
+    )
   });
   const app = express();
 
@@ -83,6 +90,7 @@ export const useRouteHarness = (prefix: string) => {
     await db.changeRequest.deleteMany({ where: { clinic } });
     await db.clinicTreatment.deleteMany({ where: { clinic } });
     await db.bonoPlan.deleteMany({ where: { clinic } });
+    await db.onboardingProgram.deleteMany({ where: { clinic } });
   };
   let a: Clinic;
   let b: Clinic;
