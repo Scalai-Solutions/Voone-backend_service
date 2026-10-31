@@ -17,6 +17,7 @@ import { buildNotificationService } from "../../modules/notifications/notificati
 import { buildWalletSyncQueue } from "../../wallet/wallet.composition";
 import { buildImageStorage } from "../../modules/media/image-storage";
 import { createBonosRouter } from "./bonos.route";
+import { createChangeRequestsRouter } from "./change-requests.route";
 import { createPointsRouter } from "./points.route";
 import { createImagesRouter } from "./images.route";
 import { createOnboardingRouter } from "./onboarding.route";
@@ -33,6 +34,8 @@ import {
   updatePlan
 } from "../../modules/bonos/bono-plan.service";
 import { cancelMemberBono, listForMember } from "../../modules/bonos/member-bono.service";
+import { PrismaChangeRequestRepository } from "../../modules/change-requests/prisma.repository";
+import { ChangeRequestService } from "../../modules/change-requests/service";
 import { PrismaCatalogRepository } from "../../modules/onboarding/catalog.repository";
 import { OnboardingService } from "../../modules/onboarding/onboarding.service";
 import {
@@ -224,6 +227,19 @@ v1Router.use(
       listForMember: (clinicId, memberId) => listForMember(prisma, clinicId, memberId),
       cancel: (clinicId, memberId, bonoId) => cancelMemberBono(prisma, clinicId, memberId, bonoId)
     },
+    findClinic: (slug) => findClinicBySlug(prisma, slug),
+    clinicExists: async (clinicId) => (await prisma.clinic.count({ where: { id: clinicId } })) > 0
+  })
+);
+
+/**
+ * Change requests: a centre's tickets to Voone for what the owner cannot edit directly. Only
+ * the database is needed, so unconditional. The notifier defaults to a no-op until the email
+ * task supplies one.
+ */
+v1Router.use(
+  createChangeRequestsRouter({
+    service: new ChangeRequestService(new PrismaChangeRequestRepository(prisma)),
     findClinic: (slug) => findClinicBySlug(prisma, slug),
     clinicExists: async (clinicId) => (await prisma.clinic.count({ where: { id: clinicId } })) > 0
   })
