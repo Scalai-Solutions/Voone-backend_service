@@ -24,7 +24,7 @@ import { itemsTitle, rewardTitle } from "./reward-title";
  * Neither what it costs the centre nor what it is worth at retail is here: the feedback is
  * explicit that a centre should see what it gives and what its clients spend, not what each gift
  * is worth. Value stays in the engine and the stored programme, because choosing rewards needs
- * it; it just never reaches this projection.
+ * it; it reaches this projection only as the admin-only `rewardValueEuro` on a milestone.
  */
 export interface PresentedItem {
   name: string;
@@ -47,6 +47,12 @@ export interface PresentedMilestone {
   month: number;
   /** For a tier-up row: the tier entered. */
   tier?: { key: TierCode; label: string };
+  /**
+   * ADMIN ONLY (see `PresentOptions.forAdmin`): what the reward is worth at retail, in whole euros,
+   * the sum of the items for a combo. The admin reads it to see what a swap does to the ladder; a
+   * centre's own presentation never carries it. Present only on reward milestones.
+   */
+  rewardValueEuro?: number;
   reward?: {
     name: string;
     items: PresentedItem[];
@@ -180,6 +186,9 @@ export const presentProgram = (
             items: itemsOf(a.items)
           }))
         };
+
+        // The engine's own retail value for the reward (`o.value`, already the sum for a combo).
+        if (options.forAdmin) base.rewardValueEuro = euros(chosen.o.value);
       }
 
       if (m.type === "ventaja" && m.perk) {

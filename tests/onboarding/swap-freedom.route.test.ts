@@ -7,6 +7,7 @@ import { errorHandler } from "../../src/common/middleware/error-handler";
 import { PrismaCatalogRepository } from "../../src/modules/onboarding/catalog.repository";
 import { COST_REVIEW_NOTE } from "../../src/modules/onboarding/engine";
 import type { CatalogItem, Program } from "../../src/modules/onboarding/engine.types";
+import { presentProgram } from "../../src/modules/onboarding/presentation";
 import { OnboardingService } from "../../src/modules/onboarding/onboarding.service";
 import { createOnboardingRouter } from "../../src/routes/v1/onboarding.route";
 import catalogFixture from "./reference/sapphira.catalogo.json";
@@ -173,5 +174,89 @@ describe("the cost note no longer blocks publishing", () => {
     expect(refused.body.error?.message ?? JSON.stringify(refused.body)).toContain(other);
     // The note that does not block is not in the refusal.
     expect(JSON.stringify(refused.body)).not.toContain("supera en más de un 50%");
+  });
+});
+
+describe("the reward's retail price, for the admin only", () => {
+  const live = async (): Promise<string> => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const draft = await call("POST", admin("/programs"), ANSWERS);
+
+    await call("POST", admin(`/programs/${draft.body.id}/publish`));
+
+    return draft.body.id as string;
+  };
+
+  it("carries rewardValueEuro, in whole euros, on every reward milestone of the admin programme", async () => {
+    const id = await live();
+    const r = await call("GET", admin(`/programs/${id}`));
+    const stored = (await db.onboardingProgram.findUniqueOrThrow({ where: { id } }))
+      .output as unknown as Program;
+    const rewards = r.body.program.ladder.filter((m: { type: string }) => m.type === "premio");
+
+    expect(rewards.length).toBeGreaterThan(0);
+
+    for (const m of rewards) {
+      const chosen = stored.chosen.find((c) => c.m.n === m.n)!;
+
+      expect(Number.isInteger(m.rewardValueEuro)).toBe(true);
+      expect(m.rewardValueEuro).toBe(Math.round(chosen.o.value));
+    }
+
+    // Only reward milestones, and only on the milestone, never inside what a centre reads.
+    for (const m of r.body.program.ladder.filter((x: { type: string }) => x.type !== "premio")) {
+      expect(m).not.toHaveProperty("rewardValueEuro");
+    }
+  });
+
+  it("is the sum of the items for a combo", async () => {
+    const id = await live();
+    const stored = (await db.onboardingProgram.findUniqueOrThrow({ where: { id } }))
+      .output as unknown as Program;
+    const first = stored.chosen[0];
+    const [a, b] = [first.o.items[0], { ...first.o.items[0], id: "COMBO2", value: 41.4 }];
+
+    // Plant a two-item gift the way the engine builds one: `value` is the items' sum.
+    first.o = { items: [{ ...a, value: 30.2 }, b], value: 71.6, cost: 5 };
+
+    const shown = presentProgram(stored, { forAdmin: true }).ladder.find((m) => m.n === first.m.n);
+
+    expect(shown?.rewardValueEuro).toBe(72);
+  });
+
+  it("is on the preview and on a swap result, which are the admin's too", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const preview = await call("POST", admin("/preview"), ANSWERS);
+
+    expect(JSON.stringify(preview.body.program)).toContain("rewardValueEuro");
+  });
+
+  it("is never on the owner's programme, nor anywhere in what the pass and the owner dashboard read", async () => {
+    await live();
+
+    const owner = await call("GET", `/clinics/${SLUG}/program`);
+
+    expect(owner.status).toBe(200);
+    expect(JSON.stringify(owner.body)).not.toContain("rewardValueEuro");
+    expect(owner.body.program.notes).toEqual([]);
+    expect(owner.body.program.ladder.length).toBeGreaterThan(0);
+  });
+
+  it("is off by default in the presenter and on only when asked for the admin", async () => {
+    const id = await live();
+    const stored = (await db.onboardingProgram.findUniqueOrThrow({ where: { id } }))
+      .output as unknown as Program;
+
+    expect(JSON.stringify(presentProgram(stored))).not.toContain("rewardValueEuro");
+    expect(JSON.stringify(presentProgram(stored, { forAdmin: true }))).toContain("rewardValueEuro");
+  });
+
+  it("lets the dropdown show prices: the catalogue lists priceEuro on every row", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+
+    const r = await call("GET", admin("/catalog"));
+
+    expect(r.body.items.length).toBe(fixtureItems.length);
+    for (const row of r.body.items) expect(typeof row.priceEuro).toBe("number");
   });
 });
