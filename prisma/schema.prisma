@@ -60,6 +60,7 @@ model Clinic {
   notifications         Notification[]
   notificationSettings  ClinicNotificationSettings?
   automations           ClinicAutomation[]
+  changeRequests        ChangeRequest[]
   notificationLocations ClinicLocation[]
   notificationAuditLogs NotificationAuditLog[]
   catalogItems          CatalogItem[]
@@ -555,8 +556,8 @@ model ClinicNotificationSettings {
   bonoReminderNotify       Boolean @default(true)
   bonoReminderLastRunMonth String?
 
-  createdAt          DateTime             @default(now())
-  updatedAt          DateTime             @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 /// A clinic's copy and switch for one automated message. Absent rows read as the catalog
@@ -813,7 +814,8 @@ model OnboardingProgram {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  rewards MemberReward[]
+  rewards        MemberReward[]
+  changeRequests ChangeRequest[]
 
   @@unique([clinicId, version])
   @@index([clinicId, status])
@@ -1092,4 +1094,80 @@ model ClinicAudience {
   clinic Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
 
   @@index([clinicId])
+}
+
+enum ChangeRequestType {
+  REWARD
+  LEVEL
+  SERVICE_EDIT
+  SERVICE_ADD
+  SERVICE_REMOVE
+  BONO
+  OTHER
+}
+
+enum ChangeRequestStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  REJECTED
+}
+
+enum ChangeRequestAuthorKind {
+  CLINIC
+  VOONE
+}
+
+/// A ticket from a centre asking Voone to change something the owner cannot edit directly
+/// (rewards, levels, the service catalogue, bonos). Voone resolves it by hand.
+model ChangeRequest {
+  id        String              @id @default(uuid())
+  clinicId  String
+  clinic    Clinic              @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  type      ChangeRequestType
+  /// What the request is about, e.g. {milestone}, {tier}, {treatmentId} or {bonoId}.
+  targetRef Json?
+  title     String
+  reason    String
+  /// The values the centre proposes, validated per type in the change-requests module.
+  proposed  Json?
+  status    ChangeRequestStatus @default(OPEN)
+
+  createdByEmail String
+  createdByRole  String
+
+  resolvedByEmail String?
+  resolvedAt      DateTime?
+  resolutionNote  String?
+
+  /// The draft programme created from this ticket, when there is one. Several tickets may
+  /// point at one draft; a ticket links at most one.
+  programId String?
+  program   OnboardingProgram? @relation(fields: [programId], references: [id], onDelete: SetNull)
+
+  /// Best-effort mail bookkeeping: a ticket is stored first and never lost to a mail failure.
+  emailSentAt    DateTime?
+  lastEmailError String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages ChangeRequestMessage[]
+
+  @@index([clinicId, status, createdAt])
+  @@index([status, createdAt])
+  @@index([programId])
+}
+
+/// One entry in a ticket's thread, from the centre or from Voone.
+model ChangeRequestMessage {
+  id          String                  @id @default(uuid())
+  requestId   String
+  request     ChangeRequest           @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  authorKind  ChangeRequestAuthorKind
+  authorEmail String
+  body        String
+  createdAt   DateTime                @default(now())
+
+  @@index([requestId, createdAt])
 }
