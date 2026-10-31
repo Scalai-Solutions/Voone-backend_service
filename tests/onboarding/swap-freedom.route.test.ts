@@ -260,3 +260,143 @@ describe("the reward's retail price, for the admin only", () => {
     for (const row of r.body.items) expect(typeof row.priceEuro).toBe("number");
   });
 });
+
+describe("the five-year comparison against the engine's recommendation", () => {
+  const compare = (programId: string, id: string = clinic.id) =>
+    call("POST", `/admin/clinics/${id}/onboarding/programs/${programId}/comparison`);
+
+  const draft = async (): Promise<string> => {
+    await call("PUT", admin("/catalog"), {
+      items: [...fixtureItems, { externalId: "WX", name: "Cera lujo corporal", priceEuro: 2000 }]
+    });
+
+    return (await call("POST", admin("/programs"), ANSWERS)).body.id as string;
+  };
+
+  it("answers delta 0 for the plan exactly as the engine recommended it", async () => {
+    const id = await draft();
+    const r = await compare(id);
+
+    expect(r.status).toBe(200);
+    expect(r.body.recommendedNet5y).not.toBeNull();
+    expect(r.body.currentNet5y).toBe(r.body.recommendedNet5y);
+    expect(r.body.delta).toBe(0);
+    expect(r.body.reason).toBeNull();
+    expect(r.body.years).toHaveLength(5);
+    expect(r.body.years.map((y: { year: number }) => y.year)).toEqual([1, 2, 3, 4, 5]);
+    expect(r.body.years[4].currentCumulative).toBe(r.body.currentNet5y);
+    expect(r.body.years[4].recommendedCumulative).toBe(r.body.recommendedNet5y);
+  });
+
+  it("uses the programme's calculator defaults for both plans, so only the plan differs", async () => {
+    const id = await draft();
+    const r = await compare(id);
+    const calc = await call("POST", admin(`/programs/${id}/calculator`), {});
+
+    expect(r.body.inputs).toEqual({ clients: 300, ticket: 65 });
+    expect(r.body.inputs).toEqual(calc.body.defaults);
+    // And it is the calculator's own number for the current plan, rounded to whole euros.
+    expect(r.body.currentNet5y).toBe(Math.round(calc.body.years[4].cumulativeNet));
+  });
+
+  it("shows a dearer reward as a worse five-year result than the recommendation", async () => {
+    const id = await draft();
+    const before = await compare(id);
+    // A 2000 euro waxing gift as the very first reward, which every member reaches.
+    const swap = await call("PATCH", admin(`/programs/${id}/milestones/1`), { itemId: "WX" });
+
+    expect(swap.status).toBe(200);
+
+    const after = await compare(id);
+
+    expect(after.body.recommendedNet5y).toBe(before.body.recommendedNet5y);
+    expect(after.body.currentNet5y).toBeLessThan(before.body.currentNet5y);
+    expect(after.body.delta).toBeLessThan(0);
+    expect(after.body.delta).toBe(after.body.currentNet5y - after.body.recommendedNet5y);
+    expect(after.body.years[0].currentCumulative).toBeLessThan(
+      after.body.years[0].recommendedCumulative
+    );
+  });
+
+  it("works on a live programme, and never changes the stored one", async () => {
+    const id = await draft();
+
+    await call("POST", admin(`/programs/${id}/publish`));
+
+    const stored = await db.onboardingProgram.findUniqueOrThrow({ where: { id } });
+    const r = await compare(id);
+    const after = await db.onboardingProgram.findUniqueOrThrow({ where: { id } });
+
+    expect(r.status).toBe(200);
+    expect(after.output).toEqual(stored.output);
+    expect(after.updatedAt).toEqual(stored.updatedAt);
+  });
+
+  it("says there is no recommendation, in Spanish, when the stored catalogue cannot be replayed", async () => {
+    const id = await draft();
+
+    for (const snapshot of [[], { broken: true }, "garbage", [{ id: 1 }], [null]]) {
+      await db.onboardingProgram.update({
+        where: { id },
+        data: { catalogSnapshot: snapshot as unknown as object }
+      });
+
+      const r = await compare(id);
+
+      expect(r.status, JSON.stringify(snapshot)).toBe(200);
+      expect(r.body.recommendedNet5y).toBeNull();
+      expect(r.body.delta).toBeNull();
+      expect(typeof r.body.reason).toBe("string");
+      expect(r.body.reason.length).toBeGreaterThan(10);
+      // The current plan is still worth a number.
+      expect(typeof r.body.currentNet5y).toBe("number");
+      expect(r.body.years).toHaveLength(5);
+      expect(r.body.years[0].recommendedNet).toBeNull();
+      expect(r.body.years[0].recommendedCumulative).toBeNull();
+    }
+  });
+
+  it("answers 404 for a clinic that does not exist, and for another clinic's programme", async () => {
+    const id = await draft();
+    const other = await db.clinic.upsert({
+      where: { slug: `${SLUG}-other` },
+      update: {},
+      create: { slug: `${SLUG}-other`, name: "Otro", addressLine: "Calle Seis 6", pincode: "28006" }
+    });
+
+    try {
+      expect((await compare(id, "does-not-exist")).status).toBe(404);
+      expect((await compare(id, other.id)).status).toBe(404);
+      expect((await compare("00000000-0000-4000-8000-00000000dead")).status).toBe(404);
+    } finally {
+      await db.clinic.delete({ where: { id: other.id } });
+    }
+  });
+
+  it("sends yearly totals only: the key set has no gift, cost or value in it", async () => {
+    const id = await draft();
+
+    await call("PATCH", admin(`/programs/${id}/milestones/1`), { itemId: "WX" });
+
+    const r = await compare(id);
+
+    expect(Object.keys(r.body).sort()).toEqual(
+      ["currentNet5y", "delta", "inputs", "reason", "recommendedNet5y", "years"].sort()
+    );
+    expect(Object.keys(r.body.inputs).sort()).toEqual(["clients", "ticket"]);
+
+    for (const year of r.body.years) {
+      expect(Object.keys(year).sort()).toEqual(
+        [
+          "currentCumulative",
+          "currentNet",
+          "recommendedCumulative",
+          "recommendedNet",
+          "year"
+        ].sort()
+      );
+    }
+
+    expect(JSON.stringify(r.body)).not.toMatch(/Cera lujo|WX|"items"|"reward"|"name"|"cost"/i);
+  });
+});

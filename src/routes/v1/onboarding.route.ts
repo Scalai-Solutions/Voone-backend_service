@@ -14,6 +14,7 @@ import {
   toEngineCatalog,
   type CatalogRepository
 } from "../../modules/onboarding/catalog.repository";
+import { compareFiveYears } from "../../modules/onboarding/comparison";
 import { classify, isGiftable } from "../../modules/onboarding/engine";
 import { TIERS } from "../../modules/onboarding/engine.config";
 import type { CategoryCode, Program, TierCode } from "../../modules/onboarding/engine.types";
@@ -352,6 +353,22 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
       if (problem) throw new OnboardingError(problem, 422);
 
       res.json(simulate5y(program, input, defaults));
+    })
+  );
+
+  /**
+   * The programme's five-year result against the engine's own recommendation for the same answers
+   * and catalogue, so the admin sees what her edits did to the money. Admin only, yearly totals
+   * only (no gift's cost or value), any programme status, no body. It reads and never writes.
+   */
+  router.post(
+    "/admin/clinics/:clinicId/onboarding/programs/:programId/comparison",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const clinicId = await clinicOr404(req.params.clinicId);
+      const row = await deps.onboarding.getProgram(clinicId, req.params.programId);
+
+      res.json(compareFiveYears(row));
     })
   );
 
