@@ -6,7 +6,12 @@ import { ClinicNotFoundError } from "../../common/errors/membership.errors";
 import { asyncHandler } from "../../common/middleware/async-handler";
 import { createRequireStaffKey } from "../../common/middleware/staff-key";
 import { config } from "../../config/env";
-import { adminActorOf, clinicActorOf } from "../../modules/change-requests/actor";
+import {
+  adminActorOf,
+  clinicActorOf,
+  requireAdminReader,
+  requireClinicReader
+} from "../../modules/change-requests/actor";
 import {
   adminListQuerySchema,
   createChangeRequestSchema,
@@ -68,7 +73,7 @@ export const createChangeRequestsRouter = (deps: ChangeRequestsRouterDeps): Rout
     "/clinics/:slug/change-requests",
     requireStaff,
     asyncHandler(async (req, res) => {
-      clinicActorOf(req);
+      requireClinicReader(req);
       const clinic = await deps.findClinic(req.params.slug);
       const query = parse(ownerListQuerySchema, req.query);
 
@@ -80,7 +85,7 @@ export const createChangeRequestsRouter = (deps: ChangeRequestsRouterDeps): Rout
     "/clinics/:slug/change-requests/:id",
     requireStaff,
     asyncHandler(async (req, res) => {
-      clinicActorOf(req);
+      requireClinicReader(req);
       const clinic = await deps.findClinic(req.params.slug);
 
       res.json(await service.getForClinic(clinic.id, req.params.id));
@@ -117,7 +122,7 @@ export const createChangeRequestsRouter = (deps: ChangeRequestsRouterDeps): Rout
     "/admin/change-requests",
     requireStaff,
     asyncHandler(async (req, res) => {
-      adminActorOf(req);
+      requireAdminReader(req);
 
       res.json(await service.adminList(parse(adminListQuerySchema, req.query)));
     })
@@ -127,7 +132,7 @@ export const createChangeRequestsRouter = (deps: ChangeRequestsRouterDeps): Rout
     "/admin/clinics/:clinicId/change-requests",
     requireStaff,
     asyncHandler(async (req, res) => {
-      adminActorOf(req);
+      requireAdminReader(req);
 
       if (!(await deps.clinicExists(req.params.clinicId))) {
         throw new ClinicNotFoundError(req.params.clinicId);
@@ -144,7 +149,7 @@ export const createChangeRequestsRouter = (deps: ChangeRequestsRouterDeps): Rout
     "/admin/change-requests/:id",
     requireStaff,
     asyncHandler(async (req, res) => {
-      adminActorOf(req);
+      requireAdminReader(req);
 
       res.json(await service.adminGet(req.params.id));
     })

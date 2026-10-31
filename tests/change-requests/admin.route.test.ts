@@ -26,11 +26,36 @@ describe("admin routes", () => {
       ["POST", `/admin/change-requests/${t.id}/messages`, { body: "x" }]
     ];
 
-    for (const who of [OWNER, MANAGER, {}, { actor: "a@voone.test" }, { role: "voone_admin" }]) {
+    for (const who of [OWNER, MANAGER, {}, { actor: "a@voone.test" }]) {
       for (const [method, path, body] of routes) {
         expect((await call(method, path, who, body)).status).toBe(403);
       }
     }
+  });
+
+  it("reads need only the role (the app sends x-actor on writes only); writes need the email too", async () => {
+    const t = await make();
+    const adminNoActor = { role: "voone_admin" };
+
+    for (const path of [
+      "/admin/change-requests",
+      `/admin/clinics/${a.id}/change-requests`,
+      `/admin/change-requests/${t.id}`
+    ]) {
+      expect((await call("GET", path, adminNoActor)).status).toBe(200);
+    }
+    expect(
+      (
+        await call("PATCH", `/admin/change-requests/${t.id}/status`, adminNoActor, {
+          status: "IN_PROGRESS"
+        })
+      ).status
+    ).toBe(403);
+    expect(
+      (await call("POST", `/admin/change-requests/${t.id}/messages`, adminNoActor, { body: "x" }))
+        .status
+    ).toBe(403);
+    expect((await db.changeRequest.findUniqueOrThrow({ where: { id: t.id } })).status).toBe("OPEN");
   });
 
   it("lists across clinics with clinic details, last message time and filters", async () => {

@@ -26,18 +26,41 @@ const emailOf = (request: Request): string => {
   return parsed.data;
 };
 
-/** Owners and managers write tickets for their own centre; nobody else on the clinic side does. */
-export const clinicActorOf = (request: Request): ClinicActor => {
+const clinicRoleOf = (request: Request): "OWNER" | "MANAGER" => {
   const role = roleOf(request);
 
   if (role !== "OWNER" && role !== "MANAGER") throw new ChangeRequestForbiddenError();
 
+  return role;
+};
+
+/**
+ * Owners and managers use tickets for their own centre; nobody else on the clinic side does.
+ * For reads: the role alone, because the app sends `x-actor` on writes only.
+ */
+export const requireClinicReader = (request: Request): void => {
+  clinicRoleOf(request);
+};
+
+/** For writes: the role and the person, who is recorded on what they write. */
+export const clinicActorOf = (request: Request): ClinicActor => {
+  const role = clinicRoleOf(request);
+
   return { email: emailOf(request), role };
 };
 
-/** Only Voone's own admins act on the admin side. */
-export const adminActorOf = (request: Request): AdminActor => {
+const requireAdminRole = (request: Request): void => {
   if (roleOf(request) !== "VOONE_ADMIN") throw new ChangeRequestForbiddenError();
+};
+
+/** Only Voone's own admins act on the admin side. For reads: the role alone. */
+export const requireAdminReader = (request: Request): void => {
+  requireAdminRole(request);
+};
+
+/** For writes: the role and the admin's email, recorded as who resolved or replied. */
+export const adminActorOf = (request: Request): AdminActor => {
+  requireAdminRole(request);
 
   return { email: emailOf(request) };
 };

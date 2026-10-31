@@ -214,6 +214,27 @@ describe("owner routes: read", () => {
   });
 });
 
+describe("owner routes: reads without x-actor", () => {
+  it("lets an owner read with the role alone, but not write", async () => {
+    const t = await make();
+    const roleOnly = { role: "owner" };
+
+    expect((await call("GET", "/clinics/test-cr-route-a/change-requests", roleOnly)).status).toBe(
+      200
+    );
+    expect(
+      (await call("GET", `/clinics/test-cr-route-a/change-requests/${t.id}`, roleOnly)).status
+    ).toBe(200);
+    expect(
+      (
+        await call("POST", `/clinics/test-cr-route-a/change-requests/${t.id}/messages`, roleOnly, {
+          body: "hola"
+        })
+      ).status
+    ).toBe(403);
+  });
+});
+
 describe("owner routes: reply and reopen", () => {
   it("replies with the actor's email and reopens a closed ticket inside the window", async () => {
     const t = await make();

@@ -10,7 +10,8 @@ takes a `ChangeRequestNotifier` (no-op by default, see `notifier.ts`) so mail ca
 Every route sits behind the staff key (`x-voone-staff-key`), like the other `/clinics/:slug`
 and `/admin` routes. The backend cannot check a session, so the frontend sets:
 
-- `x-actor`: the signed-in person's email. Required (403 without it).
+- `x-actor`: the signed-in person's email. Required on writes (403 without it); reads need only
+  the role, because the app sends `x-actor` on writes only.
 - `x-actor-role`: case-insensitive. Clinic routes accept `owner` / `manager`; admin routes
   accept `voone_admin`. Anything else, or nothing, is 403.
 

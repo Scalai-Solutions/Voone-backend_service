@@ -160,6 +160,10 @@ describe("create", () => {
     );
 
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(OPEN_LIMIT);
+    // Every refusal is the limit, not a pool timeout or a deadlock in disguise.
+    for (const r of results) {
+      if (r.status === "rejected") expect(r.reason).toBeInstanceOf(ChangeRequestLimitError);
+    }
     expect(await db.changeRequest.count({ where: { clinicId: a.id } })).toBe(OPEN_LIMIT);
   });
 });
