@@ -346,12 +346,49 @@ describe("editing texts and cloning a draft", () => {
     ).rejects.toMatchObject({ statusCode: 422 });
   });
 
+  it("setBenefitOverrides refuses a programme that is no longer a draft, a stale one and an unknown key", async () => {
+    await repo.replaceForClinic(clinic.id, asInput(fixture));
+    const draft = await service.createDraft(clinic.id, ANSWERS);
+
+    await expect(
+      service.setBenefitOverrides(clinic.id, draft.id, "bronce", [{ key: "mult", hidden: true }])
+    ).rejects.toMatchObject({ statusCode: 422 });
+    await expect(
+      service.setBenefitOverrides("some-other-clinic", draft.id, "oro", [
+        { key: "mult", hidden: true }
+      ])
+    ).rejects.toMatchObject({ statusCode: 404 });
+
+    await service.setBenefitOverrides(clinic.id, draft.id, "oro", [{ key: "mult", hidden: true }]);
+    await service.publish(clinic.id, draft.id);
+
+    await expect(
+      service.setBenefitOverrides(clinic.id, draft.id, "oro", [{ key: "mult" }])
+    ).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it("createDraft starts from the generated lines again, as it does for the lines the centre wrote", async () => {
+    await repo.replaceForClinic(clinic.id, asInput(fixture));
+    const first = await service.createDraft(clinic.id, ANSWERS);
+
+    await service.setBenefitOverrides(clinic.id, first.id, "oro", [{ key: "mult", hidden: true }]);
+    await service.publish(clinic.id, first.id);
+
+    const regenerated = await service.createDraft(clinic.id, ANSWERS);
+
+    expect((regenerated.output as unknown as Program).benefitOverrides).toBeUndefined();
+  });
+
   it("cloneDraft copies the live programme verbatim, numbers it next, and allows one draft", async () => {
     await repo.replaceForClinic(clinic.id, asInput(fixture));
     const first = await service.createDraft(clinic.id, ANSWERS);
 
     await service.setTexts(clinic.id, first.id, { recurring: { label: "Mi recurrente" } });
     await service.setTierBenefits(clinic.id, first.id, "oro", ["Café"]);
+    await service.setBenefitOverrides(clinic.id, first.id, "plata", [
+      { key: "discount", text: "Ventaja en cosmética" },
+      { key: "priority", hidden: true }
+    ]);
     await service.publish(clinic.id, first.id);
 
     const live = await service.getProgram(clinic.id, first.id);
@@ -363,6 +400,10 @@ describe("editing texts and cloning a draft", () => {
     expect(clone.answers).toEqual(live.answers);
     expect(clone.catalogSnapshot).toEqual(live.catalogSnapshot);
     expect((clone.output as unknown as Program).customBenefits?.oro).toEqual(["Café"]);
+    expect((clone.output as unknown as Program).benefitOverrides?.plata).toEqual({
+      discount: { text: "Ventaja en cosmética" },
+      priority: { hidden: true }
+    });
 
     await expect(service.cloneDraft(clinic.id, first.id)).rejects.toMatchObject({
       statusCode: 409

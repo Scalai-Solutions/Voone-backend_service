@@ -8,6 +8,12 @@ import {
 
 import { AppError } from "../../common/errors/app-error";
 import { refreshClinicCards } from "../wallet-refresh/clinic-card-refresh";
+import {
+  NO_VISIBLE_LINE,
+  applyBenefitOverrides,
+  visibleLineCount,
+  type BenefitOverrideEntry
+} from "./benefit-lines";
 import { toEngineCatalog, type CatalogRepository } from "./catalog.repository";
 import { run } from "./engine";
 import {
@@ -336,9 +342,55 @@ export class OnboardingService {
       customBenefits: { ...(output.customBenefits ?? {}), [tier]: benefits }
     };
 
+    // Removing the last line the centre wrote while every generated one is hidden would leave the
+    // tier with nothing to show: see NO_VISIBLE_LINE.
+    if (visibleLineCount(tier, next) === 0) throw new OnboardingError(NO_VISIBLE_LINE, 422);
+
     const updated = await this.prisma.onboardingProgram.updateMany({
       where: { id: row.id, updatedAt: row.updatedAt },
       data: { output: next as unknown as object }
+    });
+
+    if (updated.count === 0) {
+      throw new OnboardingError(
+        "El borrador ha cambiado mientras lo editabas. Recarga la página y vuelve a intentarlo.",
+        409
+      );
+    }
+
+    return this.getProgram(clinicId, programId);
+  }
+
+  /**
+   * Changes the words of, or hides, the lines the engine generates for one tier. Drafts only.
+   *
+   * Display only: the override is stored next to the programme (`benefitOverrides`) and read only
+   * when the programme is presented, so the multiplier, the discount and every other rule behave
+   * exactly as generated. Same rules as the other draft edits: BORRADOR only (409), optimistic on
+   * updatedAt, and a key the tier does not have is 422 with nothing stored.
+   */
+  async setBenefitOverrides(
+    clinicId: string,
+    programId: string,
+    tier: TierCode,
+    entries: BenefitOverrideEntry[]
+  ): Promise<OnboardingProgram> {
+    const row = await this.getProgram(clinicId, programId);
+
+    if (row.status !== OnboardingProgramStatus.BORRADOR) {
+      throw new OnboardingError(
+        "Solo se pueden editar los beneficios de un borrador. Genera un borrador nuevo para editar un programa activo.",
+        409
+      );
+    }
+
+    const result = applyBenefitOverrides(row.output as unknown as Program, tier, entries);
+
+    if (!result.ok) throw new OnboardingError(result.reason, 422);
+
+    const updated = await this.prisma.onboardingProgram.updateMany({
+      where: { id: row.id, updatedAt: row.updatedAt },
+      data: { output: result.program as unknown as object }
     });
 
     if (updated.count === 0) {
