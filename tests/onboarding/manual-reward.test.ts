@@ -157,12 +157,10 @@ describe("swapRewardToItem with the wider rule", () => {
     expect(next.guarantees.every(([, held]) => typeof held === "boolean")).toBe(true);
   });
 
-  it("refuses the same 5 euro diagnosis in a later tier, naming the milestone, not a number gone wrong", () => {
-    const r = swap(fresh(), 7, "C5");
+  it("accepts the same 5 euro diagnosis in a later tier: a cheaper reward is the admin's call", () => {
+    const next = ok(swap(fresh(), 7, "C5"));
 
-    expect(r.ok).toBe(false);
-    expect(reason(r)).toContain("hito 7");
-    expect(reason(r)).toContain("menos valor");
+    expect(entry(next, 7).o).toMatchObject({ value: 5, cost: 0 });
   });
 
   it("accepts a dearer-than-neighbours diagnosis in a later tier, at zero cost", () => {
