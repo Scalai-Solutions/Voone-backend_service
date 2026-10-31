@@ -1,5 +1,5 @@
 /**
- * Read-only report on the automated wallet notifications (birthday + bono reminder):
+ * Read-only report on the automated wallet notifications (every event in the automation catalog):
  * clinic settings, past automation sends with per-delivery outcomes, and the candidate
  * pool for upcoming sends. SELECT-only; never writes, never prints secrets.
  *
@@ -7,13 +7,16 @@
  */
 import dotenv from "dotenv";
 
-import { MemberBonoStatus, NotificationType, PrismaClient, WalletSyncStatus } from "@prisma/client";
+import { resolveAutomations } from "../src/modules/notifications/automations/automation-settings.service";
+import { AUTOMATION_NOTIFICATION_TYPES } from "../src/modules/notifications/automations/catalog";
+
+import { MemberBonoStatus, PrismaClient, WalletSyncStatus } from "@prisma/client";
 
 dotenv.config();
 
 const prisma = new PrismaClient();
 
-const AUTOMATION_TYPES = [NotificationType.BIRTHDAY, NotificationType.BONO_REMINDER];
+const AUTOMATION_TYPES = [...AUTOMATION_NOTIFICATION_TYPES];
 const DAYS_TO_SCAN = 7;
 
 const monthDay = (date: Date): string =>
@@ -25,15 +28,9 @@ const main = async (): Promise<void> => {
     select: {
       id: true,
       name: true,
-      notificationSettings: {
-        select: {
-          marketingEnabled: true,
-          birthdayEnabled: true,
-          birthdayNotify: true,
-          birthdayLastRunDate: true,
-          bonoReminderEnabled: true,
-          bonoReminderNotify: true
-        }
+      notificationSettings: { select: { marketingEnabled: true } },
+      automations: {
+        select: { event: true, enabled: true, header: true, body: true, notify: true }
       }
     },
     orderBy: { createdAt: "asc" }
@@ -41,9 +38,16 @@ const main = async (): Promise<void> => {
 
   console.log("=== Automation settings per clinic ===");
   for (const clinic of clinics) {
-    const s = clinic.notificationSettings;
+    const automations = resolveAutomations(clinic.automations);
+    const states = Object.entries(automations)
+      .map(
+        ([event, value]) =>
+          `${event}=${value.enabled ? "on" : "off"}${value.notify ? "" : " (silent)"}`
+      )
+      .join(", ");
+
     console.log(
-      `${clinic.name}: birthday=${s?.birthdayEnabled ? "on" : "off"} (push ${s?.birthdayNotify ? "on" : "off"}, last run ${s?.birthdayLastRunDate ?? "never"}), bono=${s?.bonoReminderEnabled ? "on" : "off"} (push ${s?.bonoReminderNotify ? "on" : "off"}), marketing=${s?.marketingEnabled ? "on" : "off"}`
+      `${clinic.name}: ${states}, marketing=${clinic.notificationSettings?.marketingEnabled === false ? "off" : "on"}`
     );
   }
 

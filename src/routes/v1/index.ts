@@ -189,7 +189,11 @@ v1Router.use(
   createOnboardingRouter({
     onboarding: new OnboardingService(prisma, catalogRepository),
     catalog: catalogRepository,
-    visits: pointsService ? new VisitService(prisma, pointsService) : undefined,
+    visits: pointsService
+      ? new VisitService(prisma, pointsService, undefined, (visit) =>
+          notificationService.reviewRequests.notifyIfDue(visit)
+        )
+      : undefined,
     rewards: new RewardService(prisma, undefined, pointsService ?? undefined),
     findClinic: (slug) => findClinicBySlug(prisma, slug),
     clinicExists: async (clinicId) => (await prisma.clinic.count({ where: { id: clinicId } })) > 0

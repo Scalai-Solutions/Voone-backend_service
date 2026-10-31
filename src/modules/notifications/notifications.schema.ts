@@ -1,10 +1,11 @@
+import { AutomationEvent } from "@prisma/client";
 import { z } from "zod";
 
 const httpsUrl = z
   .string()
   .url()
   .refine((value) => value.startsWith("https://"), {
-    message: "actionUrl must use https"
+    message: "URL must use https"
   });
 
 export const notificationMessageSchema = z.object({
@@ -40,7 +41,33 @@ export const notificationListQuerySchema = z.object({
   cursor: z.string().trim().min(1).optional()
 });
 
-export const notificationSettingsSchema = z.object({
+const automationPatchSchema = z
+  .object({
+    enabled: z.boolean(),
+    header: z.string().trim().min(1).max(60),
+    body: z.string().trim().min(1).max(500),
+    notify: z.boolean()
+  })
+  .partial()
+  .strict();
+
+/**
+ * A partial update: every field is optional, so a screen sends only what it changed and can
+ * never overwrite what it does not know about. Per-event copy lives under `automations`.
+ */
+export const notificationSettingsPatchSchema = z
+  .object({
+    notifyOnCredit: z.enum(["NEVER", "MILESTONE_AND_TIER", "ALWAYS"]),
+    marketingEnabled: z.boolean(),
+    googleReviewUrl: httpsUrl.max(500).nullable(),
+    referralRewardText: z.string().trim().min(1).max(120).nullable(),
+    automations: z.partialRecord(z.enum(AutomationEvent), automationPatchSchema)
+  })
+  .partial()
+  .strict();
+
+/** The full-object body older clients PUT (before the automation catalog). */
+export const legacyNotificationSettingsSchema = z.object({
   notifyOnCredit: z.enum(["NEVER", "MILESTONE_AND_TIER", "ALWAYS"]),
   marketingEnabled: z.boolean(),
   birthdayEnabled: z.boolean(),
@@ -51,6 +78,27 @@ export const notificationSettingsSchema = z.object({
   bonoReminderHeader: z.string().trim().min(1).max(60),
   bonoReminderBody: z.string().trim().min(1).max(500),
   bonoReminderNotify: z.boolean()
+});
+
+export const legacySettingsToPatch = (
+  input: z.infer<typeof legacyNotificationSettingsSchema>
+): NotificationSettingsPatch => ({
+  notifyOnCredit: input.notifyOnCredit,
+  marketingEnabled: input.marketingEnabled,
+  automations: {
+    BIRTHDAY: {
+      enabled: input.birthdayEnabled,
+      header: input.birthdayHeader,
+      body: input.birthdayBody,
+      notify: input.birthdayNotify
+    },
+    BONO_INACTIVE: {
+      enabled: input.bonoReminderEnabled,
+      header: input.bonoReminderHeader,
+      body: input.bonoReminderBody,
+      notify: input.bonoReminderNotify
+    }
+  }
 });
 
 export const clinicLocationSchema = z.object({
@@ -67,5 +115,5 @@ export type NotificationMessageInput = z.infer<typeof notificationMessageSchema>
 export type SegmentNotificationInput = z.infer<typeof segmentNotificationSchema>;
 export type NotificationSegmentInput = z.infer<typeof notificationSegmentSchema>;
 export type AudienceCreateInput = z.infer<typeof audienceCreateSchema>;
-export type NotificationSettingsInput = z.infer<typeof notificationSettingsSchema>;
+export type NotificationSettingsPatch = z.infer<typeof notificationSettingsPatchSchema>;
 export type ClinicLocationInput = z.infer<typeof clinicLocationSchema>;

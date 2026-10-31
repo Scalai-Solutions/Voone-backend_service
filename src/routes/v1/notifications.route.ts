@@ -8,6 +8,7 @@ import {
   NotificationForbiddenError,
   NotificationValidationError
 } from "../../modules/notifications/notification.errors";
+import { AUTOMATION_CATALOG } from "../../modules/notifications/automations/catalog";
 import type { AudienceService } from "../../modules/notifications/audience.service";
 import type {
   NotificationActor,
@@ -18,7 +19,9 @@ import {
   clinicLocationsSchema,
   notificationListQuerySchema,
   notificationMessageSchema,
-  notificationSettingsSchema,
+  legacyNotificationSettingsSchema,
+  legacySettingsToPatch,
+  notificationSettingsPatchSchema,
   segmentNotificationSchema
 } from "../../modules/notifications/notifications.schema";
 
@@ -160,13 +163,32 @@ export const createNotificationsRouter = (deps: NotificationsRouterDeps): Router
     })
   );
 
+  router.patch(
+    "/clinics/:clinicId/notification-settings",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const input = parse(notificationSettingsPatchSchema, req.body);
+
+      res.json(await deps.notifications.updateSettings(req.params.clinicId, input, actorFrom(req)));
+    })
+  );
+
+  // Older clients send the whole flat object; it is translated to the same partial update.
   router.put(
     "/clinics/:clinicId/notification-settings",
     requireStaff,
     asyncHandler(async (req, res) => {
-      const input = parse(notificationSettingsSchema, req.body);
+      const input = legacySettingsToPatch(parse(legacyNotificationSettingsSchema, req.body));
 
       res.json(await deps.notifications.updateSettings(req.params.clinicId, input, actorFrom(req)));
+    })
+  );
+
+  router.get(
+    "/notification-automations/catalog",
+    requireStaff,
+    asyncHandler(async (_req, res) => {
+      res.json({ automations: AUTOMATION_CATALOG });
     })
   );
 

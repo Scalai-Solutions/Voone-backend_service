@@ -116,18 +116,20 @@ const envSchema = z.object({
   // loop, which is the only reason to separate them.
   WALLET_WORKER_IN_PROCESS: booleanEnv,
 
-  // Birthday automation schedule. Defaults to once daily at 09:00 Europe/Madrid. Lowering
-  // the frequency makes the scheduler wake more often, but a member still receives at most
-  // one birthday message per clinic day because the job is idempotent by date.
-  BIRTHDAY_NOTIFICATION_CRON_ENABLED: booleanEnv,
-  BIRTHDAY_NOTIFICATION_TIME_ZONE: timeZoneEnv,
-  BIRTHDAY_NOTIFICATION_HOUR: z.coerce.number().int().min(0).max(23).default(9),
-  BIRTHDAY_NOTIFICATION_MINUTE: z.coerce.number().int().min(0).max(59).default(0),
-  BIRTHDAY_NOTIFICATION_FREQUENCY_MINUTES: z.coerce.number().int().min(1).max(1440).default(1440),
+  // The central notification dispatcher: ONE daily job that runs every time-based automation
+  // (birthday, inactive bono, review request, monthly referral push). Defaults to 09:00
+  // Europe/Madrid. Every send is idempotent, so a restart or a second replica cannot duplicate.
+  NOTIFICATION_DISPATCHER_ENABLED: booleanEnv,
+  NOTIFICATION_DISPATCH_TIME_ZONE: timeZoneEnv,
+  NOTIFICATION_DISPATCH_HOUR: z.coerce.number().int().min(0).max(23).default(9),
+  NOTIFICATION_DISPATCH_MINUTE: z.coerce.number().int().min(0).max(59).default(0),
 
-  // The monthly bono reminder rides the same daily scheduler. Per-clinic on/off lives in
-  // each clinic's notification settings; this stops the feature at the process level.
+  // Deprecated, still honoured: set false to stop the inactive-bono reminder alone. The other
+  // automations are switched per clinic, or all at once with NOTIFICATION_DISPATCHER_ENABLED.
   BONO_REMINDER_CRON_ENABLED: booleanEnv,
+
+  // Day of the month (1-28, so every month has it) on which the referral-program push goes out.
+  REFERRAL_PUSH_DAY_OF_MONTH: z.coerce.number().int().min(1).max(28).default(1),
 
   // Optional in code, but set it to a public HTTPS URL in production. It is the plain Voone
   // logo used on a wallet card when a clinic has not set its own, and what activation and the
@@ -174,7 +176,21 @@ const envSchema = z.object({
   SENDGRID_FROM_EMAIL: z.string().email("SENDGRID_FROM_EMAIL must be a valid email").optional()
 });
 
-const parsedEnv = envSchema.safeParse(process.env);
+// Deprecated names from before the central dispatcher. A deployment that still sets them keeps
+// its behaviour; the NOTIFICATION_* names win when both are present.
+const LEGACY_ENV: Array<[string, string]> = [
+  ["NOTIFICATION_DISPATCHER_ENABLED", "BIRTHDAY_NOTIFICATION_CRON_ENABLED"],
+  ["NOTIFICATION_DISPATCH_TIME_ZONE", "BIRTHDAY_NOTIFICATION_TIME_ZONE"],
+  ["NOTIFICATION_DISPATCH_HOUR", "BIRTHDAY_NOTIFICATION_HOUR"],
+  ["NOTIFICATION_DISPATCH_MINUTE", "BIRTHDAY_NOTIFICATION_MINUTE"]
+];
+const envSource: NodeJS.ProcessEnv = { ...process.env };
+
+for (const [current, legacy] of LEGACY_ENV) {
+  envSource[current] ??= process.env[legacy];
+}
+
+const parsedEnv = envSchema.safeParse(envSource);
 
 if (!parsedEnv.success) {
   const details = parsedEnv.error.issues

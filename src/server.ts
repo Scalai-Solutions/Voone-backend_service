@@ -2,7 +2,8 @@ import { buildApp } from "./app";
 import { certificateStatus, isAppleWalletConfigured } from "./config/apple-wallet.config";
 import { config } from "./config/env";
 import { prisma } from "./infrastructure/database/prisma-client";
-import { startBirthdayNotificationCron } from "./modules/notifications/birthday-cron";
+import { buildNotificationDispatcher } from "./modules/notifications/automations/registry";
+import { startNotificationDispatcher } from "./modules/notifications/automations/dispatcher";
 import {
   buildNotificationService,
   startInProcessNotificationWorker
@@ -43,10 +44,13 @@ if (!isAppleWalletConfigured()) {
 const notificationService = buildNotificationService(prisma);
 const walletWorker = startInProcessWalletWorker(prisma);
 const notificationWorker = startInProcessNotificationWorker(prisma, notificationService);
-const birthdayCron = config.BIRTHDAY_NOTIFICATION_CRON_ENABLED
-  ? // The same daily tick also takes rewards that lapsed overnight off members' cards.
-    startBirthdayNotificationCron(notificationService, undefined, () =>
-      syncMembersWithExpiredRewards()
+const notificationDispatcher = config.NOTIFICATION_DISPATCHER_ENABLED
+  ? // One daily job for every time-based automation. The same tick also takes rewards that
+    // lapsed overnight off members' cards.
+    startNotificationDispatcher(
+      buildNotificationDispatcher(prisma, notificationService.automationSender),
+      undefined,
+      () => syncMembersWithExpiredRewards()
     )
   : null;
 
@@ -85,7 +89,7 @@ const shutdown = async (signal: string): Promise<void> => {
 
   try {
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    birthdayCron?.stop();
+    notificationDispatcher?.stop();
     await walletWorker?.close();
     await notificationWorker?.close();
     await prisma.$disconnect();

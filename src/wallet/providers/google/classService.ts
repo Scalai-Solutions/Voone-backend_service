@@ -313,7 +313,10 @@ const toGoogleLoyaltyClassBody = (
     : undefined,
   rewardsTierLabel: input.rewardsTierLabel,
   rewardsTier: input.rewardsTier,
-  classTemplateInfo: buildClassTemplateInfo(options)
+  classTemplateInfo: buildClassTemplateInfo(
+    options,
+    (input.linkModules ?? []).map((linkModule) => linkModule.tag)
+  )
 });
 
 const withDefaultCardTextModules = (
@@ -388,8 +391,17 @@ export const MESSAGE_DETAILS_FIELD_PATHS = ["class.messages", "object.messages"]
  * Builds classTemplateInfo exactly as the production class body does.
  * Shared with scripts so one-off class patches stay in sync with the builder.
  */
+/**
+ * The details-view item of one link. With a detailsTemplateOverride, Google renders only the
+ * fields listed in it, so a link left out of the template never appears on the pass even though
+ * it sits in linksModuleData.
+ */
+export const linkFieldPath = (linkId: string): string => `class.linksModuleData.uris['${linkId}']`;
+
 export const buildClassTemplateInfo = (
-  options: GoogleClassBuildOptions = {}
+  options: GoogleClassBuildOptions = {},
+  /** The ids of the class's linksModuleData uris, in display order. */
+  linkIds: readonly string[] = []
 ): GoogleLoyaltyClassRequest["classTemplateInfo"] => ({
   cardTemplateOverride: {
     cardRowTemplateInfos: [
@@ -423,6 +435,7 @@ export const buildClassTemplateInfo = (
             ...PRODUCTION_DETAILS_TEMPLATE_FIELD_PATHS.map((fieldPath) => ({
               item: toTemplateItem(fieldPath)
             })),
+            ...linkIds.map((linkId) => ({ item: toTemplateItem(linkFieldPath(linkId)) })),
             ...MESSAGE_DETAILS_FIELD_PATHS.map((fieldPath) => ({
               item: toTemplateItem(fieldPath)
             }))

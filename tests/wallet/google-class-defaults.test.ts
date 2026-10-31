@@ -177,8 +177,8 @@ describe("the Spanish, neutral words on a Google card", () => {
     const body = await classWithLinks();
 
     expect(body.linksModuleData.uris.map((link: { id: string }) => link.id)).toEqual([
-      "Web",
-      "Reservar cita"
+      "web",
+      "book"
     ]);
     expect(body.appLinkData.displayText.defaultValue.value).toBe("Reservar cita");
     expect(
@@ -330,6 +330,58 @@ describe("the details template on the Google class", () => {
       "class.messages",
       "object.messages"
     ]);
+  });
+
+  it("lists every link in the details template, or Google hides them all", async () => {
+    const body = (await provision({
+      templateId: "tpl-1",
+      clinicName: "Centro Prueba",
+      template: {
+        programName: "Club Prueba",
+        backgroundColor: "#30221f",
+        pointsLabel: "Puntos",
+        tierLabel: "Nivel",
+        websiteUrl: "https://clinica.example",
+        appointmentUrl: "https://clinica.example/reservar"
+      }
+    })) as unknown as ClassBody;
+    const paths = body.classTemplateInfo.detailsTemplateOverride?.detailsItemInfos.map(
+      (item) => item.item.firstValue.fields[0].fieldPath
+    );
+
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        "class.linksModuleData.uris['web']",
+        "class.linksModuleData.uris['book']"
+      ])
+    );
+    // Before the messages, which stay last.
+    expect(paths?.slice(-2)).toEqual(["class.messages", "object.messages"]);
+  });
+
+  it("gives each extra button its own id and details item", async () => {
+    const body = (await provision({
+      templateId: "tpl-1",
+      clinicName: "Centro Prueba",
+      template: {
+        programName: "Club Prueba",
+        backgroundColor: "#30221f",
+        pointsLabel: "Puntos",
+        tierLabel: "Nivel",
+        appointmentUrl: "https://clinica.example/reservar",
+        extraButtons: [{ label: "Google Maps", url: "https://maps.example/x" }]
+      }
+    })) as unknown as ClassBody & {
+      linksModuleData: { uris: Array<{ id: string; description: string }> };
+    };
+
+    expect(body.linksModuleData.uris.at(-1)).toMatchObject({
+      id: "button_1",
+      description: "Google Maps"
+    });
+    expect(JSON.stringify(body.classTemplateInfo.detailsTemplateOverride)).toContain(
+      "class.linksModuleData.uris['button_1']"
+    );
   });
 
   it("still omits the details override for the default-template test class", async () => {

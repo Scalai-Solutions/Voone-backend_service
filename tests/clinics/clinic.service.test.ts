@@ -37,6 +37,7 @@ const TEMPLATE = {
   appointmentUrl: null,
   appLinkText: null,
   appLinkDescription: null,
+  extraButtons: [],
   pointsLabel: "Puntos",
   tierLabel: "Nivel",
   benefitsText: "Acumula puntos en cada visita.",
