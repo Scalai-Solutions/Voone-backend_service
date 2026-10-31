@@ -20,7 +20,8 @@ export interface ChangeRequestNotifier {
   onCreated(request: ChangeRequestDetail): Promise<void>;
   /**
    * A clinic user wrote in the thread. `reopenedFrom` is the status the ticket had when this
-   * message reopened it, otherwise undefined; `onStatusChanged` also fires in that case.
+   * message reopened it, otherwise undefined. A reopen that comes with a message is reported
+   * here only; onStatusChanged does not also fire for it.
    */
   onOwnerReply(
     request: ChangeRequestDetail,
@@ -30,8 +31,7 @@ export interface ChangeRequestNotifier {
   /** Voone wrote in the thread. Never changes the status. */
   onAdminReply(request: ChangeRequestDetail, message: MessageRecord): Promise<void>;
   /**
-   * The status moved: an admin transition, or a clinic reopen (including a reply that
-   * reopened). `changedBy` tells a mail template whether to write to the clinic or to Voone.
+   * The status moved: an admin transition, or a clinic reopen with no message. `changedBy` tells a mail template whether to write to the clinic or to Voone.
    */
   onStatusChanged(
     request: ChangeRequestDetail,

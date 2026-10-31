@@ -34,6 +34,9 @@ import {
   updatePlan
 } from "../../modules/bonos/bono-plan.service";
 import { cancelMemberBono, listForMember } from "../../modules/bonos/member-bono.service";
+import { EmailChangeRequestNotifier } from "../../modules/change-requests/email.notifier";
+import { PrismaChangeRequestMailStore } from "../../modules/change-requests/prisma.mail-store";
+import { SendGridMailer } from "../../modules/mail/mailer";
 import { PrismaChangeRequestRepository } from "../../modules/change-requests/prisma.repository";
 import { ChangeRequestService } from "../../modules/change-requests/service";
 import { PrismaCatalogRepository } from "../../modules/onboarding/catalog.repository";
@@ -239,7 +242,17 @@ v1Router.use(
  */
 v1Router.use(
   createChangeRequestsRouter({
-    service: new ChangeRequestService(new PrismaChangeRequestRepository(prisma)),
+    service: new ChangeRequestService(new PrismaChangeRequestRepository(prisma), {
+      notifier: new EmailChangeRequestNotifier({
+        mailer: new SendGridMailer({
+          apiKey: config.SENDGRID_API_KEY,
+          fromEmail: config.SENDGRID_FROM_EMAIL
+        }),
+        store: new PrismaChangeRequestMailStore(prisma),
+        supportEmail: config.VOONE_SUPPORT_EMAIL,
+        frontendUrl: config.FRONTEND_URL
+      })
+    }),
     findClinic: (slug) => findClinicBySlug(prisma, slug),
     clinicExists: async (clinicId) => (await prisma.clinic.count({ where: { id: clinicId } })) > 0
   })

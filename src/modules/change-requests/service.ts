@@ -443,13 +443,9 @@ export class ChangeRequestService {
 
     const after = await this.requireForClinic(clinicId, id);
 
+    // A reply that reopens is reported once, as the reply (it says what it reopened from), so
+    // a mail hook does not write twice for one action.
     await this.notify("onOwnerReply", () => this.notifier.onOwnerReply(after, message, reopenFrom));
-
-    if (reopenFrom) {
-      await this.notify("onStatusChanged", () =>
-        this.notifier.onStatusChanged(after, reopenFrom, "CLINIC")
-      );
-    }
 
     return ownerDetail(after, now);
   }
@@ -491,10 +487,11 @@ export class ChangeRequestService {
       const sent = written;
 
       await this.notify("onOwnerReply", () => this.notifier.onOwnerReply(after, sent, previous));
+    } else {
+      await this.notify("onStatusChanged", () =>
+        this.notifier.onStatusChanged(after, previous, "CLINIC")
+      );
     }
-    await this.notify("onStatusChanged", () =>
-      this.notifier.onStatusChanged(after, previous, "CLINIC")
-    );
 
     return ownerDetail(after, now);
   }

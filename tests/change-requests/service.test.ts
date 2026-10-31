@@ -376,7 +376,9 @@ describe("reopen window", () => {
     expect(reopened.status).toBe("OPEN");
     expect(reopened.messages).toHaveLength(1);
     expect(reopened.messages[0]).toMatchObject({ authorKind: "CLINIC", body: "Sigue fallando" });
-    expect(calls.map((c) => c.hook)).toEqual(["onOwnerReply", "onStatusChanged"]);
+    // One hook for one action: the message says what it reopened from.
+    expect(calls.map((c) => c.hook)).toEqual(["onOwnerReply"]);
+    expect(calls[0]!.args[2]).toBe("RESOLVED");
 
     const bare = await closed("REJECTED");
 
@@ -430,7 +432,7 @@ describe("replies", () => {
       expect(
         (await db.changeRequest.findUniqueOrThrow({ where: { id: ticket.id } })).resolvedAt
       ).toBeNull();
-      expect(calls.map((c) => c.hook)).toEqual(["onOwnerReply", "onStatusChanged"]);
+      expect(calls.map((c) => c.hook)).toEqual(["onOwnerReply"]);
       expect(calls[0]!.args[2]).toBe(status);
     }
   );

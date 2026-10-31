@@ -2,8 +2,8 @@
 
 A centre's tickets to Voone for what the owner cannot edit directly (rewards, levels, the
 service catalogue, bonos). The owner files a request and talks in a thread; Voone answers and
-resolves it by hand. Nothing here applies a change, sends mail or keeps drafts: the service
-takes a `ChangeRequestNotifier` (no-op by default, see `notifier.ts`) so mail can hook in.
+resolves it by hand. The service takes a `ChangeRequestNotifier` (no-op by default, see `notifier.ts`); production wires
+`EmailChangeRequestNotifier` (see Email below).
 
 ## Trust
 
@@ -73,3 +73,23 @@ price and duration is not editable, so neither is accepted).
 
 Limits: `title` 1-120, `reason` 3-2000, message `body` 1-2000, `resolutionNote` up to 2000.
 Errors are Spanish, as `{code, message}`; the first problem only.
+
+## Email
+
+`EmailChangeRequestNotifier` sends through `src/modules/mail/mailer.ts` (SendGrid over `fetch`,
+`SENDGRID_API_KEY` / `SENDGRID_FROM_EMAIL`; links use `FRONTEND_URL`). Every interpolated value
+is HTML-escaped. It is best-effort: the ticket is stored first, a failure never reaches the
+request, and the ticket records the latest attempt as `emailSentAt` or `lastEmailError` (a short
+name such as `SENDGRID_HTTP_401`, `NO_RECIPIENT`; never a response body or an address).
+
+| Trigger                                                                                     | To                                                        | Language |
+| ------------------------------------------------------------------------------------------- | --------------------------------------------------------- | -------- |
+| new ticket                                                                                  | `VOONE_SUPPORT_EMAIL`, link `/admin/customer-care/<id>`   | English  |
+| clinic reply (also when it reopens: one mail), clinic reopen                                | `VOONE_SUPPORT_EMAIL`                                     | English  |
+| Voone reply                                                                                 | the clinic's OWNER users, link `/dashboard/requests/<id>` | Spanish  |
+| Voone status change (en curso / resuelta / rechazada / reabierta, plus the resolution note) | the clinic's OWNER users                                  | Spanish  |
+
+Owner recipients are all OWNER users of the clinic; with none, the clinic's `billingEmail`;
+with neither, nothing is sent and `lastEmailError` is `NO_RECIPIENT`. `VOONE_SUPPORT_EMAIL`
+(optional, e.g. `business@voone.ai`): unset skips the Voone-side mails and records
+`VOONE_SUPPORT_EMAIL not set`.
