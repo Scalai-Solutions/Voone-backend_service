@@ -45,6 +45,8 @@ The clinic never sees `programId`, mail bookkeeping or Voone staff emails; it ge
 | `PATCH /admin/change-requests/:id/status`      | `{status, resolutionNote?}`            | ticket + messages                                                                         |
 | `POST /admin/change-requests/:id/messages`     | `{body}`                               | 201 ticket + messages (VOONE author)                                                      |
 
+| `POST /admin/change-requests/:id/apply` | `{note?}` | `{request, applied, warnings}` |
+
 `q` is a case-insensitive text search on the title and the clinic's name.
 
 Transitions: OPEN to IN_PROGRESS / RESOLVED / REJECTED; IN_PROGRESS to OPEN / RESOLVED /
@@ -93,3 +95,28 @@ Owner recipients are all OWNER users of the clinic; with none, the clinic's `bil
 with neither, nothing is sent and `lastEmailError` is `NO_RECIPIENT`. `VOONE_SUPPORT_EMAIL`
 (optional, e.g. `business@voone.ai`): unset skips the Voone-side mails and records
 `VOONE_SUPPORT_EMAIL not set`.
+
+## Apply (admin)
+
+`POST /admin/change-requests/:id/apply` makes the change a SERVICE_ADD / SERVICE_EDIT /
+SERVICE_REMOVE / BONO ticket asks for, through the same `treatment-catalogue` and `bono-plan`
+services the owner used to call (same validation), with the admin as the resolver. The change
+and the move to RESOLVED are one transaction, so a refused change leaves the ticket open and a
+second apply is a 409. `resolutionNote` is the admin's `note` or `Applied: <summary>`;
+`onStatusChanged` fires (the owner is emailed). Errors (English, 409): ticket already closed,
+type not applicable (REWARD, LEVEL, OTHER), target treatment/bono no longer exists, proposed
+values not valid for the catalogue.
+
+`applied` is `{kind: "treatment"|"bono", action: "created"|"updated"|"removed"|"deleted"|"retired",
+summary, treatment?, bonoPlan?}`; `warnings` is `string[]`.
+
+### Catalogue drift warnings
+
+With an ACTIVE programme, apply returns (and the admin detail shows as `catalogueImpact` on an
+open SERVICE_* ticket; null for other types, closed tickets, bono tickets and clinics with no
+active programme) English warnings, never blocking: the programme version ("The catalogue changed
+since the active programme (v2) was built: consider recalibrating."; before applying the wording
+is "Applying this will change the catalogue compared with the active programme (v2): ..."), and
+for an edited or removed treatment each live reward that uses it ("Milestone 3 reward "Bio-Pen"
+uses this treatment.", or "The recurring reward ..."). Rewards reference items by the catalogue
+row's `externalId`, matched against the programme's `output.chosen[].o.items[].id` and `output.rec`.

@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, expect } from "vitest";
 
 import { errorHandler } from "../../src/common/middleware/error-handler";
 import { findClinicBySlug } from "../../src/modules/clinics/clinic.service";
+import { PrismaCatalogueChanges } from "../../src/modules/change-requests/catalogue-changes";
 import { PrismaChangeRequestRepository } from "../../src/modules/change-requests/prisma.repository";
 import { ChangeRequestService } from "../../src/modules/change-requests/service";
 import { createChangeRequestsRouter } from "../../src/routes/v1/change-requests.route";
@@ -36,7 +37,9 @@ export const useRouteHarness = (prefix: string) => {
   const slugB = `${prefix}-b`;
   const slugs = [slugA, slugB];
   const db = new PrismaClient();
-  const service = new ChangeRequestService(new PrismaChangeRequestRepository(db));
+  const service = new ChangeRequestService(new PrismaChangeRequestRepository(db), {
+    changes: new PrismaCatalogueChanges(db)
+  });
   const app = express();
 
   app.use(express.json());
@@ -74,7 +77,13 @@ export const useRouteHarness = (prefix: string) => {
     return { status: response.status, body: text && isJson ? JSON.parse(text) : null };
   };
 
-  const wipe = () => db.changeRequest.deleteMany({ where: { clinic: { slug: { in: slugs } } } });
+  const wipe = async () => {
+    const clinic = { slug: { in: slugs } };
+
+    await db.changeRequest.deleteMany({ where: { clinic } });
+    await db.clinicTreatment.deleteMany({ where: { clinic } });
+    await db.bonoPlan.deleteMany({ where: { clinic } });
+  };
   let a: Clinic;
   let b: Clinic;
 

@@ -50,7 +50,11 @@ export type ChangeRequestConflictCode =
   | "CHANGE_REQUEST_INVALID_TRANSITION"
   | "CHANGE_REQUEST_REOPEN_WINDOW_CLOSED"
   | "CHANGE_REQUEST_NOT_CLOSED"
-  | "CHANGE_REQUEST_STALE";
+  | "CHANGE_REQUEST_STALE"
+  | "CHANGE_REQUEST_ALREADY_CLOSED"
+  | "CHANGE_REQUEST_NOT_APPLICABLE"
+  | "CHANGE_REQUEST_APPLY_FAILED"
+  | "CHANGE_REQUEST_NO_PROGRAMME";
 
 /** The ticket is not in a state that allows this. The code says which rule refused. */
 export class ChangeRequestConflictError extends AppError {

@@ -34,6 +34,7 @@ import {
   updatePlan
 } from "../../modules/bonos/bono-plan.service";
 import { cancelMemberBono, listForMember } from "../../modules/bonos/member-bono.service";
+import { PrismaCatalogueChanges } from "../../modules/change-requests/catalogue-changes";
 import { EmailChangeRequestNotifier } from "../../modules/change-requests/email.notifier";
 import { PrismaChangeRequestMailStore } from "../../modules/change-requests/prisma.mail-store";
 import { SendGridMailer } from "../../modules/mail/mailer";
@@ -243,6 +244,7 @@ v1Router.use(
 v1Router.use(
   createChangeRequestsRouter({
     service: new ChangeRequestService(new PrismaChangeRequestRepository(prisma), {
+      changes: new PrismaCatalogueChanges(prisma),
       notifier: new EmailChangeRequestNotifier({
         mailer: new SendGridMailer({
           apiKey: config.SENDGRID_API_KEY,

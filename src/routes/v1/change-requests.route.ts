@@ -14,6 +14,7 @@ import {
 } from "../../modules/change-requests/actor";
 import {
   adminListQuerySchema,
+  applySchema,
   createChangeRequestSchema,
   messageSchema,
   ownerListQuerySchema,
@@ -163,6 +164,17 @@ export const createChangeRequestsRouter = (deps: ChangeRequestsRouterDeps): Rout
       const update = parse(statusUpdateSchema, req.body);
 
       res.json(await service.adminSetStatus(req.params.id, actor, update));
+    })
+  );
+
+  router.post(
+    "/admin/change-requests/:id/apply",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const actor = adminActorOf(req);
+      const { note } = parse(applySchema, req.body);
+
+      res.json(await service.adminApply(req.params.id, actor, note));
     })
   );
 

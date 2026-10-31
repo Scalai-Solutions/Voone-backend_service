@@ -248,6 +248,9 @@ export const messageSchema = strict({ body: lines(1, TEXT_MAX, MESSAGE_ERROR) })
 /** Reopening may come with a word of explanation; it is never required. */
 export const reopenSchema = strict({ message: lines(1, TEXT_MAX, MESSAGE_ERROR).optional() });
 
+/** Applying takes only an optional note for the thread's resolution; the ticket carries the change. */
+export const applySchema = strict({ note: lines(0, TEXT_MAX, MESSAGE_ERROR).optional() });
+
 export const statusUpdateSchema = strict({
   status: z.enum(ChangeRequestStatus, { error: "Estado no válido." }),
   resolutionNote: z

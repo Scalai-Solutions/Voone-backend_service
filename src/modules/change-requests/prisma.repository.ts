@@ -157,4 +157,27 @@ export class PrismaChangeRequestRepository implements ChangeRequestRepository {
       });
     });
   }
+
+  async resolveAtomically<T>(
+    id: string,
+    work: (db: PrismaClient) => Promise<{ result: T; patch: StatusPatch }>
+  ): Promise<T | null> {
+    return this.db.$transaction(async (tx) => {
+      // Takes the row lock and checks the status in one statement: a concurrent apply waits
+      // here, then finds the ticket resolved and gets a count of 0.
+      const { count } = await tx.changeRequest.updateMany({
+        where: { id, status: { in: UNRESOLVED } },
+        data: { updatedAt: new Date() }
+      });
+
+      if (count !== 1) return null;
+
+      // The treatment and bono services only use model delegates, which a transaction client has.
+      const { result, patch } = await work(tx as unknown as PrismaClient);
+
+      await tx.changeRequest.update({ where: { id }, data: patch });
+
+      return result;
+    });
+  }
 }

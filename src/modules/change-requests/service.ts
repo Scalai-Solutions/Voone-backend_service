@@ -1,7 +1,8 @@
 import type {
   ChangeRequestAuthorKind,
   ChangeRequestStatus,
-  ChangeRequestType
+  ChangeRequestType,
+  PrismaClient
 } from "@prisma/client";
 
 import {
@@ -10,6 +11,7 @@ import {
   ChangeRequestNotFoundError,
   ChangeRequestValidationError
 } from "../../common/errors/change-request.errors";
+import { APPLICABLE_TYPES, type AppliedChange, type CatalogueChanges } from "./catalogue-changes";
 import {
   noopChangeRequestNotifier,
   type ChangeRequestNotifier,
@@ -159,6 +161,15 @@ export interface ChangeRequestRepository {
     message: NewMessage,
     reopenFrom?: ChangeRequestStatus
   ): Promise<MessageRecord | null>;
+  /**
+   * In one transaction: takes the ticket only if it is still OPEN or IN_PROGRESS, runs `work`
+   * with a transaction-bound client, then writes the patch `work` returns. Null when the ticket
+   * was already closed. If `work` throws, nothing is kept, the ticket included.
+   */
+  resolveAtomically<T>(
+    id: string,
+    work: (db: PrismaClient) => Promise<{ result: T; patch: StatusPatch }>
+  ): Promise<T | null>;
 }
 
 /* ---- views: what each audience may see ---- */
@@ -236,6 +247,17 @@ export interface AdminListItem extends AdminRequestView {
 
 export interface AdminRequestDetail extends AdminRequestView {
   messages: AdminMessageView[];
+  /**
+   * What the change does to the clinic's active programme (open service tickets only): null
+   * when there is nothing to say.
+   */
+  catalogueImpact: string[] | null;
+}
+
+export interface ApplyResult {
+  request: AdminRequestDetail;
+  applied: AppliedChange;
+  warnings: string[];
 }
 
 export interface Page<T> {
@@ -304,8 +326,12 @@ const adminView = (record: ChangeRequestRecord): AdminRequestView => ({
   updatedAt: record.updatedAt.toISOString()
 });
 
-const adminDetail = (detail: ChangeRequestDetail): AdminRequestDetail => ({
+const adminDetail = (
+  detail: ChangeRequestDetail,
+  catalogueImpact: string[] | null
+): AdminRequestDetail => ({
   ...adminView(detail),
+  catalogueImpact,
   messages: detail.messages.map((message) => ({
     id: message.id,
     authorKind: message.authorKind,
@@ -331,6 +357,8 @@ export interface ChangeRequestServiceOptions {
   notifier?: ChangeRequestNotifier;
   /** The clock, injectable so the reopen window is testable at its boundary. */
   now?: () => Date;
+  /** Applies service and bono tickets and reports their effect on the live programme. */
+  changes?: CatalogueChanges;
 }
 
 export interface ClinicListQuery {
@@ -354,11 +382,17 @@ const WINDOW_CLOSED_MESSAGE = `Esta solicitud se cerró hace más de ${REOPEN_WI
 const NOT_CLOSED_MESSAGE = "Esta solicitud ya está abierta.";
 const STALE_MESSAGE =
   "La solicitud ha cambiado mientras la editabas. Recárgala e inténtalo de nuevo.";
+const alreadyClosed = () =>
+  new ChangeRequestConflictError(
+    "CHANGE_REQUEST_ALREADY_CLOSED",
+    "This request is already resolved or rejected, so it cannot be applied."
+  );
 const NOTE_REQUIRED_MESSAGE = "Escribe una nota de resolución.";
 
 export class ChangeRequestService {
   private readonly notifier: ChangeRequestNotifier;
   private readonly now: () => Date;
+  private readonly changes?: CatalogueChanges;
 
   constructor(
     private readonly repo: ChangeRequestRepository,
@@ -366,6 +400,7 @@ export class ChangeRequestService {
   ) {
     this.notifier = options.notifier ?? noopChangeRequestNotifier;
     this.now = options.now ?? (() => new Date());
+    this.changes = options.changes;
   }
 
   /* ---- the clinic's side ---- */
@@ -512,7 +547,7 @@ export class ChangeRequestService {
   }
 
   async adminGet(id: string): Promise<AdminRequestDetail> {
-    return adminDetail(await this.requireAny(id));
+    return this.withImpact(await this.requireAny(id));
   }
 
   async adminSetStatus(
@@ -556,7 +591,7 @@ export class ChangeRequestService {
       this.notifier.onStatusChanged(after, previous, "VOONE")
     );
 
-    return adminDetail(after);
+    return this.withImpact(after);
   }
 
   async adminReply(id: string, actor: AdminActor, body: string): Promise<AdminRequestDetail> {
@@ -575,10 +610,70 @@ export class ChangeRequestService {
 
     await this.notify("onAdminReply", () => this.notifier.onAdminReply(after, message));
 
-    return adminDetail(after);
+    return this.withImpact(after);
+  }
+
+  /**
+   * Makes the change a SERVICE_* or BONO ticket asks for, through the same treatment and bono
+   * services the owner used to call, and resolves the ticket, as one transaction: if the change
+   * is refused the ticket stays open, and a second apply is a 409 because the first resolved it.
+   * Never blocked by the programme: a warning is information, not a veto.
+   */
+  async adminApply(id: string, actor: AdminActor, note?: string): Promise<ApplyResult> {
+    const changes = this.changes;
+
+    if (!changes) {
+      throw new ChangeRequestConflictError(
+        "CHANGE_REQUEST_NOT_APPLICABLE",
+        "Applying requests is not available."
+      );
+    }
+
+    const ticket = await this.requireAny(id);
+
+    if (!APPLICABLE_TYPES.has(ticket.type)) {
+      throw new ChangeRequestConflictError(
+        "CHANGE_REQUEST_NOT_APPLICABLE",
+        `Requests of type ${ticket.type} cannot be applied automatically.`
+      );
+    }
+
+    if (isClosed(ticket.status)) throw alreadyClosed();
+
+    const previous = ticket.status;
+    const now = this.now();
+    const done = await this.repo.resolveAtomically(id, async (db) => {
+      // Before the change, so a treatment about to be removed can still be found.
+      const warnings = (await changes.impact(ticket, { db, applied: true })) ?? [];
+      const applied = await changes.apply(db, ticket);
+
+      return {
+        result: { applied, warnings },
+        patch: {
+          status: "RESOLVED" as const,
+          resolvedAt: now,
+          resolvedByEmail: actor.email,
+          resolutionNote: note?.trim() || `Applied: ${applied.summary}`
+        }
+      };
+    });
+
+    if (!done) throw alreadyClosed();
+
+    const after = await this.requireAny(id);
+
+    await this.notify("onStatusChanged", () =>
+      this.notifier.onStatusChanged(after, previous, "VOONE")
+    );
+
+    return { request: await this.withImpact(after), ...done };
   }
 
   /* ---- shared ---- */
+
+  private async withImpact(detail: ChangeRequestDetail): Promise<AdminRequestDetail> {
+    return adminDetail(detail, this.changes ? await this.changes.impact(detail) : null);
+  }
 
   private async requireForClinic(clinicId: string, id: string): Promise<ChangeRequestDetail> {
     const ticket = await this.repo.find(id, clinicId);
