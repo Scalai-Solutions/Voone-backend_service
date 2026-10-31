@@ -4,7 +4,7 @@ import type { ZodType } from "zod";
 import { ChangeRequestValidationError } from "../../common/errors/change-request.errors";
 import { ClinicNotFoundError } from "../../common/errors/membership.errors";
 import { asyncHandler } from "../../common/middleware/async-handler";
-import { createRequireStaffKey } from "../../common/middleware/staff-key";
+import { createRequireStaffKeyInProduction } from "../../common/middleware/staff-key";
 import { config } from "../../config/env";
 import {
   adminActorOf,
@@ -30,6 +30,10 @@ export interface ChangeRequestsRouterDeps {
   /** Resolves a clinic slug to its id, or throws the 404 the rest of the API uses. */
   findClinic: (slug: string) => Promise<{ id: string }>;
   clinicExists: (clinicId: string) => Promise<boolean>;
+  /** The staff key; defaults to STAFF_API_KEY. Injectable for tests. */
+  staffKey?: string;
+  /** Whether to refuse everything when no key is set; defaults to NODE_ENV === "production". */
+  failClosed?: boolean;
 }
 
 /** The first problem as the bare Spanish message the screen shows, with no field path. */
@@ -50,12 +54,16 @@ const parse = <T>(schema: ZodType<T>, value: unknown): T => {
  * routes. The clinic side takes the clinic from the slug (the app puts the session's clinic
  * there, never anything from the browser) and requires `x-actor-role` OWNER or MANAGER; every
  * ticket id is resolved inside that clinic, so another clinic's id is a 404. The admin side
- * requires `x-actor-role: voone_admin`. Both read the person from `x-actor`. See the module
- * README for the endpoint shapes.
+ * requires `x-actor-role: voone_admin`. Both read the person from `x-actor`. The roles are
+ * headers, only as trustworthy as the staff key, so with no key configured production refuses
+ * every request (see createRequireStaffKeyInProduction). See the module README for the shapes.
  */
 export const createChangeRequestsRouter = (deps: ChangeRequestsRouterDeps): Router => {
   const router = Router();
-  const requireStaff = createRequireStaffKey(config.STAFF_API_KEY);
+  const requireStaff = createRequireStaffKeyInProduction(
+    "staffKey" in deps ? deps.staffKey : config.STAFF_API_KEY,
+    deps.failClosed ?? process.env.NODE_ENV === "production"
+  );
   const { service } = deps;
 
   /* ---- the clinic's side ---- */

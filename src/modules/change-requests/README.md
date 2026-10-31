@@ -15,6 +15,11 @@ and `/admin` routes. The backend cannot check a session, so the frontend sets:
 - `x-actor-role`: case-insensitive. Clinic routes accept `owner` / `manager`; admin routes
   accept `voone_admin`. Anything else, or nothing, is 403.
 
+The roles come from headers, so they are only as trustworthy as the staff key. Hence these routers
+fail closed: with `NODE_ENV=production` and no `STAFF_API_KEY` configured, every request is a 503
+(`STAFF_KEY_NOT_CONFIGURED`); outside production, with no key, they stay permissive so local
+development needs none.
+
 The clinic side takes the clinic from `:slug` (the app passes the session's clinic) and
 resolves every ticket id inside it: another clinic's id is a 404. Bodies are strict: an
 unknown key (`clinicId`, `status`, `createdByEmail`...) is a 422.

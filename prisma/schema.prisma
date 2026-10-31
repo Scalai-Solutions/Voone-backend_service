@@ -556,8 +556,8 @@ model ClinicNotificationSettings {
   bonoReminderNotify       Boolean @default(true)
   bonoReminderLastRunMonth String?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
 }
 
 /// A clinic's copy and switch for one automated message. Absent rows read as the catalog
@@ -1155,7 +1155,9 @@ model ChangeRequest {
   messages ChangeRequestMessage[]
 
   @@index([clinicId, status, createdAt])
+  @@index([clinicId, createdAt])
   @@index([status, createdAt])
+  @@index([createdAt])
   @@index([programId])
 }
 

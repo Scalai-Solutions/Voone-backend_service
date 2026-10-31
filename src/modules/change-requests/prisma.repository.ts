@@ -24,6 +24,12 @@ const REOPEN: StatusPatch = {
 
 const UNRESOLVED: ChangeRequestStatus[] = ["OPEN", "IN_PROGRESS"];
 
+/**
+ * `contains` hands the text to LIKE as is, so `%` and `_` would be wildcards (a search for "%"
+ * would match everything). Escape them and the escape character itself.
+ */
+const escapeLike = (value: string): string => value.replace(/[\\%_]/g, (char) => `\\${char}`);
+
 const json = (value: Record<string, unknown> | undefined) =>
   value === undefined ? undefined : (value as Prisma.InputJsonValue);
 
@@ -91,8 +97,8 @@ export class PrismaChangeRequestRepository implements ChangeRequestRepository {
     if (filter.q) {
       and.push({
         OR: [
-          { title: { contains: filter.q, mode: "insensitive" } },
-          { clinic: { name: { contains: filter.q, mode: "insensitive" } } }
+          { title: { contains: escapeLike(filter.q), mode: "insensitive" } },
+          { clinic: { name: { contains: escapeLike(filter.q), mode: "insensitive" } } }
         ]
       });
     }

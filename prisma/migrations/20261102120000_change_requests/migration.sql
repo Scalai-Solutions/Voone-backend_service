@@ -47,7 +47,13 @@ CREATE TABLE "ChangeRequestMessage" (
 CREATE INDEX "ChangeRequest_clinicId_status_createdAt_idx" ON "ChangeRequest"("clinicId", "status", "createdAt");
 
 -- CreateIndex
+CREATE INDEX "ChangeRequest_clinicId_createdAt_idx" ON "ChangeRequest"("clinicId", "createdAt");
+
+-- CreateIndex
 CREATE INDEX "ChangeRequest_status_createdAt_idx" ON "ChangeRequest"("status", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "ChangeRequest_createdAt_idx" ON "ChangeRequest"("createdAt");
 
 -- CreateIndex
 CREATE INDEX "ChangeRequest_programId_idx" ON "ChangeRequest"("programId");

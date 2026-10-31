@@ -190,4 +190,27 @@ describe("admin routes", () => {
     }
     expect((await db.changeRequest.findUniqueOrThrow({ where: { id: t.id } })).status).toBe("OPEN");
   });
+
+  it("treats % and _ in the text search literally", async () => {
+    await make(h.slugA, OWNER, { title: "Descuento 100% real" });
+    await make(h.slugA, OWNER, { title: "Descuento plano" });
+    await make(h.slugA, OWNER, { title: "Nombre_con_guion" });
+    await make(h.slugA, OWNER, { title: "Ruta C:\\temp" });
+
+    const titles = async (q: string) =>
+      (
+        await call(
+          "GET",
+          `/admin/change-requests?clinicId=${a.id}&q=${encodeURIComponent(q)}`,
+          ADMIN
+        )
+      ).body.items.map((i: { title: string }) => i.title);
+
+    expect(await titles("%")).toEqual(["Descuento 100% real"]);
+    expect(await titles("100%")).toEqual(["Descuento 100% real"]);
+    expect(await titles("_")).toEqual(["Nombre_con_guion"]);
+    expect(await titles("\\")).toEqual(["Ruta C:\\temp"]);
+    expect(await titles("n_m")).toEqual([]);
+    expect(await titles("DESCUENTO")).toHaveLength(2);
+  });
 });
