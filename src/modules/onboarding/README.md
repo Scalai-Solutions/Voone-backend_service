@@ -23,7 +23,8 @@ const result = run(catalogRows, {
 if (isEngineError(result)) {
   // Show result.error to the centre. Nothing was generated.
 } else {
-  // result.review must be empty before the centre can approve.
+  // Blocking review notes (result.review) must be empty before the centre can approve;
+  // informational notes (the cost note) do not block.
 }
 ```
 

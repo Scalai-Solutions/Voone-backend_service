@@ -62,8 +62,8 @@ const MANUAL_REFUSALS: Record<ManualRefusal, string> = {
  * (founders' E2E item 28). That is wider than what the engine proposes from: waxing and diagnosis
  * are allowed, only medical items are not (see `manualCandidates`). The same checks as an engine
  * alternative apply; what it adds is that the choice is no longer limited to the two the engine
- * proposed, and a dearer one is flagged, not refused. Neither is a reward cheaper than the one
- * before it.
+ * proposed, and a dearer one is flagged, not refused. A reward cheaper than the one before it in
+ * a later tier is allowed too.
  */
 export const swapRewardToItem = (
   program: Program,
