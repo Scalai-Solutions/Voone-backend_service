@@ -332,8 +332,21 @@ describe("the five-year comparison against the engine's recommendation", () => {
     expect(after.updatedAt).toEqual(stored.updatedAt);
   });
 
-  it("says there is no recommendation, in Spanish, when the stored catalogue cannot be replayed", async () => {
+  /** An old row: made before the baseline was stored, so only a replay can recommend. */
+  const withoutBaseline = async (id: string): Promise<void> => {
+    const row = await db.onboardingProgram.findUniqueOrThrow({ where: { id } });
+    const { recommended: _drop, ...output } = row.output as unknown as Program & {
+      recommended?: unknown;
+    };
+
+    void _drop;
+    await db.onboardingProgram.update({ where: { id }, data: { output: output as object } });
+  };
+
+  it("says there is no recommendation, in English, when an old row's catalogue cannot be replayed", async () => {
     const id = await draft();
+
+    await withoutBaseline(id);
 
     for (const snapshot of [[], { broken: true }, "garbage", [{ id: 1 }], [null]]) {
       await db.onboardingProgram.update({
@@ -346,14 +359,28 @@ describe("the five-year comparison against the engine's recommendation", () => {
       expect(r.status, JSON.stringify(snapshot)).toBe(200);
       expect(r.body.recommendedNet5y).toBeNull();
       expect(r.body.delta).toBeNull();
-      expect(typeof r.body.reason).toBe("string");
-      expect(r.body.reason.length).toBeGreaterThan(10);
+      expect(r.body.reason).toMatch(/^The original recommendation could not be recalculated/);
       // The current plan is still worth a number.
       expect(typeof r.body.currentNet5y).toBe("number");
       expect(r.body.years).toHaveLength(5);
       expect(r.body.years[0].recommendedNet).toBeNull();
       expect(r.body.years[0].recommendedCumulative).toBeNull();
     }
+  });
+
+  it("does not need the stored catalogue at all when the baseline was stored", async () => {
+    const id = await draft();
+
+    await db.onboardingProgram.update({
+      where: { id },
+      data: { catalogSnapshot: { broken: true } }
+    });
+
+    const r = await compare(id);
+
+    expect(r.status).toBe(200);
+    expect(r.body.delta).toBe(0);
+    expect(r.body.reason).toBeNull();
   });
 
   it("answers 404 for a clinic that does not exist, and for another clinic's programme", async () => {
@@ -398,5 +425,123 @@ describe("the five-year comparison against the engine's recommendation", () => {
     }
 
     expect(JSON.stringify(r.body)).not.toMatch(/Cera lujo|WX|"items"|"reward"|"name"|"cost"/i);
+  });
+
+  it("stores the engine's untouched output as the baseline of a new draft", async () => {
+    const id = await draft();
+    const stored = (await db.onboardingProgram.findUniqueOrThrow({ where: { id } }))
+      .output as unknown as Program & { recommended?: Program & { recommended?: unknown } };
+    const { recommended, ...plan } = stored;
+
+    expect(recommended).toBeDefined();
+    // The baseline is the plan as generated, and carries no baseline of its own.
+    expect(recommended).toEqual(plan);
+    expect(recommended).not.toHaveProperty("recommended");
+  });
+
+  it("keeps the baseline exactly as it was through a swap, so the swap shows as the difference", async () => {
+    const id = await draft();
+    const read = async () =>
+      (
+        (await db.onboardingProgram.findUniqueOrThrow({ where: { id } })).output as unknown as {
+          recommended: unknown;
+        }
+      ).recommended;
+    const before = await read();
+
+    expect(
+      (await call("PATCH", admin(`/programs/${id}/milestones/1`), { itemId: "WX" })).status
+    ).toBe(200);
+    expect(await read()).toEqual(before);
+  });
+
+  it("gives delta 0 for an untouched clone even when a replay would now differ", async () => {
+    const id = await draft();
+
+    await call("POST", admin(`/programs/${id}/publish`));
+
+    const clone = await call("POST", admin(`/programs/${id}/draft`));
+
+    expect(clone.status).toBe(201);
+
+    // The catalogue snapshot drifts (as the engine has between versions): a replay now differs.
+    const cloneRow = await db.onboardingProgram.findUniqueOrThrow({ where: { id: clone.body.id } });
+    const drifted = (cloneRow.catalogSnapshot as unknown as Array<{ price: number }>).map((i) => ({
+      ...i,
+      price: i.price * 3
+    }));
+
+    await db.onboardingProgram.update({
+      where: { id: clone.body.id },
+      data: { catalogSnapshot: drifted as unknown as object }
+    });
+
+    const r = await compare(clone.body.id);
+
+    expect(r.body.delta).toBe(0);
+    expect(r.body.reason).toBeNull();
+
+    // And the tampering is real: without the baseline the replay disagrees.
+    await withoutBaseline(clone.body.id);
+
+    const replayed = await compare(clone.body.id);
+
+    expect(replayed.body.delta).not.toBe(0);
+  });
+
+  it("replays an old row with the reason, and names a version change", async () => {
+    const id = await draft();
+
+    await withoutBaseline(id);
+
+    const same = await compare(id);
+
+    expect(same.status).toBe(200);
+    expect(same.body.recommendedNet5y).not.toBeNull();
+    expect(same.body.reason).toBe(
+      "Recommendation rebuilt with the current engine; it may differ from the plan originally proposed."
+    );
+
+    await db.onboardingProgram.update({
+      where: { id },
+      data: { engineVersion: "0.9.0", configVersion: "2020-01-01.1" }
+    });
+
+    const older = await compare(id);
+
+    expect(older.body.reason).toContain(
+      "Recommendation rebuilt with the current engine; it may differ from the plan originally proposed."
+    );
+    expect(older.body.reason).toContain("0.9.0");
+    expect(older.body.reason).toContain("2020-01-01.1");
+  });
+
+  it("never lets the baseline into any admin or owner response", async () => {
+    const id = await draft();
+    const baseline = /"recommended"\s*:/;
+
+    const created = await call("POST", admin("/programs"), ANSWERS);
+    const drafted = await call("GET", admin(`/programs/${id}`));
+    const swapped = await call("PATCH", admin(`/programs/${id}/milestones/1`), { itemId: "WX" });
+    const preview = await call("POST", admin("/preview"), ANSWERS);
+    const listed = await call("GET", admin("/programs"));
+    const published = await call("POST", admin(`/programs/${id}/publish`));
+    const owner = await call("GET", `/clinics/${SLUG}/program`);
+
+    for (const r of [created, drafted, swapped, preview, listed, published, owner]) {
+      expect(r.status).toBeLessThan(300);
+      expect(JSON.stringify(r.body)).not.toMatch(baseline);
+    }
+  });
+
+  it("answers 422 in English, not a 500, when the stored programme itself is unusable", async () => {
+    const id = await draft();
+
+    await db.onboardingProgram.update({ where: { id }, data: { output: { junk: true } } });
+
+    const r = await compare(id);
+
+    expect(r.status).toBe(422);
+    expect(JSON.stringify(r.body)).toContain("could not be compared");
   });
 });

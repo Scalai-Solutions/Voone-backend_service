@@ -271,6 +271,13 @@ export interface Program {
   diamondReal: number;
   /** Progress euros actually required at each milestone, after tier multipliers. */
   realTh: Record<number, number>;
+  /**
+   * The programme exactly as the engine generated it, before any edit (see `createDraft`). Written
+   * once when a draft is created, copied verbatim by a clone, and never modified: it is what the
+   * five-year comparison measures an edited plan against. The engine itself never sets it, and no
+   * presentation or response carries it. Absent on drafts made before it existed.
+   */
+  recommended?: Omit<Program, "recommended">;
 }
 
 /** Returned instead of a Program when the catalogue cannot support one. */

@@ -170,7 +170,10 @@ export class OnboardingService {
           engineVersion: ENGINE_VERSION,
           configVersion: CONFIG_VERSION,
           answers: answers as unknown as object,
-          output: program as unknown as object,
+          // The engine's untouched output rides inside the stored output as the baseline of the
+          // five-year comparison. Replaying the snapshot later cannot stand in for it: the engine
+          // has changed without a version bump, so a replay would show a difference nobody made.
+          output: { ...program, recommended: structuredClone(program) } as unknown as object,
           catalogSnapshot: engineCatalog as unknown as object
         }
       });
