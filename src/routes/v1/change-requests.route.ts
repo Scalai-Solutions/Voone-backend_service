@@ -2,15 +2,18 @@ import { Router } from "express";
 import type { ZodType } from "zod";
 
 import { ChangeRequestValidationError } from "../../common/errors/change-request.errors";
+import { ClinicNotFoundError } from "../../common/errors/membership.errors";
 import { asyncHandler } from "../../common/middleware/async-handler";
 import { createRequireStaffKey } from "../../common/middleware/staff-key";
 import { config } from "../../config/env";
-import { clinicActorOf } from "../../modules/change-requests/actor";
+import { adminActorOf, clinicActorOf } from "../../modules/change-requests/actor";
 import {
+  adminListQuerySchema,
   createChangeRequestSchema,
   messageSchema,
   ownerListQuerySchema,
-  reopenSchema
+  reopenSchema,
+  statusUpdateSchema
 } from "../../modules/change-requests/schema";
 import type { ChangeRequestService } from "../../modules/change-requests/service";
 
@@ -105,6 +108,67 @@ export const createChangeRequestsRouter = (deps: ChangeRequestsRouterDeps): Rout
       const { message } = parse(reopenSchema, req.body);
 
       res.json(await service.reopenAsClinic(clinic.id, req.params.id, actor, message));
+    })
+  );
+
+  /* ---- Voone's side ---- */
+
+  router.get(
+    "/admin/change-requests",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      adminActorOf(req);
+
+      res.json(await service.adminList(parse(adminListQuerySchema, req.query)));
+    })
+  );
+
+  router.get(
+    "/admin/clinics/:clinicId/change-requests",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      adminActorOf(req);
+
+      if (!(await deps.clinicExists(req.params.clinicId))) {
+        throw new ClinicNotFoundError(req.params.clinicId);
+      }
+
+      // The path decides the clinic; a clinicId in the query string is ignored.
+      const query = parse(adminListQuerySchema, req.query);
+
+      res.json(await service.adminList({ ...query, clinicId: req.params.clinicId }));
+    })
+  );
+
+  router.get(
+    "/admin/change-requests/:id",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      adminActorOf(req);
+
+      res.json(await service.adminGet(req.params.id));
+    })
+  );
+
+  router.patch(
+    "/admin/change-requests/:id/status",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const actor = adminActorOf(req);
+      const update = parse(statusUpdateSchema, req.body);
+
+      res.json(await service.adminSetStatus(req.params.id, actor, update));
+    })
+  );
+
+  router.post(
+    "/admin/change-requests/:id/messages",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const actor = adminActorOf(req);
+      const { body } = parse(messageSchema, req.body);
+
+      res.status(201).json(await service.adminReply(req.params.id, actor, body));
     })
   );
 
