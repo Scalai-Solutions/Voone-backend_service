@@ -19,7 +19,7 @@ import { OnboardingService } from "../../src/modules/onboarding/onboarding.servi
 import { PrismaProgramTierPort } from "../../src/modules/onboarding/runtime/program-tier.port";
 import { programView } from "../../src/modules/onboarding/runtime/program-view";
 import { ReferralService } from "../../src/modules/onboarding/runtime/referral.service";
-import { RewardService } from "../../src/modules/onboarding/runtime/reward.service";
+import { RewardService, publicDetail } from "../../src/modules/onboarding/runtime/reward.service";
 import { VisitService } from "../../src/modules/onboarding/runtime/visit.service";
 import type { Program } from "../../src/modules/onboarding/engine.types";
 import catalogFixture from "./reference/sapphira.catalogo.json";
@@ -762,6 +762,42 @@ describe("redeeming", () => {
 
     expect(out.status).toBe("canjeado");
     expect(out.redeemedAt).not.toBeNull();
+  });
+
+  it("never returns a gift's retail value, in the list or in the redeem response, but keeps the names", async () => {
+    const { m, v, reward } = await setup();
+
+    // What was stored carries the value (the engine needs it); what is served must not.
+    expect(JSON.stringify(reward.detail)).toContain('"value"');
+
+    const listed = (await rewards.listForMember(clinic.id, m.id)).find((r) => r.id === reward.id)!;
+    const redeemed = await rewards.redeem({
+      clinicId: clinic.id,
+      rewardId: reward.id,
+      visitId: v.visitId,
+      redeemedBy: "staff"
+    });
+
+    for (const served of [listed, redeemed]) {
+      const detail = served.detail as { items: Array<Record<string, unknown>> };
+
+      expect(JSON.stringify(served.detail)).not.toContain('"value"');
+      expect(detail.items.length).toBeGreaterThan(0);
+      for (const item of detail.items) expect(Object.keys(item).sort()).toEqual(["id", "name"]);
+    }
+
+    // The stored row is unchanged.
+    const after = await db.memberReward.findUniqueOrThrow({ where: { id: reward.id } });
+
+    expect(after.detail).toEqual(reward.detail);
+  });
+
+  it("keeps what the screen uses of a perk's detail", () => {
+    const detail = { perk: "sorpresa", description: "x", pool: [{ id: "A", name: "Uno" }] };
+
+    expect(publicDetail(detail)).toEqual(detail);
+    expect(publicDetail(null)).toBeNull();
+    expect(publicDetail({ every: 3 })).toEqual({ every: 3 });
   });
 
   it("refuses with no visit at all, because it is enforced and not a convention", async () => {

@@ -40,6 +40,30 @@ export interface MemberRewardSummary {
   status: "disponible" | "canjeado" | "caducado";
 }
 
+/**
+ * A reward's stored `detail` as a screen may read it. The row keeps the retail value of the gift
+ * (and of each item) because choosing and issuing needed it, but the centre's browser must not
+ * learn what a gift is worth: names and ids stay, `value` goes. Stored rows are not touched.
+ */
+export const publicDetail = (detail: unknown): unknown => {
+  if (!detail || typeof detail !== "object" || Array.isArray(detail)) return detail;
+
+  const { value: _value, items, ...rest } = detail as { value?: unknown; items?: unknown };
+
+  void _value;
+
+  return Array.isArray(items)
+    ? {
+        ...rest,
+        items: items.map((i) => {
+          const { id, name } = (i ?? {}) as { id?: unknown; name?: unknown };
+
+          return { id, name };
+        })
+      }
+    : rest;
+};
+
 const statusOf = (reward: MemberReward, now: Date): MemberRewardSummary["status"] =>
   reward.redeemedAt
     ? "canjeado"
@@ -79,7 +103,7 @@ export class RewardService {
       id: r.id,
       kind: r.kind,
       title: r.title,
-      detail: r.detail,
+      detail: publicDetail(r.detail),
       issuedAt: r.issuedAt,
       expiresAt: r.expiresAt,
       redeemedAt: r.redeemedAt,
@@ -193,7 +217,7 @@ export class RewardService {
       id: fresh.id,
       kind: fresh.kind,
       title: fresh.title,
-      detail: fresh.detail,
+      detail: publicDetail(fresh.detail),
       issuedAt: fresh.issuedAt,
       expiresAt: fresh.expiresAt,
       redeemedAt: fresh.redeemedAt,
