@@ -1,4 +1,5 @@
 import { benefitLinesFor, visibleBenefits, type PresentedBenefitLine } from "./benefit-lines";
+import { blockingReview, informationalNotes } from "./engine";
 import { MIN_TENURE, TIERS, TIER_BENEFITS, TIER_NAMES } from "./engine.config";
 import type { Program, TierCode } from "./engine.types";
 import { itemsTitle, rewardTitle } from "./reward-title";
@@ -94,6 +95,11 @@ export interface PresentedProgram {
   adaptations: string[];
   /** Real problems to resolve before approving. Blocking. */
   review: string[];
+  /**
+   * Things Voone tells the admin that do not stop publishing (today: the cost note). Always empty
+   * unless the programme is presented for an admin: a centre's own view carries no warnings.
+   */
+  notes: string[];
 }
 
 /**
@@ -106,7 +112,20 @@ const COST_NOTE_PREFIX = "Algunos premios usan algo más de su presupuesto indiv
 const itemsOf = (items: Array<{ name: string }>): PresentedItem[] =>
   items.map((i) => ({ name: i.name }));
 
-export const presentProgram = (program: Program): PresentedProgram => {
+export interface PresentOptions {
+  /**
+   * Present the programme for Voone's admin screen, which may carry what a centre must never see:
+   * the informational notes and (A3) each reward's retail price. OFF by default, and only the
+   * admin routes turn it on, so a new caller (the owner dashboard, the pass, a sign-up page)
+   * gets the centre-safe projection without having to remember to ask for it.
+   */
+  forAdmin?: boolean;
+}
+
+export const presentProgram = (
+  program: Program,
+  options: PresentOptions = {}
+): PresentedProgram => {
   const levels = program.lad.ms.filter((m) => m.type === "nivel");
   // Whole euros: a centre reads "826 €", and an unrounded real spend is a long float whose last
   // digits differ between the engine's output and the copy stored and read back.
@@ -193,6 +212,7 @@ export const presentProgram = (program: Program): PresentedProgram => {
     },
 
     adaptations: program.adapt.filter((note) => !note.startsWith(COST_NOTE_PREFIX)),
-    review: program.review
+    review: blockingReview(program.review),
+    notes: options.forAdmin ? informationalNotes(program.review) : []
   };
 };

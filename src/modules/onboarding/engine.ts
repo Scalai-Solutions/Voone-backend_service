@@ -824,14 +824,33 @@ export const orderBronce = (chosen: ChosenReward[]): BronceOrdering => {
 /* ----------------------------------------------------------------- guarantees and review */
 
 /**
- * The blocking note raised when a programme costs more than half again its chosen budget.
+ * The note raised when a programme costs more than half again its chosen budget.
  *
  * A constant because two places must agree on it exactly: the engine, which raises it, and a
  * reward swap, which must clear it or add it as the cost moves. A swap that matched the text
  * by a near copy would stop recognising it the first time someone reworded one.
+ *
+ * It lives in `review` (the engine's output keeps it, so Voone can audit it) but it does NOT
+ * block publishing: see `INFORMATIONAL_NOTES`.
  */
 export const COST_REVIEW_NOTE =
   "El coste de los premios supera en más de un 50% la inversión elegida. Sube la inversión o añade regalos más baratos.";
+
+/**
+ * Review notes that are told to the admin but never stop a programme going live. A dearer reward
+ * is a legitimate choice once the admin can see what it does to the five-year result; every other
+ * note is a defect Voone has judged and keeps blocking. Matched by exact text, and also true of
+ * programmes stored before this existed, whose `review` already carries the note.
+ */
+export const INFORMATIONAL_NOTES: readonly string[] = [COST_REVIEW_NOTE];
+
+/** The review notes that block publishing. */
+export const blockingReview = (review: readonly string[]): string[] =>
+  review.filter((note) => !INFORMATIONAL_NOTES.includes(note));
+
+/** The review notes that are information only. */
+export const informationalNotes = (review: readonly string[]): string[] =>
+  review.filter((note) => INFORMATIONAL_NOTES.includes(note));
 
 /**
  * The invariants a valid programme must hold, as sentences with a truth value.

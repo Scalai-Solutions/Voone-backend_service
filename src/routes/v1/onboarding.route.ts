@@ -131,7 +131,7 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
       publishedAt: row.publishedAt,
       // What the centre answered, so the screens can pre-fill when it comes back to a draft.
       answers: row.answers,
-      program: presentProgram(output),
+      program: presentProgram(output, { forAdmin: true }),
       internal: {
         costPct: output.costPct,
         guarantees: output.guarantees.map(([text, held]) => ({ text, held }))
@@ -296,7 +296,7 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
       const program = await deps.onboarding.preview(clinicId, answers);
 
       res.json({
-        program: presentProgram(program),
+        program: presentProgram(program, { forAdmin: true }),
         internal: {
           costPct: program.costPct,
           guarantees: program.guarantees.map(([text, held]) => ({ text, held }))

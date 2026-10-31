@@ -15,7 +15,7 @@ import {
   type BenefitOverrideEntry
 } from "./benefit-lines";
 import { toEngineCatalog, type CatalogRepository } from "./catalog.repository";
-import { run } from "./engine";
+import { blockingReview, run } from "./engine";
 import {
   ANSWER_LIMITS,
   CONFIG_VERSION,
@@ -221,10 +221,11 @@ export class OnboardingService {
   /**
    * Makes a draft live, retiring whatever was live before.
    *
-   * Refuses while the programme carries review notes. Those are raised only for things a
-   * centre must actually resolve — unclassified rows, answers that contradict the
-   * catalogue, a cost overrun — and publishing past them would put a programme in front
-   * of members that Voone has already judged wrong.
+   * Refuses while the programme carries blocking review notes. Those are raised only for things a
+   * centre must actually resolve — unclassified rows, answers that contradict the catalogue — and
+   * publishing past them would put a programme in front of members that Voone has already judged
+   * wrong. A cost overrun is told to the admin but does not block: she chose it with the number
+   * in front of her.
    *
    * The previous version is marked SUSTITUIDO, never deleted: members progressed against
    * its thresholds and the record of what they were promised has to survive.
@@ -247,7 +248,8 @@ export class OnboardingService {
       }
 
       const output = draft.output as unknown as Program;
-      const review = Array.isArray(output?.review) ? output.review : [];
+      // The cost note is information, not a defect: it never blocks (see `INFORMATIONAL_NOTES`).
+      const review = blockingReview(Array.isArray(output?.review) ? output.review : []);
 
       if (review.length) {
         throw new OnboardingError(
