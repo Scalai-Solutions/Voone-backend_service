@@ -23,7 +23,15 @@ export interface Reply {
   body: any; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
-export const call = async (method: string, path: string, body?: unknown): Promise<Reply> => {
+/** The header the admin portal's proxy sends on clinic writes; see the PATCH route. */
+export const ADMIN_ACTOR = { "x-actor-role": "voone_admin" } as const;
+
+export const call = async (
+  method: string,
+  path: string,
+  body?: unknown,
+  headers: Record<string, string> = {}
+): Promise<Reply> => {
   const server = app.listen(0);
 
   try {
@@ -33,7 +41,8 @@ export const call = async (method: string, path: string, body?: unknown): Promis
       method,
       headers: {
         ...(config.STAFF_API_KEY ? { "x-voone-staff-key": config.STAFF_API_KEY } : {}),
-        ...(body === undefined ? {} : { "content-type": "application/json" })
+        ...(body === undefined ? {} : { "content-type": "application/json" }),
+        ...headers
       },
       body: body === undefined ? undefined : JSON.stringify(body)
     });
