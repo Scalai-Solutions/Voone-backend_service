@@ -176,6 +176,7 @@ const createClinicWithTemplate = (
           appointmentUrl: input.appointmentUrl,
           appLinkText: input.appLinkText,
           appLinkDescription: input.appLinkDescription,
+          extraButtons: input.extraButtons,
           pointsLabel: input.pointsLabel,
           tierLabel: input.tierLabel,
           benefitsText: input.benefitsText,

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { CARD_EXTRA_BUTTONS_MAX, cardButtonSchema } from "../../wallet/engine/loyalty-card";
+
 import {
   DEFAULT_WALLET_BENEFITS_TEXT,
   DEFAULT_WALLET_INFO_TEXT,
@@ -158,6 +160,8 @@ export const createTemplateSchema = z.object({
   appointmentUrl: optionalUrlSchema,
   appLinkText: z.string().trim().min(1).max(30).optional().or(z.literal("")),
   appLinkDescription: z.string().trim().min(1).max(120).optional().or(z.literal("")),
+  /** Further buttons beside the main one; left out on an update, they stay as they were. */
+  extraButtons: z.array(cardButtonSchema).max(CARD_EXTRA_BUTTONS_MAX).optional(),
   pointsLabel: defaultedString(DEFAULT_WALLET_POINTS_LABEL, 2, 80),
   tierLabel: defaultedString(DEFAULT_WALLET_TIER_LABEL, 2, 80),
   benefitsText: walletTextSchema(DEFAULT_WALLET_BENEFITS_TEXT, 8),

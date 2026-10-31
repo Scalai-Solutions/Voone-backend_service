@@ -10,7 +10,6 @@ import {
   type PrismaClient
 } from "@prisma/client";
 
-import { config } from "../../config/env";
 import {
   WalletNotificationNotFoundError,
   WalletNotificationQuotaExceededError,
@@ -28,10 +27,15 @@ import type {
   ClinicLocationInput,
   NotificationMessageInput,
   NotificationSegmentInput,
-  NotificationSettingsInput,
+  NotificationSettingsPatch,
   SegmentNotificationInput
 } from "./notifications.schema";
+import { AutomationSettingsService } from "./automations/automation-settings.service";
+import { AutomationDispatchService } from "./automations/dispatch.service";
+import { TierUpgradeNotifier } from "./automations/tier-upgrade";
+import { ReviewRequestNotifier } from "./automations/triggers/review-request.trigger";
 import { NotificationQuotaService } from "./quota.service";
+import { linkifyForGoogle } from "./template";
 
 const BROADCAST_LIMIT = 3;
 const BROADCAST_WINDOW_MS = 24 * 60 * 60 * 1_000;
@@ -41,27 +45,6 @@ const MANUAL_NOTIFICATION_TYPES = new Set<NotificationType>([
   NotificationType.SEGMENT,
   NotificationType.SINGLE
 ]);
-const birthdayDay = (
-  date: Date,
-  timeZone = config.BIRTHDAY_NOTIFICATION_TIME_ZONE
-): { dateKey: string; month: number; day: number } => {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).formatToParts(date);
-  const value = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
-  const year = value("year");
-  const month = value("month");
-  const day = value("day");
-
-  return { dateKey: `${year}-${month}-${day}`, month: Number(month), day: Number(day) };
-};
-
-const birthdayMatches = (birthDate: Date, month: number, day: number): boolean =>
-  birthDate.getUTCMonth() + 1 === month && birthDate.getUTCDate() === day;
-
 export interface NotificationActor {
   userId?: string;
   clinicId?: string;
@@ -75,6 +58,8 @@ export interface PointsCreditNotificationJob {
   newBalance: number;
   milestoneReached: boolean;
   tierChanged: boolean;
+  /** Set only when the member moved UP into `newTier` (a demotion or no change leaves it unset). */
+  tierUpgradedTo?: string;
 }
 
 export interface NotificationJobQueue {
@@ -106,26 +91,16 @@ export interface NotificationCounts {
   skipped: number;
 }
 
-export interface BirthdayAutomationResult {
-  date: string;
-  clinicsChecked: number;
-  candidates: number;
-  notificationsCreated: number;
-  deliveriesCreated: number;
-}
-
-export interface BonoReminderResult {
-  /** The month the run is for, "YYYY-MM" in the automation's time zone. */
-  month: string;
-  clinicsChecked: number;
-  candidates: number;
-  notificationsCreated: number;
-  deliveriesCreated: number;
-}
-
 type NotificationRecord = Awaited<ReturnType<NotificationService["findNotification"]>>;
 
 export class NotificationService {
+  /** The one path automated messages are sent through; the scheduled dispatcher shares it. */
+  readonly automationSender: AutomationDispatchService;
+  private readonly automationSettings: AutomationSettingsService;
+  private readonly tierUpgrades: TierUpgradeNotifier;
+  /** EVT-005, sent when a visit is recorded (wired to VisitService in the routes). */
+  readonly reviewRequests: ReviewRequestNotifier;
+
   constructor(
     private readonly prisma: PrismaClient,
     private readonly wallet: WalletPassEngine,
@@ -133,7 +108,12 @@ export class NotificationService {
     private readonly jobs: NotificationJobQueue,
     /** Null where Apple cards cannot be refreshed (no signing material / card secret). */
     private readonly appleCards: AppleCardRefresher | null = null
-  ) {}
+  ) {
+    this.automationSender = new AutomationDispatchService(prisma, jobs);
+    this.automationSettings = new AutomationSettingsService(prisma);
+    this.tierUpgrades = new TierUpgradeNotifier(prisma, this.automationSender);
+    this.reviewRequests = new ReviewRequestNotifier(prisma, this.automationSender);
+  }
 
   async broadcast(
     clinicId: string,
@@ -326,317 +306,9 @@ export class NotificationService {
   async onPointsCredited(
     memberId: string,
     newBalance: number,
-    flags: { milestoneReached: boolean; tierChanged: boolean }
+    flags: { milestoneReached: boolean; tierChanged: boolean; tierUpgradedTo?: string }
   ): Promise<void> {
     await this.jobs.enqueuePointsCredit({ memberId, newBalance, ...flags });
-  }
-
-  async runBirthdayAutomations(
-    now = new Date(),
-    timeZone = config.BIRTHDAY_NOTIFICATION_TIME_ZONE
-  ): Promise<BirthdayAutomationResult> {
-    const today = birthdayDay(now, timeZone);
-    const result: BirthdayAutomationResult = {
-      date: today.dateKey,
-      clinicsChecked: 0,
-      candidates: 0,
-      notificationsCreated: 0,
-      deliveriesCreated: 0
-    };
-    const clinics = await this.prisma.clinic.findMany({
-      where: { isActive: true },
-      include: { notificationSettings: true },
-      orderBy: { createdAt: "asc" }
-    });
-
-    for (const clinic of clinics) {
-      result.clinicsChecked += 1;
-      const settings =
-        clinic.notificationSettings ??
-        (await this.prisma.clinicNotificationSettings.upsert({
-          where: { clinicId: clinic.id },
-          create: { clinicId: clinic.id },
-          update: {}
-        }));
-
-      if (!settings.marketingEnabled || !settings.birthdayEnabled) {
-        continue;
-      }
-
-      const members = await this.prisma.member.findMany({
-        where: {
-          clinicId: clinic.id,
-          erasedAt: null,
-          consentMarketing: true,
-          birthDate: { not: null }
-        },
-        include: { walletObjects: true },
-        orderBy: { createdAt: "asc" }
-      });
-      const candidates = members.filter((member) => {
-        if (!member.birthDate || !birthdayMatches(member.birthDate, today.month, today.day)) {
-          return false;
-        }
-
-        return member.walletObjects.some(
-          (walletObject) =>
-            walletObject.status === WalletSyncStatus.SYNCED &&
-            (walletObject.provider === WalletProviderType.GOOGLE ||
-              walletObject.provider === WalletProviderType.APPLE)
-        );
-      });
-
-      result.candidates += candidates.length;
-
-      if (candidates.length > 0) {
-        const idempotencyKey = `birthday:${clinic.id}:${today.dateKey}`;
-        const existing = await this.findIdempotent(clinic.id, idempotencyKey);
-        const deliveries = candidates.flatMap((member) =>
-          member.walletObjects
-            .filter(
-              (walletObject) =>
-                walletObject.status === WalletSyncStatus.SYNCED &&
-                (walletObject.provider === WalletProviderType.GOOGLE ||
-                  walletObject.provider === WalletProviderType.APPLE)
-            )
-            .map((walletObject) => ({
-              memberId: member.id,
-              provider: walletObject.provider,
-              status: NotificationDeliveryStatus.QUEUED
-            }))
-        );
-
-        if (existing) {
-          const existingDeliveries = await this.prisma.notificationDelivery.findMany({
-            where: { notificationId: existing.id },
-            select: { id: true, memberId: true, provider: true, status: true }
-          });
-          const existingKeys = new Set(
-            existingDeliveries.map((delivery) => `${delivery.memberId}:${delivery.provider}`)
-          );
-          const missingDeliveries = deliveries.filter(
-            (delivery) => !existingKeys.has(`${delivery.memberId}:${delivery.provider}`)
-          );
-          const createdDeliveries = await Promise.all(
-            missingDeliveries.map((delivery) =>
-              this.prisma.notificationDelivery.create({
-                data: { notificationId: existing.id, ...delivery },
-                select: { id: true }
-              })
-            )
-          );
-          const queuedDeliveryIds = [
-            ...existingDeliveries
-              .filter((delivery) => delivery.status === NotificationDeliveryStatus.QUEUED)
-              .map((delivery) => delivery.id),
-            ...createdDeliveries.map((delivery) => delivery.id)
-          ];
-
-          await Promise.all(
-            queuedDeliveryIds.map((deliveryId) => this.jobs.enqueueDelivery(deliveryId))
-          );
-          result.deliveriesCreated += createdDeliveries.length;
-        } else {
-          const notification = await this.prisma.notification.create({
-            data: {
-              clinicId: clinic.id,
-              type: NotificationType.BIRTHDAY,
-              header: settings.birthdayHeader,
-              body: settings.birthdayBody,
-              notify: settings.birthdayNotify,
-              idempotencyKey,
-              segmentJson: {
-                automation: "birthday",
-                date: today.dateKey,
-                timeZone
-              },
-              deliveries: { create: deliveries }
-            },
-            include: { deliveries: { select: { id: true } } }
-          });
-
-          await this.audit(
-            notification.id,
-            clinic.id,
-            { role: "SYSTEM" },
-            "BIRTHDAY_CREATED",
-            candidates.length,
-            {
-              date: today.dateKey,
-              timeZone
-            }
-          );
-
-          await Promise.all(
-            notification.deliveries.map((delivery) => this.jobs.enqueueDelivery(delivery.id))
-          );
-
-          result.notificationsCreated += 1;
-          result.deliveriesCreated += notification.deliveries.length;
-        }
-      }
-
-      await this.prisma.clinicNotificationSettings.update({
-        where: { clinicId: clinic.id },
-        data: { birthdayLastRunDate: today.dateKey }
-      });
-    }
-
-    return result;
-  }
-
-  /**
-   * The monthly "you have sessions left" automation: on the 1st, to every member holding a
-   * bono with sessions left and a synced pass.
-   *
-   * NOT gated on marketingEnabled or consentMarketing (2026-10 product decision): the
-   * sessions are already paid for. The clinic's off switch is bonoReminderEnabled.
-   * Idempotent by (clinic, month).
-   */
-  async runBonoReminderAutomations(
-    now = new Date(),
-    timeZone = config.BIRTHDAY_NOTIFICATION_TIME_ZONE
-  ): Promise<BonoReminderResult> {
-    const today = birthdayDay(now, timeZone);
-    const month = today.dateKey.slice(0, 7);
-    const result: BonoReminderResult = {
-      month,
-      clinicsChecked: 0,
-      candidates: 0,
-      notificationsCreated: 0,
-      deliveriesCreated: 0
-    };
-
-    // The cron ticks daily; this gate is what makes the send monthly.
-    if (today.day !== 1) return result;
-
-    const clinics = await this.prisma.clinic.findMany({
-      where: { isActive: true },
-      include: { notificationSettings: true },
-      orderBy: { createdAt: "asc" }
-    });
-
-    for (const clinic of clinics) {
-      result.clinicsChecked += 1;
-      const settings =
-        clinic.notificationSettings ??
-        (await this.prisma.clinicNotificationSettings.upsert({
-          where: { clinicId: clinic.id },
-          create: { clinicId: clinic.id },
-          update: {}
-        }));
-
-      if (!settings.bonoReminderEnabled) continue;
-
-      const members = await this.prisma.member.findMany({
-        where: {
-          clinicId: clinic.id,
-          erasedAt: null,
-          bonos: { some: { status: MemberBonoStatus.ACTIVE } }
-        },
-        include: { walletObjects: true },
-        orderBy: { createdAt: "asc" }
-      });
-      const candidates = members.filter((member) =>
-        member.walletObjects.some(
-          (walletObject) =>
-            walletObject.status === WalletSyncStatus.SYNCED &&
-            (walletObject.provider === WalletProviderType.GOOGLE ||
-              walletObject.provider === WalletProviderType.APPLE)
-        )
-      );
-
-      result.candidates += candidates.length;
-
-      if (candidates.length > 0) {
-        const idempotencyKey = `bono:${clinic.id}:${month}`;
-        const existing = await this.findIdempotent(clinic.id, idempotencyKey);
-        const deliveries = candidates.flatMap((member) =>
-          member.walletObjects
-            .filter(
-              (walletObject) =>
-                walletObject.status === WalletSyncStatus.SYNCED &&
-                (walletObject.provider === WalletProviderType.GOOGLE ||
-                  walletObject.provider === WalletProviderType.APPLE)
-            )
-            .map((walletObject) => ({
-              memberId: member.id,
-              provider: walletObject.provider,
-              status: NotificationDeliveryStatus.QUEUED
-            }))
-        );
-
-        if (existing) {
-          // A retry after a crash between the two halves: deliver what is missing.
-          const existingDeliveries = await this.prisma.notificationDelivery.findMany({
-            where: { notificationId: existing.id },
-            select: { id: true, memberId: true, provider: true, status: true }
-          });
-          const known = new Set(
-            existingDeliveries.map((delivery) => `${delivery.memberId}:${delivery.provider}`)
-          );
-          const missing = deliveries.filter(
-            (delivery) => !known.has(`${delivery.memberId}:${delivery.provider}`)
-          );
-          const createdDeliveries = await Promise.all(
-            missing.map((delivery) =>
-              this.prisma.notificationDelivery.create({
-                data: { notificationId: existing.id, ...delivery },
-                select: { id: true }
-              })
-            )
-          );
-          const queuedDeliveryIds = [
-            ...existingDeliveries
-              .filter((delivery) => delivery.status === NotificationDeliveryStatus.QUEUED)
-              .map((delivery) => delivery.id),
-            ...createdDeliveries.map((delivery) => delivery.id)
-          ];
-
-          await Promise.all(
-            queuedDeliveryIds.map((deliveryId) => this.jobs.enqueueDelivery(deliveryId))
-          );
-          result.deliveriesCreated += createdDeliveries.length;
-        } else {
-          const notification = await this.prisma.notification.create({
-            data: {
-              clinicId: clinic.id,
-              type: NotificationType.BONO_REMINDER,
-              header: settings.bonoReminderHeader,
-              body: settings.bonoReminderBody,
-              notify: settings.bonoReminderNotify,
-              idempotencyKey,
-              segmentJson: { automation: "bono_reminder", month, timeZone },
-              deliveries: { create: deliveries }
-            },
-            include: { deliveries: { select: { id: true } } }
-          });
-
-          await this.audit(
-            notification.id,
-            clinic.id,
-            { role: "SYSTEM" },
-            "BONO_REMINDER_CREATED",
-            candidates.length,
-            { month, timeZone }
-          );
-
-          await Promise.all(
-            notification.deliveries.map((delivery) => this.jobs.enqueueDelivery(delivery.id))
-          );
-
-          result.notificationsCreated += 1;
-          result.deliveriesCreated += notification.deliveries.length;
-        }
-      }
-
-      await this.prisma.clinicNotificationSettings.update({
-        where: { clinicId: clinic.id },
-        data: { bonoReminderLastRunMonth: month }
-      });
-    }
-
-    return result;
   }
 
   async processNotification(notificationId: string): Promise<void> {
@@ -919,8 +591,8 @@ export class NotificationService {
 
     try {
       const message = await this.wallet.addObjectMessage(object.externalObjectId, {
-        header: delivery.notification.header,
-        body: this.bodyWithAction(delivery.notification.body, delivery.notification.actionUrl),
+        header: delivery.header ?? delivery.notification.header,
+        body: this.googleBody(delivery),
         notify,
         actionUrl: delivery.notification.actionUrl ?? undefined
       });
@@ -931,8 +603,8 @@ export class NotificationService {
     } catch (error) {
       if (error instanceof WalletNotificationQuotaExceededError && wantsPush) {
         const message = await this.wallet.addObjectMessage(object.externalObjectId, {
-          header: delivery.notification.header,
-          body: this.bodyWithAction(delivery.notification.body, delivery.notification.actionUrl),
+          header: delivery.header ?? delivery.notification.header,
+          body: this.googleBody(delivery),
           notify: false,
           actionUrl: delivery.notification.actionUrl ?? undefined
         });
@@ -1114,6 +786,8 @@ export class NotificationService {
     id: string;
     notificationId: string;
     memberId: string;
+    header: string | null;
+    body: string | null;
     notification: NonNullable<NotificationRecord>;
     member: { walletObjects: Array<{ provider: WalletProviderType; status: WalletSyncStatus }> };
   }): Promise<void> {
@@ -1158,8 +832,8 @@ export class NotificationService {
     }
 
     const message = {
-      header: delivery.notification.header,
-      body: delivery.notification.body,
+      header: delivery.header ?? delivery.notification.header,
+      body: delivery.body ?? delivery.notification.body,
       sentAt: new Date(),
       notificationId: delivery.notification.id
     };
@@ -1208,6 +882,27 @@ export class NotificationService {
         walletObject.status === WalletSyncStatus.SYNCED
     );
 
+    // EVT-008: a tier upgrade gets its own congratulation (every wallet, personalised). It
+    // replaces the generic "points updated" push below, so the member is not pushed twice.
+    let upgradeSent = false;
+
+    if (job.tierUpgradedTo) {
+      try {
+        const result = await this.tierUpgrades.notify({
+          memberId: member.id,
+          clinicId: member.clinicId,
+          newTier: job.tierUpgradedTo
+        });
+
+        upgradeSent = !result.skipped;
+      } catch (error) {
+        console.error("[notifications] tier upgrade message failed", {
+          memberId: member.id,
+          error: error instanceof Error ? error.name : "UNKNOWN"
+        });
+      }
+    }
+
     let outcome: { status: NotificationDeliveryStatus; errorCode: string | null };
 
     if (!object) {
@@ -1217,7 +912,7 @@ export class NotificationService {
       const shouldNotify =
         settings.notifyOnCredit === ClinicNotifyOnCredit.ALWAYS ||
         (settings.notifyOnCredit === ClinicNotifyOnCredit.MILESTONE_AND_TIER &&
-          (job.milestoneReached || job.tierChanged));
+          (job.milestoneReached || (job.tierChanged && !upgradeSent)));
       const notify = shouldNotify && (await this.quota.canPush(object.externalObjectId));
 
       // The Google patch comes first and its failure leaves no row behind: a transient error
@@ -1275,7 +970,7 @@ export class NotificationService {
       await this.prisma.notification.create({
         data: {
           clinicId: member.clinicId,
-          type: job.tierChanged ? NotificationType.TIER : NotificationType.POINTS,
+          type: job.tierChanged && !upgradeSent ? NotificationType.TIER : NotificationType.POINTS,
           header: "Puntos actualizados",
           body: `Tu saldo ahora es ${shownBalance}`,
           notify: false,
@@ -1400,21 +1095,17 @@ export class NotificationService {
   async getSettings(clinicId: string, actor: NotificationActor) {
     this.assertReader(actor, clinicId);
 
-    return this.settingsFor(clinicId);
+    return this.automationSettings.get(clinicId);
   }
 
   async updateSettings(
     clinicId: string,
-    input: NotificationSettingsInput,
+    patch: NotificationSettingsPatch,
     actor: NotificationActor
   ) {
     this.assertSender(actor, clinicId);
 
-    return this.prisma.clinicNotificationSettings.upsert({
-      where: { clinicId },
-      create: { clinicId, ...input },
-      update: input
-    });
+    return this.automationSettings.patch(clinicId, patch);
   }
 
   async getLocations(clinicId: string, actor: NotificationActor) {
@@ -1757,6 +1448,24 @@ export class NotificationService {
         error: error instanceof Error ? error.name : "UNKNOWN"
       });
     }
+  }
+
+  /**
+   * The body as a Google Wallet message: the member's rendered text, with the review link made a
+   * real `<a href>` hyperlink (as the Wallet docs specify) for review requests, then the action
+   * URL. Apple's path builds its own text and is not affected.
+   */
+  private googleBody(delivery: {
+    body: string | null;
+    notification: { body: string; type: NotificationType; actionUrl: string | null };
+  }): string {
+    const text = delivery.body ?? delivery.notification.body;
+    const linked =
+      delivery.notification.type === NotificationType.REVIEW_REQUEST
+        ? linkifyForGoogle(text)
+        : text;
+
+    return this.bodyWithAction(linked, delivery.notification.actionUrl);
   }
 
   private bodyWithAction(body: string, actionUrl?: string | null): string {

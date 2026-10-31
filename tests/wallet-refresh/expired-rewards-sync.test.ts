@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { startBirthdayNotificationCron } from "../../src/modules/notifications/birthday-cron";
-import type { NotificationService } from "../../src/modules/notifications/notification.service";
+import { startNotificationDispatcher } from "../../src/modules/notifications/automations/dispatcher";
+import type { NotificationDispatcher } from "../../src/modules/notifications/automations/dispatcher";
 import {
   EXPIRED_REWARDS_LOOKBACK_HOURS,
   EXPIRED_REWARDS_MAX_MEMBERS,
@@ -98,11 +98,8 @@ describe("syncMembersWithExpiredRewards", () => {
 });
 
 describe("the daily cron", () => {
-  const notifications = {
-    runBirthdayAutomations: vi.fn(async () => ({})),
-    runBonoReminderAutomations: vi.fn(async () => ({}))
-  } as unknown as NotificationService;
-  const schedule = { timeZone: "Europe/Madrid", hour: 9, minute: 0, frequencyMinutes: 1440 };
+  const dispatcher = { runOnce: vi.fn(async () => null) } as unknown as NotificationDispatcher;
+  const schedule = { timeZone: "Europe/Madrid", hour: 9, minute: 0 };
 
   it("runs the expired-rewards sync on its daily tick, and a failure there does not stop the cron", async () => {
     vi.useFakeTimers();
@@ -113,7 +110,7 @@ describe("the daily cron", () => {
       throw new Error("sync failed");
     });
 
-    const cron = startBirthdayNotificationCron(notifications, schedule, daily);
+    const cron = startNotificationDispatcher(dispatcher, schedule, daily);
 
     // 09:00 Madrid is 08:00 UTC at the end of October (CET).
     await vi.advanceTimersByTimeAsync(121 * 60_000);

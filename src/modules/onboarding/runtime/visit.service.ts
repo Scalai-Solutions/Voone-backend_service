@@ -151,11 +151,19 @@ interface ResolvedBono {
   totalSessions: number;
 }
 
+/**
+ * Told about each newly recorded visit, after it is committed. Whatever it does (today: the
+ * review request after the 2nd visit) never fails or slows the visit: it is not awaited by the
+ * caller's answer and its errors are only logged.
+ */
+export type VisitRecordedHook = (visit: { memberId: string; clinicId: string }) => Promise<unknown>;
+
 export class VisitService {
   constructor(
     private readonly prisma: PrismaClient,
     private readonly points: PointsService,
-    private readonly now: () => Date = () => new Date()
+    private readonly now: () => Date = () => new Date(),
+    private readonly onVisitRecorded?: VisitRecordedHook
   ) {}
 
   async record(input: RecordVisitInput): Promise<VisitOutcome> {
@@ -256,6 +264,17 @@ export class VisitService {
       where: { id: input.memberId },
       select: { pointsBalance: true }
     });
+
+    // A visit counts whatever it earned: a 0 € visit queues no points credit, yet is still a visit.
+    if (opened.created && this.onVisitRecorded) {
+      void this.onVisitRecorded({ memberId: input.memberId, clinicId: input.clinicId }).catch(
+        (error: unknown) =>
+          console.error("[visits] after-visit hook failed", {
+            memberId: input.memberId,
+            error: error instanceof Error ? error.name : "UNKNOWN"
+          })
+      );
+    }
 
     const window = discountWindowStart(this.now());
     const used = await this.prisma.paidVisit.aggregate({

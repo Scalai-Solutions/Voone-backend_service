@@ -109,6 +109,38 @@ const passwordChangeSchema = z
     message: "Passwords do not match"
   });
 
+/**
+ * The centre's own details and billing information, editable from Settings › Información del
+ * centro. `name`, `addressLine` and `pincode` have existed since the centre was created and
+ * cannot be emptied; the billing fields are optional, and an empty string clears one (null in
+ * the database). `voonePlan` and `isActive` are handled by the same PATCH route separately and
+ * are not part of this schema.
+ */
+const clinicDetailsSchema = z.object({
+  name: z.string().trim().min(1, "El nombre del centro no puede quedar vacío.").optional(),
+  addressLine: z
+    .string()
+    .trim()
+    .min(1, "La dirección del centro no puede quedar vacía.")
+    .optional(),
+  pincode: z
+    .string()
+    .trim()
+    .min(1, "El código postal del centro no puede quedar vacío.")
+    .optional(),
+  billingName: z.string().optional(),
+  billingTaxId: z.string().optional(),
+  billingEmail: z
+    .union([z.literal(""), z.string().trim().email("El email de facturación no es válido.")])
+    .optional(),
+  billingAddressLine: z.string().optional(),
+  billingPostalCode: z.string().optional()
+});
+
+/** A billing field's new value: `undefined` leaves it untouched, an empty string clears it to null. */
+const billingPatch = (value: string | undefined): string | null | undefined =>
+  value === undefined ? undefined : value.trim() || null;
+
 type AdminClinicSummaryUser = {
   id: string;
   name?: string | null;
@@ -169,6 +201,12 @@ const toAdminClinicSummary = (clinic: AdminClinicSummaryInput) => ({
   isActive: clinic.isActive,
   privacyPolicyVersion: clinic.privacyPolicyVersion,
   voonePlan: clinic.voonePlan,
+  // Billing details for invoicing the centre, straight from the Clinic row; null when unset.
+  billingName: clinic.billingName ?? null,
+  billingTaxId: clinic.billingTaxId ?? null,
+  billingEmail: clinic.billingEmail ?? null,
+  billingAddressLine: clinic.billingAddressLine ?? null,
+  billingPostalCode: clinic.billingPostalCode ?? null,
   notificationsMonthlyQuota: clinic.notificationsMonthlyQuota,
   notificationsUsedThisMonth: clinic.notificationsUsedThisMonth,
   notificationsRemainingThisMonth: Math.max(
@@ -722,6 +760,16 @@ adminClinicsRouter.patch(
     const voonePlan = typeof req.body?.voonePlan === "string" ? req.body.voonePlan : undefined;
     const isActive = typeof req.body?.isActive === "boolean" ? req.body.isActive : undefined;
 
+    // The centre's own details and billing information, from Settings › Información del centro.
+    // Unknown keys (voonePlan, isActive) are stripped by the schema and handled above.
+    const details = clinicDetailsSchema.safeParse(req.body ?? {});
+
+    if (!details.success) {
+      throw new MembershipValidationError(
+        details.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")
+      );
+    }
+
     // Turning a draft on is an activation like POST .../activate, so it meets the same checks.
     // Turning a centre off, or setting a flag it already has, stays unrestricted.
     if (isActive === true && !clinic.isActive) {
@@ -731,12 +779,27 @@ adminClinicsRouter.patch(
     }
 
     const notificationsMonthlyQuota = voonePlan ? planQuota(voonePlan) : undefined;
+    const billingName = billingPatch(details.data.billingName);
+    const billingTaxId = billingPatch(details.data.billingTaxId);
+    const billingEmail = billingPatch(details.data.billingEmail);
+    const billingAddressLine = billingPatch(details.data.billingAddressLine);
+    const billingPostalCode = billingPatch(details.data.billingPostalCode);
 
     await prisma.clinic.update({
       where: { id: clinic.id },
       data: {
         ...(isActive !== undefined ? { isActive } : {}),
-        ...(voonePlan ? { voonePlan, notificationsMonthlyQuota } : {})
+        ...(voonePlan ? { voonePlan, notificationsMonthlyQuota } : {}),
+        ...(details.data.name !== undefined ? { name: details.data.name } : {}),
+        ...(details.data.addressLine !== undefined
+          ? { addressLine: details.data.addressLine }
+          : {}),
+        ...(details.data.pincode !== undefined ? { pincode: details.data.pincode } : {}),
+        ...(billingName !== undefined ? { billingName } : {}),
+        ...(billingTaxId !== undefined ? { billingTaxId } : {}),
+        ...(billingEmail !== undefined ? { billingEmail } : {}),
+        ...(billingAddressLine !== undefined ? { billingAddressLine } : {}),
+        ...(billingPostalCode !== undefined ? { billingPostalCode } : {})
       }
     });
 

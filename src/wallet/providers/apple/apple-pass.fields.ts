@@ -190,6 +190,10 @@ export const buildStoreCardFields = (data: LoyaltyCard): StoreCardFields => {
     );
   }
 
+  (data.template.extraButtons ?? []).forEach((button, index) => {
+    backFields.push(linkField(`button${index + 1}`, button.label, button.label, button.url));
+  });
+
   if (data.template.websiteUrl) {
     backFields.push(
       linkField("website", PASS_LABELS.website, "Visitar la web", data.template.websiteUrl)

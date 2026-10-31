@@ -1,3 +1,4 @@
+import { cardButtonSchema } from "./loyalty-card";
 import type { ClinicTemplateWithRelations } from "../../modules/templates/templates.repository";
 import type { ProgramTemplate } from "./wallet-pass-provider.interface";
 
@@ -18,9 +19,19 @@ export type TemplateForProgram = Pick<
   | "benefitsText"
   | "infoText"
 > & {
+  /** The stored JSON list of further buttons; absent on older fixtures. */
+  extraButtons?: unknown;
   /** `onboardingPrograms` is the clinic's live programme, if any: at most one row, id only. */
   clinic: { name: string; onboardingPrograms?: Array<unknown> };
 };
+
+/** The stored extra buttons, keeping only the well-formed ones so a bad row cannot break a sync. */
+export const extraButtonsOf = (value: unknown) =>
+  (Array.isArray(value) ? value : []).flatMap((item) => {
+    const parsed = cardButtonSchema.safeParse(item);
+
+    return parsed.success ? [parsed.data] : [];
+  });
 
 /** A clinic template as the provider-neutral programme the wallets provision and refresh. */
 export const programTemplateFor = (template: TemplateForProgram): ProgramTemplate => ({
@@ -36,6 +47,7 @@ export const programTemplateFor = (template: TemplateForProgram): ProgramTemplat
     appointmentUrl: template.appointmentUrl ?? undefined,
     appLinkText: template.appLinkText ?? undefined,
     appLinkDescription: template.appLinkDescription ?? undefined,
+    extraButtons: extraButtonsOf(template.extraButtons),
     pointsLabel: template.pointsLabel,
     tierLabel: template.tierLabel,
     benefitsText: template.benefitsText,

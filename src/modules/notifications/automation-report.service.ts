@@ -1,4 +1,5 @@
 import {
+  AutomationEvent,
   MemberBonoStatus,
   NotificationStatus,
   NotificationType,
@@ -12,7 +13,10 @@ import {
  * SELECT-only: nothing here writes, and callers are Voone staff endpoints.
  */
 
-const AUTOMATION_TYPES = [NotificationType.BIRTHDAY, NotificationType.BONO_REMINDER];
+import { AUTOMATION_NOTIFICATION_TYPES } from "./automations/catalog";
+import { resolveAutomations } from "./automations/automation-settings.service";
+
+const AUTOMATION_TYPES = [...AUTOMATION_NOTIFICATION_TYPES];
 const DAYS_TO_SCAN = 7;
 const NOTIFICATION_LOOKBACK_DAYS = 90;
 const NOTIFICATION_LIMIT = 30;
@@ -20,22 +24,22 @@ const BONO_NAME_LIMIT = 25;
 /** A PARTIAL_FAILED send still reached some members, so it counts as sent. */
 const SENT_STATUSES = [NotificationStatus.SENT, NotificationStatus.PARTIAL_FAILED];
 
-/** The schema defaults, used when a clinic has no ClinicNotificationSettings row yet. */
-const DEFAULT_SETTINGS = {
-  marketingEnabled: true,
-  birthdayEnabled: true,
-  birthdayNotify: true,
-  bonoReminderEnabled: true,
-  bonoReminderNotify: true
+/** What the report selects for a clinic's settings; shared by both queries. */
+const SETTINGS_SELECT = {
+  notificationSettings: { select: { marketingEnabled: true } },
+  automations: { select: { event: true, enabled: true, header: true, body: true, notify: true } }
 } as const;
 
 export interface AutomationClinicSettings {
   marketingEnabled: boolean;
   birthdayEnabled: boolean;
   birthdayNotify: boolean;
+  /** The day the newest birthday send was created, "YYYY-MM-DD" (UTC), or null. */
   birthdayLastRunDate: string | null;
   bonoReminderEnabled: boolean;
   bonoReminderNotify: boolean;
+  /** Every automated event, so the admin panel needs no change per new event. */
+  automations: Record<AutomationEvent, { enabled: boolean; notify: boolean }>;
   usesDefaults: boolean;
 }
 
@@ -131,6 +135,18 @@ export interface ClinicAutomationReport {
 const monthDay = (date: Date): string =>
   `${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
 
+const latestOf = (
+  notifications: ReadonlyArray<{ type: NotificationType; createdAt: Date }>,
+  type: NotificationType
+): Date | null =>
+  notifications
+    .filter((notification) => notification.type === type)
+    .reduce<Date | null>(
+      (latest, notification) =>
+        latest && latest > notification.createdAt ? latest : notification.createdAt,
+      null
+    );
+
 const birthdayWindow = (days: number): Set<string> => {
   const window = new Set<string>();
 
@@ -153,16 +169,7 @@ export class AutomationReportService {
         addressLine: true,
         notificationsMonthlyQuota: true,
         notificationsUsedThisMonth: true,
-        notificationSettings: {
-          select: {
-            marketingEnabled: true,
-            birthdayEnabled: true,
-            birthdayNotify: true,
-            birthdayLastRunDate: true,
-            bonoReminderEnabled: true,
-            bonoReminderNotify: true
-          }
-        }
+        ...SETTINGS_SELECT
       },
       orderBy: { createdAt: "asc" }
     });
@@ -197,7 +204,7 @@ export class AutomationReportService {
         name: clinic.name,
         addressLine: clinic.addressLine,
         isActive: true,
-        settings: this.effectiveSettings(clinic.notificationSettings),
+        settings: this.effectiveSettings(clinic, latestOf(clinicRecent, NotificationType.BIRTHDAY)),
         manualQuota: this.manualQuota(
           clinic.notificationsMonthlyQuota,
           clinic.notificationsUsedThisMonth
@@ -227,16 +234,7 @@ export class AutomationReportService {
         isActive: true,
         notificationsMonthlyQuota: true,
         notificationsUsedThisMonth: true,
-        notificationSettings: {
-          select: {
-            marketingEnabled: true,
-            birthdayEnabled: true,
-            birthdayNotify: true,
-            birthdayLastRunDate: true,
-            bonoReminderEnabled: true,
-            bonoReminderNotify: true
-          }
-        }
+        ...SETTINGS_SELECT
       }
     });
 
@@ -307,7 +305,7 @@ export class AutomationReportService {
       clinicId: clinic.id,
       name: clinic.name,
       isActive: clinic.isActive,
-      settings: this.effectiveSettings(clinic.notificationSettings),
+      settings: this.effectiveSettings(clinic, latestOf(notifications, NotificationType.BIRTHDAY)),
       manualQuota: this.manualQuota(
         clinic.notificationsMonthlyQuota,
         clinic.notificationsUsedThisMonth
@@ -343,27 +341,35 @@ export class AutomationReportService {
   }
 
   private effectiveSettings(
-    stored: {
-      marketingEnabled: boolean;
-      birthdayEnabled: boolean;
-      birthdayNotify: boolean;
-      birthdayLastRunDate: string | null;
-      bonoReminderEnabled: boolean;
-      bonoReminderNotify: boolean;
-    } | null
+    clinic: {
+      notificationSettings: { marketingEnabled: boolean } | null;
+      automations: Array<{
+        event: AutomationEvent;
+        enabled: boolean;
+        header: string;
+        body: string;
+        notify: boolean;
+      }>;
+    },
+    lastBirthdayAt: Date | null
   ): AutomationClinicSettings {
-    if (!stored) {
-      return { ...DEFAULT_SETTINGS, birthdayLastRunDate: null, usesDefaults: true };
-    }
+    const resolved = resolveAutomations(clinic.automations);
+    const automations = Object.fromEntries(
+      Object.entries(resolved).map(([event, value]) => [
+        event,
+        { enabled: value.enabled, notify: value.notify }
+      ])
+    ) as AutomationClinicSettings["automations"];
 
     return {
-      marketingEnabled: stored.marketingEnabled,
-      birthdayEnabled: stored.birthdayEnabled,
-      birthdayNotify: stored.birthdayNotify,
-      birthdayLastRunDate: stored.birthdayLastRunDate,
-      bonoReminderEnabled: stored.bonoReminderEnabled,
-      bonoReminderNotify: stored.bonoReminderNotify,
-      usesDefaults: false
+      marketingEnabled: clinic.notificationSettings?.marketingEnabled ?? true,
+      birthdayEnabled: resolved.BIRTHDAY.enabled,
+      birthdayNotify: resolved.BIRTHDAY.notify,
+      birthdayLastRunDate: lastBirthdayAt ? lastBirthdayAt.toISOString().slice(0, 10) : null,
+      bonoReminderEnabled: resolved.BONO_INACTIVE.enabled,
+      bonoReminderNotify: resolved.BONO_INACTIVE.notify,
+      automations,
+      usesDefaults: clinic.notificationSettings === null && clinic.automations.length === 0
     };
   }
 

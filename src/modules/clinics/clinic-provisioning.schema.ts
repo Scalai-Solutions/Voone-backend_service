@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { CARD_EXTRA_BUTTONS_MAX, cardButtonSchema } from "../../wallet/engine/loyalty-card";
 import { newClinicSlugSchema } from "../members/membership.schema";
 import {
   DEFAULT_WALLET_BENEFITS_TEXT,
@@ -52,6 +53,7 @@ export const provisionClinicSchema = z.object({
   appointmentUrl: createTemplateSchema.shape.appointmentUrl,
   appLinkText: createTemplateSchema.shape.appLinkText,
   appLinkDescription: createTemplateSchema.shape.appLinkDescription,
+  extraButtons: z.array(cardButtonSchema).max(CARD_EXTRA_BUTTONS_MAX).default([]),
   pointsLabel: createTemplateSchema.shape.pointsLabel.default(DEFAULT_WALLET_POINTS_LABEL),
   tierLabel: createTemplateSchema.shape.tierLabel.default(DEFAULT_WALLET_TIER_LABEL),
   benefitsText: createTemplateSchema.shape.benefitsText.default(DEFAULT_WALLET_BENEFITS_TEXT),

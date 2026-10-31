@@ -53,7 +53,7 @@ export interface PointsNotificationPort {
   onPointsCredited(
     memberId: string,
     newBalance: number,
-    flags: { milestoneReached: boolean; tierChanged: boolean }
+    flags: { milestoneReached: boolean; tierChanged: boolean; tierUpgradedTo?: string }
   ): Promise<void>;
 }
 
@@ -251,7 +251,15 @@ export class PointsService {
               ? program.milestoneCrossed(previous.lifetimePoints, balance.lifetime)
               : this.crossedMilestone(previous.lifetimePoints, balance.lifetime, tier)
             : false,
-          tierChanged: previous ? previous.tier !== (tier?.code ?? null) : false
+          tierChanged: previous ? previous.tier !== (tier?.code ?? null) : false,
+          // Only a move UP the scale is an upgrade (EVT-008); a demotion is not celebrated.
+          tierUpgradedTo:
+            previous &&
+            tier &&
+            previous.tier !== tier.code &&
+            this.isHigherTier(scale, previous.tier, tier.code)
+              ? tier.code
+              : undefined
         })
         .catch((error) => {
           console.error("[notifications] could not enqueue points credit notification", {
@@ -262,6 +270,20 @@ export class PointsService {
     }
 
     return { applied, balance, tier };
+  }
+
+  /**
+   * Whether `next` sits above `previous`. By position on the clinic's scale when both are on it;
+   * a programme clinic never demotes unless asked to, so an unknown previous tier (none held
+   * yet) counts as below.
+   */
+  private isHigherTier(scale: TierDefinition[], previous: string | null, next: string): boolean {
+    if (!previous) return true;
+
+    const from = scale.findIndex((tier) => tier.code === previous);
+    const to = scale.findIndex((tier) => tier.code === next);
+
+    return from >= 0 && to >= 0 ? to > from : true;
   }
 
   private crossedMilestone(
