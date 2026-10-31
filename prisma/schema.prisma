@@ -59,6 +59,7 @@ model Clinic {
   pointsLedger          PointsTransaction[]
   notifications         Notification[]
   notificationSettings  ClinicNotificationSettings?
+  automations           ClinicAutomation[]
   notificationLocations ClinicLocation[]
   notificationAuditLogs NotificationAuditLog[]
   catalogItems          CatalogItem[]
@@ -169,6 +170,8 @@ model ClinicTemplate {
   appointmentUrl     String?
   appLinkText        String?
   appLinkDescription String?
+  /// Further tappable buttons beside the main one (appLinkText + appointmentUrl): [{ label, url }].
+  extraButtons       Json           @default("[]")
   pointsLabel        String
   tierLabel          String
   benefitsText       String
@@ -427,8 +430,22 @@ enum NotificationType {
   POINTS
   TIER
   BIRTHDAY
-  /// Monthly reminder to members with an active bono that they have sessions left.
+  /// Reminder to members whose active bono has gone unused for 30 days.
   BONO_REMINDER
+  /// Asks a returning member (2nd visit onwards) for a Google review.
+  REVIEW_REQUEST
+  /// Monthly nudge to share the referral code.
+  REFERRAL_PROMO
+}
+
+/// The automated, template-driven messages. One ClinicAutomation row per clinic and event holds
+/// the clinic's on/off switch and copy; the catalog in code holds everything else.
+enum AutomationEvent {
+  BIRTHDAY
+  BONO_INACTIVE
+  REVIEW_REQUEST
+  REFERRAL_PROMO
+  TIER_UPGRADE
 }
 
 enum NotificationStatus {
@@ -489,7 +506,12 @@ model NotificationDelivery {
   errorCode         String?
   sentAt            DateTime?
   providerMessageId String?
+  /// The text rendered for this member (variables filled in). Null for messages that are the
+  /// same for everyone, which read the Notification's header and body.
+  header            String?
+  body              String?
 
+  @@unique([notificationId, memberId, provider])
   @@index([notificationId, status])
   @@index([memberId])
 }
@@ -509,28 +531,50 @@ model MemberWalletMessage {
 }
 
 model ClinicNotificationSettings {
-  id                  String               @id @default(uuid())
-  clinicId            String               @unique
-  clinic              Clinic               @relation(fields: [clinicId], references: [id], onDelete: Cascade)
-  notifyOnCredit      ClinicNotifyOnCredit @default(MILESTONE_AND_TIER)
-  marketingEnabled    Boolean              @default(true)
-  birthdayEnabled     Boolean              @default(true)
-  birthdayHeader      String               @default("¡Feliz cumpleaños!")
-  birthdayBody        String               @default("¡Feliz cumpleaños! Disfruta de un 10% de descuento en nuestros servicios. Esperamos verte pronto.")
-  birthdayNotify      Boolean              @default(true)
-  birthdayLastRunDate String?
+  id                 String               @id @default(uuid())
+  clinicId           String               @unique
+  clinic             Clinic               @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  notifyOnCredit     ClinicNotifyOnCredit @default(MILESTONE_AND_TIER)
+  marketingEnabled   Boolean              @default(true)
+  /// Clinic-level template variables. Null until the clinic sets them; an automation that needs
+  /// one cannot be switched on before then.
+  googleReviewUrl    String?
+  referralRewardText String?
 
-  /// The monthly "you have sessions left" automation. Sent on the 1st to members with an
-  /// ACTIVE bono and a synced pass, regardless of marketing consent: the sessions are
-  /// already paid for, so this is about the member's own purchase. The clinic's toggle is
-  /// bonoReminderEnabled.
-  bonoReminderEnabled      Boolean  @default(true)
-  bonoReminderHeader       String   @default("Tienes sesiones pendientes")
-  bonoReminderBody         String   @default("Te quedan sesiones de tu bono. Reserva tu próxima cita cuando quieras.")
-  bonoReminderNotify       Boolean  @default(true)
+  /// DEPRECATED, no longer read or written: the per-event copy moved to ClinicAutomation. Kept
+  /// for one release so a rollback or an older instance still finds its columns; a later
+  /// migration drops them.
+  birthdayEnabled          Boolean @default(true)
+  birthdayHeader           String  @default("¡Feliz cumpleaños!")
+  birthdayBody             String  @default("¡Feliz cumpleaños! Disfruta de un 10% de descuento en nuestros servicios. Esperamos verte pronto.")
+  birthdayNotify           Boolean @default(true)
+  birthdayLastRunDate      String?
+  bonoReminderEnabled      Boolean @default(true)
+  bonoReminderHeader       String  @default("Tienes sesiones pendientes")
+  bonoReminderBody         String  @default("Te quedan sesiones de tu bono. Reserva tu próxima cita cuando quieras.")
+  bonoReminderNotify       Boolean @default(true)
   bonoReminderLastRunMonth String?
-  createdAt                DateTime @default(now())
-  updatedAt                DateTime @updatedAt
+
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+}
+
+/// A clinic's copy and switch for one automated message. Absent rows read as the catalog
+/// defaults (see automations/catalog.ts), so adding an event needs no backfill.
+model ClinicAutomation {
+  id        String          @id @default(uuid())
+  clinicId  String
+  clinic    Clinic          @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  event     AutomationEvent
+  enabled   Boolean
+  header    String
+  body      String
+  /// true = a real push (Google TEXT_AND_NOTIFY), false = a silent card message.
+  notify    Boolean
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@unique([clinicId, event])
 }
 
 model ClinicLocation {

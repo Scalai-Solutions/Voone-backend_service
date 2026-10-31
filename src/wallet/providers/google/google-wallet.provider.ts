@@ -291,20 +291,28 @@ export class GoogleWalletProvider extends BaseWalletProvider {
           : [])
       ],
       linkModules: [
+        // Tags are the uris' ids, referenced by the details template as
+        // class.linksModuleData.uris['<id>'], so they stay plain slugs; the description is the
+        // text the member sees.
         {
-          tag: "Web",
+          tag: "web",
           description: "Web",
           url: websiteUrl
         },
         ...(appointmentUrl
           ? [
               {
-                tag: "Reservar cita",
-                description: "Reservar cita",
+                tag: "book",
+                description: template.appLinkText ?? "Reservar cita",
                 url: appointmentUrl
               }
             ]
-          : [])
+          : []),
+        ...(template.extraButtons ?? []).map((button, index) => ({
+          tag: `button_${index + 1}`,
+          description: button.label,
+          url: button.url
+        }))
       ],
       appLink: appointmentUrl
         ? {

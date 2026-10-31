@@ -5,6 +5,7 @@ import { WalletConfigurationError } from "../common/errors/wallet.errors";
 import { LoyaltyCardAssembler } from "./engine/loyalty-card-assembler";
 import { LoyaltyCard, loyaltyCardSchema, MEMBER_CODE_PATTERN } from "./engine/loyalty-card";
 import { formatCardMessage } from "./engine/card-message";
+import { extraButtonsOf } from "./engine/program-template";
 import { clipCardText } from "./engine/card-text";
 import { clipText } from "./engine/rewards-text";
 import { fitTierBenefits } from "./engine/tier-benefits-text";
@@ -349,6 +350,7 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
         appointmentUrl: template.appointmentUrl ?? undefined,
         appLinkText: template.appLinkText ?? undefined,
         appLinkDescription: template.appLinkDescription ?? undefined,
+        extraButtons: extraButtonsOf(template.extraButtons),
         pointsLabel: template.pointsLabel,
         tierLabel: template.tierLabel,
         // Clipped, not rejected: texts saved while the template schema still allowed 1200

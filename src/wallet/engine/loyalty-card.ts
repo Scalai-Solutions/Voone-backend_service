@@ -29,6 +29,14 @@ export const MEMBER_CODE_PATTERN = /^[A-HJ-KM-NP-Z2-9]{5}$/;
  * Card appearance is per clinic template, not per tier: a clinic chooses its own
  * background colour and field labels, and the card follows whatever it chose.
  */
+/** A further tappable button on the card, beside the main one. */
+export const cardButtonSchema = z.object({
+  label: z.string().trim().min(1).max(30),
+  url: z.string().url().max(2048)
+});
+
+export const CARD_EXTRA_BUTTONS_MAX = 5;
+
 export const cardTemplateSchema = z.object({
   programName: z.string().min(1).max(48),
   backgroundColor: hexColorSchema,
@@ -39,6 +47,7 @@ export const cardTemplateSchema = z.object({
   appointmentUrl: z.string().url().max(2048).optional(),
   appLinkText: z.string().min(1).max(30).optional(),
   appLinkDescription: z.string().min(1).max(120).optional(),
+  extraButtons: z.array(cardButtonSchema).max(CARD_EXTRA_BUTTONS_MAX).optional(),
   pointsLabel: z.string().min(1).max(32),
   tierLabel: z.string().min(1).max(32),
   benefitsText: z.string().min(1).max(CARD_TEXT_MAX_LENGTH).optional(),
