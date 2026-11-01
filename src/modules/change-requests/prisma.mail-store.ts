@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 
-import type { ChangeRequestMailStore } from "./email.notifier";
+import type { Audience, ChangeRequestMailStore } from "./email.notifier";
 
 export class PrismaChangeRequestMailStore implements ChangeRequestMailStore {
   constructor(private readonly db: PrismaClient) {}
@@ -27,17 +27,25 @@ export class PrismaChangeRequestMailStore implements ChangeRequestMailStore {
     return billing ? [billing] : [];
   }
 
-  async recordSent(requestId: string, at: Date): Promise<void> {
-    await this.db.changeRequest.updateMany({
-      where: { id: requestId },
-      data: { emailSentAt: at, lastEmailError: null }
-    });
+  /**
+   * Raw SQL, not `update`: Prisma would bump `updatedAt`, which the owner sees as the ticket's
+   * last change, and a mail outcome is not one.
+   */
+  async recordSent(requestId: string, at: Date, kind: Audience): Promise<void> {
+    await this.db.$executeRaw`
+      UPDATE "ChangeRequest"
+      SET "emailSentAt" = (${at.toISOString()}::timestamptz AT TIME ZONE 'UTC'),
+          "lastEmailError" = CASE WHEN "lastEmailErrorKind" IS NULL OR "lastEmailErrorKind" = ${kind}
+            THEN NULL ELSE "lastEmailError" END,
+          "lastEmailErrorKind" = CASE WHEN "lastEmailErrorKind" IS NULL OR "lastEmailErrorKind" = ${kind}
+            THEN NULL ELSE "lastEmailErrorKind" END
+      WHERE "id" = ${requestId}`;
   }
 
-  async recordError(requestId: string, error: string): Promise<void> {
-    await this.db.changeRequest.updateMany({
-      where: { id: requestId },
-      data: { lastEmailError: error }
-    });
+  async recordError(requestId: string, error: string, kind: Audience): Promise<void> {
+    await this.db.$executeRaw`
+      UPDATE "ChangeRequest"
+      SET "lastEmailError" = ${error}, "lastEmailErrorKind" = ${kind}
+      WHERE "id" = ${requestId}`;
   }
 }

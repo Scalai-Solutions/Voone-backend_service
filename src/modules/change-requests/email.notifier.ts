@@ -4,12 +4,15 @@ import { escapeHtml, MailError, singleLine, type Mailer } from "../mail/mailer";
 import type { ChangeRequestNotifier, StatusChangedBy } from "./notifier";
 import type { ChangeRequestDetail, MessageRecord } from "./service";
 
+export type Audience = "voone" | "owners";
+
 /** What the notifier needs from storage: who to write to, and where to note the outcome. */
 export interface ChangeRequestMailStore {
   /** The clinic's OWNER users' emails, else its billing email, else none. */
   ownerEmails(clinicId: string): Promise<string[]>;
-  recordSent(requestId: string, at: Date): Promise<void>;
-  recordError(requestId: string, error: string): Promise<void>;
+  /** `kind` is the audience of the mail; a success only clears an error of the same kind. */
+  recordSent(requestId: string, at: Date, kind: Audience): Promise<void>;
+  recordError(requestId: string, error: string, kind: Audience): Promise<void>;
 }
 
 export interface EmailNotifierOptions {
@@ -33,8 +36,6 @@ interface Mail {
   /** Paragraph pieces already escaped by the builder helpers below. */
   html: string[];
 }
-
-type Audience = "voone" | "owners";
 
 /** Plain words for the owner, who does not read enum names. */
 const STATUS_WORDS: Record<ChangeRequestStatus, string> = {
@@ -68,7 +69,9 @@ const errorName = (error: unknown): string => {
  * Tells people about tickets by email. Best-effort by construction: every hook catches
  * everything, notes the outcome on the ticket (`emailSentAt`, or `lastEmailError` holding only
  * a short name, never a response body or an address) and never rethrows, so the ticket is
- * never lost or failed because of mail. The two fields reflect the latest attempt.
+ * never lost or failed because of mail. `emailSentAt` is the latest success; `lastEmailError`
+ * stays until a later mail of the SAME kind (Voone-side or clinic-side) succeeds, so a success
+ * to the clinic does not hide a failure to Voone.
  *
  * Voone-side mail (a new ticket, a clinic's reply or reopen) is in English and goes to
  * `supportEmail`. Clinic-side mail (a Voone reply or status change) is in Spanish and goes to
@@ -228,7 +231,7 @@ export class EmailChangeRequestNotifier implements ChangeRequestNotifier {
       const recipients = await this.recipients(request, audience);
 
       if (typeof recipients === "string") {
-        await this.record(request.id, { error: recipients });
+        await this.record(request.id, audience, { error: recipients });
 
         return;
       }
@@ -239,9 +242,9 @@ export class EmailChangeRequestNotifier implements ChangeRequestNotifier {
         text: mail.text.join("\n"),
         html: mail.html.join("")
       });
-      await this.record(request.id, { sentAt: this.now() });
+      await this.record(request.id, audience, { sentAt: this.now() });
     } catch (error) {
-      await this.record(request.id, { error: errorName(error) });
+      await this.record(request.id, audience, { error: errorName(error) });
     }
   }
 
@@ -261,11 +264,13 @@ export class EmailChangeRequestNotifier implements ChangeRequestNotifier {
 
   private async record(
     requestId: string,
+    audience: Audience,
     outcome: { sentAt: Date } | { error: string }
   ): Promise<void> {
     try {
-      if ("sentAt" in outcome) await this.options.store.recordSent(requestId, outcome.sentAt);
-      else await this.options.store.recordError(requestId, outcome.error);
+      if ("sentAt" in outcome)
+        await this.options.store.recordSent(requestId, outcome.sentAt, audience);
+      else await this.options.store.recordError(requestId, outcome.error, audience);
     } catch (error) {
       // The outcome is a courtesy too; log the class only, never a message that may name a row.
       console.error(`[change-requests] could not record mail outcome: ${errorName(error)}`);

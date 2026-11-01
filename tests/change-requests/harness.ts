@@ -22,9 +22,12 @@ export const MANAGER: Who = { actor: "manager@a.test", role: "manager" };
 export const OWNER_B: Who = { actor: "owner@b.test", role: "owner" };
 export const ADMIN: Who = { actor: "admin@voone.test", role: "voone_admin" };
 
+let counter = 0;
+
+/** Titles differ per call: the same ticket filed twice within a minute is a retry, deduplicated. */
 export const ticketBody = (over: Record<string, unknown> = {}) => ({
   type: "OTHER",
-  title: "Una duda",
+  title: `Una duda ${++counter}`,
   reason: "Necesito ayuda con esto.",
   ...over
 });

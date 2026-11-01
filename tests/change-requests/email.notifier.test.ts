@@ -42,7 +42,9 @@ const build = (supportEmail: string | null = SUPPORT) =>
       frontendUrl: "https://app.voone.test/",
       now: () => clock
     }),
-    now: () => clock
+    now: () => clock,
+    // Mail is fire-and-forget in production; tests await it before asserting.
+    background: (task) => task
   });
 
 const owner = { email: "dueno@a.test", role: "OWNER" as const };
@@ -168,10 +170,12 @@ describe("mail to Voone", () => {
     expect((await row(ticket.id)).lastEmailError).toBe("VOONE_SUPPORT_EMAIL not set");
     expect((await row(ticket.id)).emailSentAt).toBeNull();
 
-    // Clinic-bound mail does not depend on it.
+    // Clinic-bound mail does not depend on it, and its success does not hide the Voone-side
+    // error: that stays until a later mail of the same kind succeeds.
     await service.adminReply(ticket.id, admin, "Respuesta");
     expect(mailer.sent).toHaveLength(1);
-    expect((await row(ticket.id)).lastEmailError).toBeNull();
+    expect((await row(ticket.id)).lastEmailError).toBe("VOONE_SUPPORT_EMAIL not set");
+    expect((await row(ticket.id)).emailSentAt).not.toBeNull();
   });
 });
 
@@ -261,7 +265,7 @@ describe("failure handling", () => {
     mailer.failure = new MailError("SENDGRID_HTTP_503");
     const ticket = await service.create(a.id, owner, {
       type: "OTHER",
-      title: "Una duda",
+      title: `Una duda ${Math.random()}`,
       reason: "Necesito ayuda."
     } as never);
     const stored = await row(ticket.id);
@@ -273,8 +277,13 @@ describe("failure handling", () => {
     await service.adminReply(ticket.id, admin, "Hola");
     const after = await row(ticket.id);
 
-    expect(after.lastEmailError).toBeNull();
+    // A success to the clinic does not clear a failure to Voone...
+    expect(after.lastEmailError).toBe("SENDGRID_HTTP_503");
     expect(after.emailSentAt).not.toBeNull();
+
+    // ...a later success of the same kind does.
+    await service.replyAsClinic(a.id, ticket.id, owner, "Gracias");
+    expect((await row(ticket.id)).lastEmailError).toBeNull();
   });
 
   it("records a bare error name for an unexpected failure, never its message", async () => {
@@ -283,7 +292,7 @@ describe("failure handling", () => {
     mailer.failure = new TypeError("connect to dueno@a.test failed");
     const ticket = await service.create(a.id, owner, {
       type: "OTHER",
-      title: "Una duda",
+      title: `Una duda ${Math.random()}`,
       reason: "Necesito ayuda."
     } as never);
 

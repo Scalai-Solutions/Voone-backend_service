@@ -300,7 +300,10 @@ describe("owner routes: reply and reopen", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("OPEN");
-    expect(res.body.messages).toHaveLength(1);
+    expect(res.body.messages.map((m: { body: string }) => m.body)).toEqual([
+      "Hecho",
+      "Sigue igual"
+    ]);
   });
 
   it("422s an empty or oversized reply and an unknown key", async () => {

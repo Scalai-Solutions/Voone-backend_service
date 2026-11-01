@@ -59,7 +59,11 @@ describe("admin routes", () => {
   });
 
   it("lists across clinics with clinic details, last message time and filters", async () => {
-    const x = await make("test-cr-admin-a", OWNER, { type: "BONO", title: "Bono nuevo" });
+    const x = await make("test-cr-admin-a", OWNER, {
+      type: "BONO",
+      title: "Bono nuevo",
+      proposed: { action: "add", name: "B", priceEuro: 10, totalSessions: 2 }
+    });
     const y = await make("test-cr-admin-b", OWNER_B, { title: "Otra cosa" });
 
     await adminSay(x.id, "Hola");
@@ -212,5 +216,41 @@ describe("admin routes", () => {
     expect(await titles("\\")).toEqual(["Ruta C:\\temp"]);
     expect(await titles("n_m")).toEqual([]);
     expect(await titles("DESCUENTO")).toHaveLength(2);
+  });
+
+  it("answers refusals in English on the admin side and stays Spanish on the owner side", async () => {
+    const t = await make();
+    const path = `/admin/change-requests/${t.id}/status`;
+    const message = async (res: Promise<{ body: { message: string } }>) => (await res).body.message;
+
+    expect(await message(call("GET", "/admin/change-requests", OWNER))).toBe(
+      "Only Voone admins can manage change requests."
+    );
+    expect(
+      await message(call("PATCH", path, { role: "voone_admin" }, { status: "IN_PROGRESS" }))
+    ).toBe("The acting user (x-actor) is missing.");
+    expect(await message(call("PATCH", path, ADMIN, { status: "DONE" }))).toBe("Invalid status.");
+    expect(await message(call("PATCH", path, ADMIN, { status: "OPEN", extra: 1 }))).toBe(
+      "The request contains fields that are not accepted."
+    );
+    expect(await message(call("GET", "/admin/change-requests?limit=0", ADMIN))).toMatch(
+      /The limit must be between/
+    );
+    expect(await message(call("GET", "/admin/change-requests?cursor=%25%25", ADMIN))).toBe(
+      "The pagination cursor is not valid."
+    );
+    expect(await message(call("GET", "/admin/change-requests/nope", ADMIN))).toBe(
+      "Request not found."
+    );
+    expect(await message(call("PATCH", path, ADMIN, { status: "OPEN" }))).toMatch(
+      /cannot move from OPEN to OPEN/
+    );
+    expect(
+      await message(call("POST", `/admin/change-requests/${t.id}/messages`, ADMIN, { body: " " }))
+    ).toMatch(/Write a message/);
+    // Owner side.
+    expect(await message(call("GET", `/clinics/${h.slugA}/change-requests/nope`, OWNER))).toBe(
+      "No se ha encontrado esa solicitud."
+    );
   });
 });

@@ -52,6 +52,7 @@ const recorder: ChangeRequestNotifier = {
 
 const service = new ChangeRequestService(new PrismaChangeRequestRepository(db), {
   notifier: recorder,
+  background: (task) => task,
   now
 });
 
@@ -59,8 +60,11 @@ const owner = { email: "owner@a.test", role: "OWNER" as const };
 const manager = { email: "manager@a.test", role: "MANAGER" as const };
 const admin = { email: "admin@voone.test" };
 
+let counter = 0;
+
+/** Titles differ per call: the same ticket filed twice within a minute is a retry, deduplicated. */
 const input = (over: Record<string, unknown> = {}) =>
-  ({ type: "OTHER", title: "Una duda", reason: "Necesito ayuda.", ...over }) as never;
+  ({ type: "OTHER", title: `Una duda ${++counter}`, reason: "Necesito ayuda.", ...over }) as never;
 
 const wipe = () => db.changeRequest.deleteMany({ where: { clinic: { slug: { in: SLUGS } } } });
 
@@ -120,7 +124,8 @@ describe("create", () => {
         onAdminReply: async () => {},
         onStatusChanged: async () => {}
       },
-      now
+      now,
+      background: (task) => task
     });
 
     const ticket = await failing.create(a.id, owner, input());
@@ -374,8 +379,9 @@ describe("reopen window", () => {
     const reopened = await service.reopenAsClinic(a.id, ticket.id, owner, "Sigue fallando");
 
     expect(reopened.status).toBe("OPEN");
-    expect(reopened.messages).toHaveLength(1);
-    expect(reopened.messages[0]).toMatchObject({ authorKind: "CLINIC", body: "Sigue fallando" });
+    // The resolution note stays in the thread, then the clinic's message.
+    expect(reopened.messages.map((m) => m.body)).toEqual(["Cerrado", "Sigue fallando"]);
+    expect(reopened.messages[1]).toMatchObject({ authorKind: "CLINIC" });
     // One hook for one action: the message says what it reopened from.
     expect(calls.map((c) => c.hook)).toEqual(["onOwnerReply"]);
     expect(calls[0]!.args[2]).toBe("RESOLVED");
@@ -386,7 +392,8 @@ describe("reopen window", () => {
     await service.reopenAsClinic(a.id, bare.id, owner);
     expect(calls.map((c) => c.hook)).toEqual(["onStatusChanged"]);
     expect(calls[0]!.args.slice(1)).toEqual(["REJECTED", "CLINIC"]);
-    expect(await db.changeRequestMessage.count({ where: { requestId: bare.id } })).toBe(0);
+    // Only the resolution note: a bare reopen writes no message of its own.
+    expect(await db.changeRequestMessage.count({ where: { requestId: bare.id } })).toBe(1);
   });
 
   it("counts a reopen against the open limit", async () => {
@@ -428,7 +435,7 @@ describe("replies", () => {
       const detail = await service.replyAsClinic(a.id, ticket.id, owner, "Una cosa más");
 
       expect(detail.status).toBe("OPEN");
-      expect(detail.messages).toHaveLength(1);
+      expect(detail.messages.map((m) => m.body)).toEqual(["Cerrado", "Una cosa más"]);
       expect(
         (await db.changeRequest.findUniqueOrThrow({ where: { id: ticket.id } })).resolvedAt
       ).toBeNull();
@@ -449,7 +456,8 @@ describe("replies", () => {
     await expect(service.replyAsClinic(a.id, ticket.id, owner, "Hola")).rejects.toBeInstanceOf(
       ChangeRequestConflictError
     );
-    expect(await db.changeRequestMessage.count({ where: { requestId: ticket.id } })).toBe(0);
+    // Nothing but the resolution note was written.
+    expect(await db.changeRequestMessage.count({ where: { requestId: ticket.id } })).toBe(1);
     expect((await db.changeRequest.findUniqueOrThrow({ where: { id: ticket.id } })).status).toBe(
       "RESOLVED"
     );
@@ -467,7 +475,7 @@ describe("replies", () => {
     const detail = await service.adminReply(ticket.id, admin, "Por cierto...");
 
     expect(detail.status).toBe("RESOLVED");
-    expect(detail.messages[0]).toMatchObject({
+    expect(detail.messages.at(-1)).toMatchObject({
       authorKind: "VOONE",
       authorEmail: "admin@voone.test",
       body: "Por cierto..."

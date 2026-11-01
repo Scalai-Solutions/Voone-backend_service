@@ -35,6 +35,7 @@ const recorder: ChangeRequestNotifier = {
 
 const service = new ChangeRequestService(new PrismaChangeRequestRepository(db), {
   notifier: recorder,
+  background: (task) => task,
   programs: new PrismaProgramDrafts(db, new OnboardingService(db, new PrismaCatalogRepository(db)))
 });
 
@@ -83,10 +84,12 @@ afterAll(async () => {
   await db.$disconnect();
 });
 
+let counter = 0;
+
 const file = async (clinic: Clinic, type = "REWARD") => {
   const ticket = await service.create(clinic.id, owner, {
     type,
-    title: "Cambio",
+    title: `Cambio ${++counter}`,
     reason: "Por favor."
   } as never);
 

@@ -20,7 +20,7 @@ export interface Mailer {
   send(message: MailMessage): Promise<void>;
 }
 
-/** A failed send. `code` is safe to store and to log: SENDGRID_NOT_CONFIGURED, SENDGRID_HTTP_<status>, SENDGRID_NETWORK. */
+/** A failed send. `code` is safe to store and to log: SENDGRID_NOT_CONFIGURED, SENDGRID_HTTP_<status>, SENDGRID_TIMEOUT, SENDGRID_NETWORK. */
 export class MailError extends Error {
   constructor(readonly code: string) {
     super(code);
@@ -49,7 +49,11 @@ export interface SendGridMailerOptions {
   fromName?: string;
   /** Injectable for tests; defaults to the global fetch. */
   fetch?: typeof fetch;
+  /** How long to wait for SendGrid before giving up. Default 5 seconds. */
+  timeoutMs?: number;
 }
+
+export const MAIL_TIMEOUT_MS = 5000;
 
 export class SendGridMailer implements Mailer {
   constructor(private readonly options: SendGridMailerOptions) {}
@@ -67,6 +71,8 @@ export class SendGridMailer implements Mailer {
       response = await (this.options.fetch ?? fetch)("https://api.sendgrid.com/v3/mail/send", {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        // A SendGrid that never answers must not hold a connection (or a ticket) open.
+        signal: AbortSignal.timeout(this.options.timeoutMs ?? MAIL_TIMEOUT_MS),
         body: JSON.stringify({
           personalizations: recipients.map((email) => ({ to: [{ email }] })),
           from: { email: fromEmail, name: this.options.fromName ?? "Voone" },
@@ -77,8 +83,11 @@ export class SendGridMailer implements Mailer {
           ]
         })
       });
-    } catch {
-      throw new MailError("SENDGRID_NETWORK");
+    } catch (error) {
+      const timedOut =
+        error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+
+      throw new MailError(timedOut ? "SENDGRID_TIMEOUT" : "SENDGRID_NETWORK");
     }
 
     if (!response.ok) throw new MailError(`SENDGRID_HTTP_${response.status}`);

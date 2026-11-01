@@ -50,7 +50,7 @@ The clinic never sees `programId`, mail bookkeeping or Voone staff emails; it ge
 | `PATCH /admin/change-requests/:id/status`      | `{status, resolutionNote?}`            | ticket + messages                                                                         |
 | `POST /admin/change-requests/:id/messages`     | `{body}`                               | 201 ticket + messages (VOONE author)                                                      |
 
-| `POST /admin/change-requests/:id/apply` | `{note?}` | `{request, applied, warnings}` |
+| `POST /admin/change-requests/:id/apply` | `{note?, categoryId?}` | `{request, applied, warnings}` |
 | `POST /admin/change-requests/:id/draft` | `{}` | `{request, programId}` |
 | `POST /admin/clinics/:clinicId/onboarding/programs/:programId/resolve-tickets` | `{note}` (required) | `{resolved: string[]}` |
 
@@ -70,15 +70,18 @@ and `proposed` must agree. Treatment and bono fields reuse the real write schema
 "apply" maps one to one (price 0.01 to 100000, two decimals; points are derived from the
 price and duration is not editable, so neither is accepted).
 
-| type           | `targetRef`                                               | `proposed`                                                                                                                                                          |
-| -------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| REWARD         | `{milestone: int>=1}` optional                            | `{milestone?, text?<=120, itemId?<=64}` optional                                                                                                                    |
-| LEVEL          | `{tier: string<=32}` optional                             | `{tier?, text?<=120}` optional                                                                                                                                      |
-| SERVICE_EDIT   | `{treatmentId}` required                                  | required: `{treatmentId?, name?, priceEuro?, categoryId?}`, at least one change                                                                                     |
-| SERVICE_ADD    | none                                                      | required: `{name, priceEuro, categoryId?}`                                                                                                                          |
-| SERVICE_REMOVE | `{treatmentId}` required                                  | `{treatmentId?}` optional                                                                                                                                           |
-| BONO           | `{bonoId}`, required for edit and remove, refused for add | optional; if given, by `action`: `add` `{name, priceEuro, totalSessions}`; `edit` `{bonoId?, name?, priceEuro?, totalSessions?}` at least one; `remove` `{bonoId?}` |
-| OTHER          | none                                                      | none                                                                                                                                                                |
+| type           | `targetRef`                                               | `proposed`                                                                                                                                                |
+| -------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| REWARD         | `{milestone: int>=1}` optional                            | `{milestone?, text?<=120, itemId?<=64}` optional                                                                                                          |
+| LEVEL          | `{tier: string<=32}` optional                             | `{tier?, text?<=120}` optional                                                                                                                            |
+| SERVICE_EDIT   | `{treatmentId}` required                                  | required: `{treatmentId?, name?, priceEuro?, categoryId?}`, at least one change                                                                           |
+| SERVICE_ADD    | none                                                      | required: `{name, priceEuro, categoryId?}`                                                                                                                |
+| SERVICE_REMOVE | `{treatmentId}` required                                  | `{treatmentId?}` optional                                                                                                                                 |
+| BONO           | `{bonoId}`, required for edit and remove, refused for add | REQUIRED, by `action`: `add` `{name, priceEuro, totalSessions}`; `edit` `{bonoId?, name?, priceEuro?, totalSessions?}` at least one; `remove` `{bonoId?}` |
+| OTHER          | none                                                      | none                                                                                                                                                      |
+
+A ticket filed again by the same person with the same type, title and reason within 60 seconds is a
+retry: the stored ticket is returned (201, same body) and nobody is notified twice.
 
 Limits: `title` 1-120, `reason` 3-2000, message `body` 1-2000, `resolutionNote` up to 2000.
 Errors are Spanish, as `{code, message}`; the first problem only.
@@ -142,3 +145,31 @@ resolves every OPEN / IN_PROGRESS ticket of that clinic linked to the programme,
 admin as resolver and the given note, firing `onStatusChanged` for each. Only for an ACTIVO
 programme (409 for a draft or superseded one, 404 for another clinic's), so the owners are told
 only once the change is live.
+
+## Behaviour notes
+
+- **Resolution notes stay in the thread.** Closing a ticket (status move, apply, resolve-linked) writes
+  the note as a VOONE message in the same transaction, so a reopen (which clears `resolvedAt`,
+  `resolvedByEmail` and `resolutionNote` from the ticket) never loses it.
+- **The cap holds under concurrency.** Create, the clinic's reopen / reply-that-reopens and an admin
+  move of a closed ticket to OPEN all take one advisory lock per clinic and count inside the same
+  transaction (409 `CHANGE_REQUEST_LIMIT_REACHED`; Spanish for the clinic, English for admin).
+- **Apply once.** `appliedAt` / `appliedByEmail` are set inside the apply transaction and never
+  cleared; a second apply, even after a reopen, is a 409 `CHANGE_REQUEST_ALREADY_APPLIED` (a reopened
+  applied ticket can still be resolved or rejected by hand). Both fields are admin-only (list, detail,
+  apply response), never in owner responses.
+- **Apply needs a category sometimes.** At a centre whose treatments live in the catalogue, a
+  SERVICE_ADD with no `proposed.categoryId` cannot be applied as is: the admin detail says
+  `needsCategory: true` and apply takes `categoryId` (an engine category id, from
+  `GET /clinics/:slug/treatment-categories`, `[{id, label}]`). The owner's own category wins over the
+  override; `categoryId` on any other ticket type is a 422.
+- **`catalogueImpact` is read before the apply transaction** and a failure there only drops the
+  warnings: it can never abort the apply.
+- **Notifications are fire-and-forget.** They start after the commit and never delay or fail the
+  request; resolve-linked sends its mails in turn in the background. SendGrid calls time out after 5
+  seconds (`SENDGRID_TIMEOUT`). `ChangeRequestServiceOptions.background` lets a test await them.
+- **Mail bookkeeping** (`emailSentAt`, `lastEmailError`) is written with raw SQL so it does not move
+  `updatedAt` (which owners see). `lastEmailError` stays until a later mail of the SAME kind (Voone-side
+  or clinic-side) succeeds, so a success to the clinic does not hide a failure to Voone.
+- **Language.** Owner routes answer in Spanish, admin routes (errors, validation, forbidden, not
+  found) in English.

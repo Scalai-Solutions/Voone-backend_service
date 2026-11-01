@@ -9,18 +9,33 @@ import type {
   MessageRecord,
   NewChangeRequest,
   NewMessage,
+  StatusChange,
+  StatusChangeResult,
   StatusPatch
 } from "./service";
 import type { ChangeRequestStatus } from "@prisma/client";
 
 const CLINIC = { select: { id: true, name: true, slug: true } } as const;
 
-const REOPEN: StatusPatch = {
-  status: "OPEN",
-  resolvedAt: null,
-  resolvedByEmail: null,
-  resolutionNote: null
-};
+const CLOSED: ChangeRequestStatus[] = ["RESOLVED", "REJECTED"];
+
+/**
+ * Closing writes the resolution note into the thread too, in the same transaction, as the
+ * resolver's own message. A reopen clears the note from the ticket, and this keeps it.
+ */
+const closingMessage = (patch: StatusPatch): NewMessage | null =>
+  CLOSED.includes(patch.status) && patch.resolutionNote && patch.resolvedByEmail && patch.resolvedAt
+    ? {
+        authorKind: "VOONE",
+        authorEmail: patch.resolvedByEmail,
+        body: patch.resolutionNote,
+        createdAt: patch.resolvedAt
+      }
+    : null;
+
+/** One lock per clinic: creates and reopens queue on it, so the cap is counted and applied in turn. */
+const lockClinic = (tx: Prisma.TransactionClient, clinicId: string) =>
+  tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`change-requests:${clinicId}`}))`;
 
 const UNRESOLVED: ChangeRequestStatus[] = ["OPEN", "IN_PROGRESS"];
 
@@ -38,12 +53,28 @@ export class PrismaChangeRequestRepository implements ChangeRequestRepository {
 
   async createWithinLimit(
     data: NewChangeRequest,
-    limit: number
-  ): Promise<ChangeRequestRecord | null> {
+    limit: number,
+    dedupeWithinMs: number
+  ): Promise<{ record: ChangeRequestRecord; duplicate: boolean } | null> {
     return this.db.$transaction(async (tx) => {
-      // One lock per clinic, held to the end of the transaction: two creates for the same
-      // clinic queue here, so the count below is the count the insert is checked against.
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`change-requests:${data.clinicId}`}))`;
+      await lockClinic(tx, data.clinicId);
+
+      // A client retry (a double click, a replayed request) sends the same ticket again: answer
+      // with the one already stored instead of a twin.
+      const twin = await tx.changeRequest.findFirst({
+        where: {
+          clinicId: data.clinicId,
+          createdByEmail: data.createdByEmail,
+          type: data.type,
+          title: data.title,
+          reason: data.reason,
+          createdAt: { gte: new Date(data.createdAt.getTime() - dedupeWithinMs) }
+        },
+        orderBy: { createdAt: "desc" },
+        include: { clinic: CLINIC }
+      });
+
+      if (twin) return { record: twin, duplicate: true };
 
       const unresolved = await tx.changeRequest.count({
         where: { clinicId: data.clinicId, status: { in: UNRESOLVED } }
@@ -51,7 +82,7 @@ export class PrismaChangeRequestRepository implements ChangeRequestRepository {
 
       if (unresolved >= limit) return null;
 
-      return tx.changeRequest.create({
+      const record = await tx.changeRequest.create({
         data: {
           clinicId: data.clinicId,
           type: data.type,
@@ -65,6 +96,8 @@ export class PrismaChangeRequestRepository implements ChangeRequestRepository {
         },
         include: { clinic: CLINIC }
       });
+
+      return { record, duplicate: false };
     });
   }
 
@@ -126,53 +159,60 @@ export class PrismaChangeRequestRepository implements ChangeRequestRepository {
     }));
   }
 
-  async transition(id: string, from: ChangeRequestStatus, patch: StatusPatch): Promise<boolean> {
-    const { count } = await this.db.changeRequest.updateMany({
-      where: { id, status: from },
-      data: patch
-    });
-
-    return count === 1;
-  }
-
-  async appendMessage(
-    id: string,
-    message: NewMessage,
-    reopenFrom?: ChangeRequestStatus
-  ): Promise<MessageRecord | null> {
+  async changeStatus(id: string, change: StatusChange): Promise<StatusChangeResult> {
     return this.db.$transaction(async (tx) => {
-      if (reopenFrom) {
-        const { count } = await tx.changeRequest.updateMany({
-          where: { id, status: reopenFrom },
-          data: REOPEN
+      if (change.openLimit !== undefined) {
+        // A move that puts a ticket back among the unresolved counts against the cap, so it
+        // takes the same clinic lock a create does and counts inside the same transaction.
+        const ticket = await tx.changeRequest.findUnique({
+          where: { id },
+          select: { clinicId: true }
         });
 
-        if (count !== 1) return null;
-      } else if ((await tx.changeRequest.count({ where: { id } })) === 0) {
-        return null;
+        if (!ticket) return { kind: "stale" as const };
+
+        await lockClinic(tx, ticket.clinicId);
+
+        const unresolved = await tx.changeRequest.count({
+          where: { clinicId: ticket.clinicId, status: { in: UNRESOLVED } }
+        });
+
+        if (unresolved >= change.openLimit) return { kind: "limit" as const };
       }
 
-      return tx.changeRequestMessage.create({
-        data: {
-          requestId: id,
-          authorKind: message.authorKind,
-          authorEmail: message.authorEmail,
-          body: message.body,
-          createdAt: message.createdAt
-        }
+      const { count } = await tx.changeRequest.updateMany({
+        where: { id, status: change.from },
+        data: change.patch
       });
+
+      if (count !== 1) return { kind: "stale" as const };
+
+      const wrote = change.message ?? closingMessage(change.patch);
+      const message = wrote
+        ? await tx.changeRequestMessage.create({ data: { requestId: id, ...wrote } })
+        : null;
+
+      return { kind: "ok" as const, message };
     });
   }
 
-  async resolveAtomically<T>(
+  async appendMessage(id: string, message: NewMessage): Promise<MessageRecord | null> {
+    return this.db.$transaction(async (tx) => {
+      if ((await tx.changeRequest.count({ where: { id } })) === 0) return null;
+
+      return tx.changeRequestMessage.create({ data: { requestId: id, ...message } });
+    });
+  }
+
+  async applyAtomically<T>(
     id: string,
     work: (db: PrismaClient) => Promise<{ result: T; patch: StatusPatch }>
   ): Promise<T | null> {
     return this.db.$transaction(async (tx) => {
-      // Takes the row lock and checks the status in one statement: a concurrent apply waits
-      // here, then finds the ticket resolved and gets a count of 0.
+      // Takes the row lock and checks the status and the applied mark in one statement: a
+      // concurrent apply waits here, then finds the ticket resolved and gets a count of 0.
       const { count } = await tx.changeRequest.updateMany({
-        where: { id, status: { in: UNRESOLVED } },
+        where: { id, status: { in: UNRESOLVED }, appliedAt: null },
         data: { updatedAt: new Date() }
       });
 
@@ -181,7 +221,14 @@ export class PrismaChangeRequestRepository implements ChangeRequestRepository {
       // The treatment and bono services only use model delegates, which a transaction client has.
       const { result, patch } = await work(tx as unknown as PrismaClient);
 
-      await tx.changeRequest.update({ where: { id }, data: patch });
+      await tx.changeRequest.update({
+        where: { id },
+        data: { ...patch, appliedAt: patch.resolvedAt, appliedByEmail: patch.resolvedByEmail }
+      });
+
+      const note = closingMessage(patch);
+
+      if (note) await tx.changeRequestMessage.create({ data: { requestId: id, ...note } });
 
       return result;
     });

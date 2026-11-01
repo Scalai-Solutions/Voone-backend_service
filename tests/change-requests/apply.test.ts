@@ -32,6 +32,7 @@ const recorder: ChangeRequestNotifier = {
 
 const service = new ChangeRequestService(new PrismaChangeRequestRepository(db), {
   notifier: recorder,
+  background: (task) => task,
   changes: new PrismaCatalogueChanges(db)
 });
 
@@ -103,9 +104,11 @@ afterAll(async () => {
   await db.$disconnect();
 });
 
+let counter = 0;
+
 const file = async (clinic: Clinic, input: Record<string, unknown>) => {
   const ticket = await service.create(clinic.id, owner, {
-    title: "Cambio",
+    title: `Cambio ${++counter}`,
     reason: "Por favor.",
     ...input
   } as never);
@@ -149,7 +152,7 @@ describe("apply: services", () => {
       targetRef: { treatmentId: peel.id },
       proposed: { priceEuro: 90 }
     });
-    const res = await service.adminApply(t.id, admin, "  Done as asked  ");
+    const res = await service.adminApply(t.id, admin, { note: "  Done as asked  " });
 
     expect(res.request.resolutionNote).toBe("Done as asked");
   });

@@ -256,8 +256,9 @@ describe("createChangeRequestSchema: proposed per type", () => {
         proposed: { action: "add", name: "x", priceEuro: 10, totalSessions: 2.5 }
       }).success
     ).toBe(false);
-    // A general bono question with nothing structured is fine.
-    expect(parse({ type: "BONO" }).success).toBe(true);
+    // A bono ticket must say what to do, or the admin can never apply it.
+    expect(parse({ type: "BONO" }).success).toBe(false);
+    expect(parse({ type: "BONO", proposed: {} }).success).toBe(false);
   });
 
   it("OTHER: nothing structured is allowed", () => {

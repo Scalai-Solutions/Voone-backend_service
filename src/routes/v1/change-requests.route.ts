@@ -14,6 +14,7 @@ import {
 } from "../../modules/change-requests/actor";
 import {
   adminListQuerySchema,
+  adminMessageSchema,
   applySchema,
   createChangeRequestSchema,
   messageSchema,
@@ -37,15 +38,21 @@ export interface ChangeRequestsRouterDeps {
 }
 
 /** The first problem as the bare Spanish message the screen shows, with no field path. */
-const parse = <T>(schema: ZodType<T>, value: unknown): T => {
-  const parsed = schema.safeParse(value ?? {});
+const parseWith =
+  (fallback: string) =>
+  <T>(schema: ZodType<T>, value: unknown): T => {
+    const parsed = schema.safeParse(value ?? {});
 
-  if (!parsed.success) {
-    throw new ChangeRequestValidationError(parsed.error.issues[0]?.message ?? "Datos no válidos.");
-  }
+    if (!parsed.success) {
+      throw new ChangeRequestValidationError(parsed.error.issues[0]?.message ?? fallback);
+    }
 
-  return parsed.data;
-};
+    return parsed.data;
+  };
+
+/** Owner-facing routes answer in Spanish, admin-facing ones in English (the schemas carry the text). */
+const parse = parseWith("Datos no válidos.");
+const parseAdmin = parseWith("Invalid request.");
 
 /**
  * Change requests: a centre asks Voone for what the owner cannot edit directly.
@@ -135,7 +142,7 @@ export const createChangeRequestsRouter = (deps: ChangeRequestsRouterDeps): Rout
     asyncHandler(async (req, res) => {
       requireAdminReader(req);
 
-      res.json(await service.adminList(parse(adminListQuerySchema, req.query)));
+      res.json(await service.adminList(parseAdmin(adminListQuerySchema, req.query)));
     })
   );
 
@@ -150,7 +157,7 @@ export const createChangeRequestsRouter = (deps: ChangeRequestsRouterDeps): Rout
       }
 
       // The path decides the clinic; a clinicId in the query string is ignored.
-      const query = parse(adminListQuerySchema, req.query);
+      const query = parseAdmin(adminListQuerySchema, req.query);
 
       res.json(await service.adminList({ ...query, clinicId: req.params.clinicId }));
     })
@@ -171,7 +178,7 @@ export const createChangeRequestsRouter = (deps: ChangeRequestsRouterDeps): Rout
     requireStaff,
     asyncHandler(async (req, res) => {
       const actor = adminActorOf(req);
-      const update = parse(statusUpdateSchema, req.body);
+      const update = parseAdmin(statusUpdateSchema, req.body);
 
       res.json(await service.adminSetStatus(req.params.id, actor, update));
     })
@@ -182,9 +189,9 @@ export const createChangeRequestsRouter = (deps: ChangeRequestsRouterDeps): Rout
     requireStaff,
     asyncHandler(async (req, res) => {
       const actor = adminActorOf(req);
-      const { note } = parse(applySchema, req.body);
+      const { note, categoryId } = parseAdmin(applySchema, req.body);
 
-      res.json(await service.adminApply(req.params.id, actor, note));
+      res.json(await service.adminApply(req.params.id, actor, { note, categoryId }));
     })
   );
 
@@ -193,7 +200,7 @@ export const createChangeRequestsRouter = (deps: ChangeRequestsRouterDeps): Rout
     requireStaff,
     asyncHandler(async (req, res) => {
       adminActorOf(req);
-      parse(strictEmptySchema, req.body);
+      parseAdmin(strictEmptySchema, req.body);
 
       res.json(await service.adminDraft(req.params.id));
     })
@@ -205,7 +212,7 @@ export const createChangeRequestsRouter = (deps: ChangeRequestsRouterDeps): Rout
     requireStaff,
     asyncHandler(async (req, res) => {
       const actor = adminActorOf(req);
-      const { note } = parse(resolveLinkedSchema, req.body);
+      const { note } = parseAdmin(resolveLinkedSchema, req.body);
 
       res.json(
         await service.adminResolveLinked(req.params.clinicId, req.params.programId, actor, note)
@@ -218,7 +225,7 @@ export const createChangeRequestsRouter = (deps: ChangeRequestsRouterDeps): Rout
     requireStaff,
     asyncHandler(async (req, res) => {
       const actor = adminActorOf(req);
-      const { body } = parse(messageSchema, req.body);
+      const { body } = parseAdmin(adminMessageSchema, req.body);
 
       res.status(201).json(await service.adminReply(req.params.id, actor, body));
     })

@@ -22,9 +22,12 @@ CREATE TABLE "ChangeRequest" (
     "resolvedByEmail" TEXT,
     "resolvedAt" TIMESTAMP(3),
     "resolutionNote" TEXT,
+    "appliedAt" TIMESTAMP(3),
+    "appliedByEmail" TEXT,
     "programId" TEXT,
     "emailSentAt" TIMESTAMP(3),
     "lastEmailError" TEXT,
+    "lastEmailErrorKind" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 

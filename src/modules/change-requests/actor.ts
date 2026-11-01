@@ -16,11 +16,15 @@ const email = z.string().max(254).email();
 const roleOf = (request: Request): string =>
   request.header("x-actor-role")?.trim().toUpperCase() ?? "";
 
-const emailOf = (request: Request): string => {
+const emailOf = (request: Request, locale: "es" | "en"): string => {
   const parsed = email.safeParse(request.header("x-actor")?.trim());
 
   if (!parsed.success) {
-    throw new ChangeRequestForbiddenError("Falta el usuario que realiza la acción.");
+    throw new ChangeRequestForbiddenError(
+      locale === "es"
+        ? "Falta el usuario que realiza la acción."
+        : "The acting user (x-actor) is missing."
+    );
   }
 
   return parsed.data;
@@ -46,11 +50,13 @@ export const requireClinicReader = (request: Request): void => {
 export const clinicActorOf = (request: Request): ClinicActor => {
   const role = clinicRoleOf(request);
 
-  return { email: emailOf(request), role };
+  return { email: emailOf(request, "es"), role };
 };
 
 const requireAdminRole = (request: Request): void => {
-  if (roleOf(request) !== "VOONE_ADMIN") throw new ChangeRequestForbiddenError();
+  if (roleOf(request) !== "VOONE_ADMIN") {
+    throw new ChangeRequestForbiddenError("Only Voone admins can manage change requests.");
+  }
 };
 
 /** Only Voone's own admins act on the admin side. For reads: the role alone. */
@@ -62,5 +68,5 @@ export const requireAdminReader = (request: Request): void => {
 export const adminActorOf = (request: Request): AdminActor => {
   requireAdminRole(request);
 
-  return { email: emailOf(request) };
+  return { email: emailOf(request, "en") };
 };

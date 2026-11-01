@@ -22,6 +22,10 @@ export const LIST_MAX_LIMIT = 50;
 const UNKNOWN_FIELDS = "La solicitud contiene datos que no se pueden procesar.";
 const strict = <T extends z.ZodRawShape>(shape: T) =>
   z.strictObject(shape, { error: UNKNOWN_FIELDS });
+const UNKNOWN_FIELDS_EN = "The request contains fields that are not accepted.";
+/** Admin-facing bodies answer in English; owner-facing ones in Spanish. */
+const strictEn = <T extends z.ZodRawShape>(shape: T) =>
+  z.strictObject(shape, { error: UNKNOWN_FIELDS_EN });
 
 /* ---- text cleaning ---- */
 
@@ -156,6 +160,7 @@ const RULES: Record<ChangeRequestType, TypeRule> = {
     proposed: serviceRemoveProposed
   },
   BONO: {
+    proposedRequired: true,
     target: bonoTarget,
     targetRequired: (proposed) => proposed?.action === "edit" || proposed?.action === "remove",
     proposed: bonoProposed as unknown as z.ZodType<Record<string, unknown>>
@@ -242,29 +247,39 @@ export const createChangeRequestSchema = strict({
 });
 
 const MESSAGE_ERROR = `Escribe un mensaje de hasta ${TEXT_MAX} caracteres.`;
+const MESSAGE_ERROR_EN = `Write a message of up to ${TEXT_MAX} characters.`;
 
 export const messageSchema = strict({ body: lines(1, TEXT_MAX, MESSAGE_ERROR) });
+
+/** Voone's reply: same shape, English errors. */
+export const adminMessageSchema = strictEn({ body: lines(1, TEXT_MAX, MESSAGE_ERROR_EN) });
 
 /** Reopening may come with a word of explanation; it is never required. */
 export const reopenSchema = strict({ message: lines(1, TEXT_MAX, MESSAGE_ERROR).optional() });
 
-/** Applying takes only an optional note for the thread's resolution; the ticket carries the change. */
-export const applySchema = strict({ note: lines(0, TEXT_MAX, MESSAGE_ERROR).optional() });
+/**
+ * Applying takes an optional note for the resolution (the ticket carries the change) and, for a
+ * SERVICE_ADD that has no category, the category to create it in at a catalogue centre.
+ */
+export const applySchema = strictEn({
+  note: lines(0, TEXT_MAX, MESSAGE_ERROR_EN).optional(),
+  categoryId: line(1, 32, "Choose a category from the list.").optional()
+});
 
 /** A body that carries nothing: the ticket id in the path says it all. */
-export const strictEmptySchema = strict({});
+export const strictEmptySchema = strictEn({});
 
 /** The note every ticket linked to a published programme is resolved with. */
-export const resolveLinkedSchema = strict({
+export const resolveLinkedSchema = strictEn({
   note: lines(1, TEXT_MAX, "A resolution note is required (up to 2000 characters).")
 });
 
-export const statusUpdateSchema = strict({
-  status: z.enum(ChangeRequestStatus, { error: "Estado no válido." }),
+export const statusUpdateSchema = strictEn({
+  status: z.enum(ChangeRequestStatus, { error: "Invalid status." }),
   resolutionNote: z
-    .string({ error: "La nota de resolución debe ser un texto." })
+    .string({ error: "The resolution note must be text." })
     .transform(manyLines)
-    .pipe(z.string().max(TEXT_MAX, `La nota admite hasta ${TEXT_MAX} caracteres.`))
+    .pipe(z.string().max(TEXT_MAX, `The note admits up to ${TEXT_MAX} characters.`))
     .optional()
 });
 
@@ -290,46 +305,51 @@ export const decodeCursor = (raw: string): ListCursor => {
   return { createdAt, id: parsed.i };
 };
 
-const CURSOR_ERROR = "El cursor de paginación no es válido.";
+/** The paging and filter fields, with the messages of one language. */
+const listFields = (m: { cursor: string; limit: string; status: string }) => ({
+  status: z.enum(ChangeRequestStatus, { error: m.status }).optional(),
+  limit: z.coerce
+    .number({ error: m.limit })
+    .int(m.limit)
+    .min(1, m.limit)
+    .max(LIST_MAX_LIMIT, m.limit)
+    .default(LIST_DEFAULT_LIMIT),
+  cursor: z
+    .string({ error: m.cursor })
+    .max(200, m.cursor)
+    .transform((raw, ctx) => {
+      try {
+        return decodeCursor(raw);
+      } catch {
+        ctx.addIssue({ code: "custom", message: m.cursor });
 
-const cursor = z
-  .string({ error: CURSOR_ERROR })
-  .max(200, CURSOR_ERROR)
-  .transform((raw, ctx) => {
-    try {
-      return decodeCursor(raw);
-    } catch {
-      ctx.addIssue({ code: "custom", message: CURSOR_ERROR });
-
-      return z.NEVER;
-    }
-  })
-  .optional();
-
-const LIMIT_ERROR = `El límite debe estar entre 1 y ${LIST_MAX_LIMIT}.`;
-
-const limit = z.coerce
-  .number({ error: LIMIT_ERROR })
-  .int(LIMIT_ERROR)
-  .min(1, LIMIT_ERROR)
-  .max(LIST_MAX_LIMIT, LIMIT_ERROR)
-  .default(LIST_DEFAULT_LIMIT);
-
-const status = z.enum(ChangeRequestStatus, { error: "Estado no válido." }).optional();
+        return z.NEVER;
+      }
+    })
+    .optional()
+});
 
 /** Query strings are not strict: a cache-busting parameter is not a mistake worth a 422. */
-export const ownerListQuerySchema = z.object({ status, limit, cursor });
+export const ownerListQuerySchema = z.object(
+  listFields({
+    cursor: "El cursor de paginación no es válido.",
+    limit: `El límite debe estar entre 1 y ${LIST_MAX_LIMIT}.`,
+    status: "Estado no válido."
+  })
+);
 
 export const adminListQuerySchema = z.object({
-  status,
-  limit,
-  cursor,
-  type: z.enum(ChangeRequestType, { error: "Tipo no válido." }).optional(),
-  clinicId: line(1, 64, ID_MESSAGE).optional(),
+  ...listFields({
+    cursor: "The pagination cursor is not valid.",
+    limit: `The limit must be between 1 and ${LIST_MAX_LIMIT}.`,
+    status: "Invalid status."
+  }),
+  type: z.enum(ChangeRequestType, { error: "Invalid type." }).optional(),
+  clinicId: line(1, 64, "Invalid clinic id.").optional(),
   q: z
-    .string({ error: "La búsqueda debe ser un texto." })
+    .string({ error: "The search must be text." })
     .transform(oneLine)
-    .pipe(z.string().max(100, "La búsqueda admite hasta 100 caracteres."))
+    .pipe(z.string().max(100, "The search admits up to 100 characters."))
     .transform((value) => value || undefined)
     .optional()
 });

@@ -1,5 +1,7 @@
 import { AppError } from "./app-error";
 
+export type Locale = "es" | "en";
+
 /**
  * The messages here are fixed Spanish copy the owner sees, and none of them echoes anything
  * stored, so every one is exposed.
@@ -17,8 +19,9 @@ export class ChangeRequestValidationError extends AppError {
  * another clinic", so an id cannot be probed across clinics.
  */
 export class ChangeRequestNotFoundError extends AppError {
-  constructor() {
-    super("No se ha encontrado esa solicitud.", {
+  /** Owner-facing routes answer in Spanish, admin-facing ones in English. */
+  constructor(locale: Locale = "es") {
+    super(locale === "es" ? "No se ha encontrado esa solicitud." : "Request not found.", {
       statusCode: 404,
       code: "CHANGE_REQUEST_NOT_FOUND",
       expose: true
@@ -38,9 +41,11 @@ export class ChangeRequestForbiddenError extends AppError {
 
 /** The clinic already has as many unresolved tickets as it may have. */
 export class ChangeRequestLimitError extends AppError {
-  constructor(limit: number) {
+  constructor(limit: number, locale: Locale = "es") {
     super(
-      `Tienes ${limit} solicitudes abiertas. Espera a que Voone resuelva alguna antes de crear otra.`,
+      locale === "es"
+        ? `Tienes ${limit} solicitudes abiertas. Espera a que Voone resuelva alguna antes de crear otra.`
+        : `The clinic already has ${limit} open requests (OPEN or IN_PROGRESS), so this one cannot be opened.`,
       { statusCode: 409, code: "CHANGE_REQUEST_LIMIT_REACHED", expose: true }
     );
   }
@@ -52,6 +57,7 @@ export type ChangeRequestConflictCode =
   | "CHANGE_REQUEST_NOT_CLOSED"
   | "CHANGE_REQUEST_STALE"
   | "CHANGE_REQUEST_ALREADY_CLOSED"
+  | "CHANGE_REQUEST_ALREADY_APPLIED"
   | "CHANGE_REQUEST_NOT_APPLICABLE"
   | "CHANGE_REQUEST_APPLY_FAILED"
   | "CHANGE_REQUEST_NO_PROGRAMME"

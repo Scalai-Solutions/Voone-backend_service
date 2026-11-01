@@ -1140,14 +1140,22 @@ model ChangeRequest {
   resolvedAt      DateTime?
   resolutionNote  String?
 
+  /// Set when an admin applied the change (inside the apply transaction) and never cleared, not
+  /// even by a reopen: a second apply would duplicate the change. Admin-only.
+  appliedAt      DateTime?
+  appliedByEmail String?
+
   /// The draft programme created from this ticket, when there is one. Several tickets may
   /// point at one draft; a ticket links at most one.
   programId String?
   program   OnboardingProgram? @relation(fields: [programId], references: [id], onDelete: SetNull)
 
   /// Best-effort mail bookkeeping: a ticket is stored first and never lost to a mail failure.
-  emailSentAt    DateTime?
-  lastEmailError String?
+  emailSentAt        DateTime?
+  lastEmailError     String?
+  /// Which kind of mail ("voone" or "owners") lastEmailError belongs to: a later success of the
+  /// same kind clears it, a success to the other audience does not.
+  lastEmailErrorKind String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

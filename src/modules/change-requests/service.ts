@@ -73,6 +73,8 @@ export interface ChangeRequestRecord {
   resolvedByEmail: string | null;
   resolvedAt: Date | null;
   resolutionNote: string | null;
+  appliedAt: Date | null;
+  appliedByEmail: string | null;
   programId: string | null;
   emailSentAt: Date | null;
   lastEmailError: string | null;
@@ -126,6 +128,18 @@ export interface StatusPatch {
   resolutionNote: string | null;
 }
 
+export interface StatusChange {
+  from: ChangeRequestStatus;
+  patch: StatusPatch;
+  /** Written with the move, in the same transaction. */
+  message?: NewMessage;
+  /** Refuse ("limit") if the clinic already has this many unresolved tickets. */
+  openLimit?: number;
+}
+
+export type StatusChangeResult =
+  { kind: "ok"; message: MessageRecord | null } | { kind: "stale" } | { kind: "limit" };
+
 export interface ListFilter {
   clinicId?: string;
   status?: ChangeRequestStatus;
@@ -140,34 +154,31 @@ export interface ListFilter {
 export interface ChangeRequestRepository {
   /**
    * Creates the ticket unless the clinic already has `limit` that are OPEN or IN_PROGRESS,
-   * in which case it returns null. The check and the insert are one atomic step, so
-   * concurrent creates cannot overshoot the limit.
+   * in which case it returns null. Under one lock per clinic, so concurrent creates and
+   * reopens cannot overshoot the limit. If the same person already filed the same ticket (type,
+   * title, reason) within `dedupeWithinMs`, that one is returned with `duplicate: true` and
+   * nothing is written: a retried request, not a second ticket.
    */
-  createWithinLimit(data: NewChangeRequest, limit: number): Promise<ChangeRequestRecord | null>;
+  createWithinLimit(
+    data: NewChangeRequest,
+    limit: number,
+    dedupeWithinMs: number
+  ): Promise<{ record: ChangeRequestRecord; duplicate: boolean } | null>;
   countUnresolved(clinicId: string): Promise<number>;
   /** With `clinicId`, only a ticket of that clinic: another clinic's id is simply absent. */
   find(id: string, clinicId?: string): Promise<ChangeRequestDetail | null>;
   /** Newest first, ties by id, strictly after the cursor; up to `limit + 1` rows. */
   list(filter: ListFilter): Promise<ChangeRequestListRow[]>;
   /**
-   * Moves the ticket only if it is still in `from`; false when it was not (someone else got
-   * there first), so a stale decision never overwrites a newer one.
+   * Moves the ticket only if it is still in `from` ("stale" otherwise, so a decision made on an
+   * old view never overwrites a newer one), writing `message` in the same transaction. A move
+   * to RESOLVED or REJECTED also writes its resolution note into the thread, as the resolver's
+   * message, so a later reopen (which clears the note from the ticket) loses nothing. With
+   * `openLimit`, the clinic's unresolved count is checked under the clinic lock first ("limit").
    */
-  transition(id: string, from: ChangeRequestStatus, patch: StatusPatch): Promise<boolean>;
-  /**
-   * Adds a message and, with `reopenFrom`, reopens the ticket in the same transaction, but
-   * only if it is still in that status. Null when it was not, and nothing is written.
-   */
-  appendMessage(
-    id: string,
-    message: NewMessage,
-    reopenFrom?: ChangeRequestStatus
-  ): Promise<MessageRecord | null>;
-  /**
-   * In one transaction: takes the ticket only if it is still OPEN or IN_PROGRESS, runs `work`
-   * with a transaction-bound client, then writes the patch `work` returns. Null when the ticket
-   * was already closed. If `work` throws, nothing is kept, the ticket included.
-   */
+  changeStatus(id: string, change: StatusChange): Promise<StatusChangeResult>;
+  /** Adds a message to the thread. Null when the ticket does not exist. */
+  appendMessage(id: string, message: NewMessage): Promise<MessageRecord | null>;
   /**
    * Links the ticket to a programme and moves OPEN to IN_PROGRESS, only while it is
    * unresolved. Returns the status it had, or null when it was closed (or moved) meanwhile.
@@ -175,7 +186,14 @@ export interface ChangeRequestRepository {
   linkProgram(id: string, programId: string): Promise<ChangeRequestStatus | null>;
   /** The clinic's OPEN or IN_PROGRESS tickets linked to the programme. */
   findUnresolvedByProgram(clinicId: string, programId: string): Promise<ChangeRequestRecord[]>;
-  resolveAtomically<T>(
+  /**
+   * The apply step, in one transaction: takes the ticket only if it is OPEN or IN_PROGRESS and
+   * has never been applied, runs `work` with a transaction-bound client, then writes the patch
+   * `work` returns, marks the ticket applied (appliedAt / appliedByEmail, never cleared) and
+   * writes the resolution note into the thread. Null when the ticket was closed or already
+   * applied. If `work` throws, nothing is kept, the ticket included.
+   */
+  applyAtomically<T>(
     id: string,
     work: (db: PrismaClient) => Promise<{ result: T; patch: StatusPatch }>
   ): Promise<T | null>;
@@ -242,6 +260,9 @@ export interface AdminRequestView {
   resolvedByEmail: string | null;
   resolvedAt: string | null;
   resolutionNote: string | null;
+  /** When an admin applied the change; never cleared, even by a reopen. Admin-only. */
+  appliedAt: string | null;
+  appliedByEmail: string | null;
   programId: string | null;
   emailSentAt: string | null;
   lastEmailError: string | null;
@@ -261,6 +282,11 @@ export interface AdminRequestDetail extends AdminRequestView {
    * when there is nothing to say.
    */
   catalogueImpact: string[] | null;
+  /**
+   * True on a SERVICE_ADD with no category at a centre that files treatments under categories:
+   * apply needs a `categoryId` then.
+   */
+  needsCategory: boolean;
 }
 
 export interface DraftResult {
@@ -333,6 +359,8 @@ const adminView = (record: ChangeRequestRecord): AdminRequestView => ({
   resolvedByEmail: record.resolvedByEmail,
   resolvedAt: iso(record.resolvedAt),
   resolutionNote: record.resolutionNote,
+  appliedAt: iso(record.appliedAt),
+  appliedByEmail: record.appliedByEmail,
   programId: record.programId,
   emailSentAt: iso(record.emailSentAt),
   lastEmailError: record.lastEmailError,
@@ -342,10 +370,12 @@ const adminView = (record: ChangeRequestRecord): AdminRequestView => ({
 
 const adminDetail = (
   detail: ChangeRequestDetail,
-  catalogueImpact: string[] | null
+  catalogueImpact: string[] | null,
+  needsCategory: boolean
 ): AdminRequestDetail => ({
   ...adminView(detail),
   catalogueImpact,
+  needsCategory,
   messages: detail.messages.map((message) => ({
     id: message.id,
     authorKind: message.authorKind,
@@ -375,6 +405,21 @@ export interface ChangeRequestServiceOptions {
   changes?: CatalogueChanges;
   /** Starts programme drafts from REWARD and LEVEL tickets. */
   programs?: ProgramDrafts;
+  /**
+   * Where notifications run. By default they are fire-and-forget after the commit: the request
+   * never waits for mail. Tests pass `(task) => task` to await them before asserting.
+   */
+  background?: (task: Promise<void>) => void | Promise<void>;
+}
+
+/** A ticket filed again with the same type, title and reason by the same person within this is a retry. */
+export const DEDUPE_WINDOW_MS = 60 * 1000;
+
+export interface ApplyOptions {
+  /** The resolution note; default "Applied: <summary>". */
+  note?: string;
+  /** The category for a SERVICE_ADD that has none, at a centre that files treatments under categories. */
+  categoryId?: string;
 }
 
 export interface ClinicListQuery {
@@ -398,16 +443,23 @@ const WINDOW_CLOSED_MESSAGE = `Esta solicitud se cerró hace más de ${REOPEN_WI
 const NOT_CLOSED_MESSAGE = "Esta solicitud ya está abierta.";
 const STALE_MESSAGE =
   "La solicitud ha cambiado mientras la editabas. Recárgala e inténtalo de nuevo.";
+const STALE_MESSAGE_EN = "The request changed in the meantime. Reload it and try again.";
 const alreadyClosed = (
   message = "This request is already resolved or rejected, so it cannot be applied."
 ) => new ChangeRequestConflictError("CHANGE_REQUEST_ALREADY_CLOSED", message);
-const NOTE_REQUIRED_MESSAGE = "Escribe una nota de resolución.";
+const alreadyApplied = () =>
+  new ChangeRequestConflictError(
+    "CHANGE_REQUEST_ALREADY_APPLIED",
+    "This request was already applied; applying it again would repeat the change. Resolve or reject it by hand instead."
+  );
+const NOTE_REQUIRED_MESSAGE = "A resolution note is required.";
 
 export class ChangeRequestService {
   private readonly notifier: ChangeRequestNotifier;
   private readonly now: () => Date;
   private readonly changes?: CatalogueChanges;
   private readonly programs?: ProgramDrafts;
+  private readonly background: (task: Promise<void>) => void | Promise<void>;
 
   constructor(
     private readonly repo: ChangeRequestRepository,
@@ -417,6 +469,7 @@ export class ChangeRequestService {
     this.now = options.now ?? (() => new Date());
     this.changes = options.changes;
     this.programs = options.programs;
+    this.background = options.background ?? (() => {});
   }
 
   /* ---- the clinic's side ---- */
@@ -427,7 +480,7 @@ export class ChangeRequestService {
     input: ChangeRequestInput
   ): Promise<OwnerRequestView> {
     const now = this.now();
-    const record = await this.repo.createWithinLimit(
+    const created = await this.repo.createWithinLimit(
       {
         clinicId,
         type: input.type,
@@ -439,16 +492,20 @@ export class ChangeRequestService {
         createdByRole: actor.role,
         createdAt: now
       },
-      OPEN_LIMIT
+      OPEN_LIMIT,
+      DEDUPE_WINDOW_MS
     );
 
-    if (!record) throw new ChangeRequestLimitError(OPEN_LIMIT);
+    if (!created) throw new ChangeRequestLimitError(OPEN_LIMIT);
 
-    const detail = await this.repo.find(record.id);
+    // A retry of a ticket just filed gets the stored one back, and nobody is told twice.
+    if (!created.duplicate) {
+      const detail = await this.repo.find(created.record.id);
 
-    if (detail) await this.notify("onCreated", () => this.notifier.onCreated(detail));
+      if (detail) await this.notify("onCreated", () => this.notifier.onCreated(detail));
+    }
 
-    return ownerView(record, now);
+    return ownerView(created.record, now);
   }
 
   async listForClinic(clinicId: string, query: ClinicListQuery): Promise<Page<OwnerListItem>> {
@@ -478,17 +535,20 @@ export class ChangeRequestService {
     const ticket = await this.requireForClinic(clinicId, id);
     const now = this.now();
     const reopenFrom = isClosed(ticket.status) ? ticket.status : undefined;
+    const draft: NewMessage = {
+      authorKind: "CLINIC",
+      authorEmail: actor.email,
+      body,
+      createdAt: now
+    };
+    let message: MessageRecord | null;
 
     if (reopenFrom) {
       this.requireInsideWindow(ticket, now);
-      await this.requireRoomToReopen(clinicId);
+      message = await this.reopen(id, reopenFrom, draft);
+    } else {
+      message = await this.repo.appendMessage(id, draft);
     }
-
-    const message = await this.repo.appendMessage(
-      id,
-      { authorKind: "CLINIC", authorEmail: actor.email, body, createdAt: now },
-      reopenFrom
-    );
 
     if (!message) throw new ChangeRequestConflictError("CHANGE_REQUEST_STALE", STALE_MESSAGE);
 
@@ -499,6 +559,31 @@ export class ChangeRequestService {
     await this.notify("onOwnerReply", () => this.notifier.onOwnerReply(after, message, reopenFrom));
 
     return ownerDetail(after, now);
+  }
+
+  /**
+   * Puts a closed ticket back to OPEN, with a message if given, counting against the clinic's
+   * cap under the clinic lock. Returns the message written (null without one).
+   */
+  private async reopen(
+    id: string,
+    from: ChangeRequestStatus,
+    message?: NewMessage
+  ): Promise<MessageRecord | null> {
+    const result = await this.repo.changeStatus(id, {
+      from,
+      patch: { status: "OPEN", resolvedAt: null, resolvedByEmail: null, resolutionNote: null },
+      message,
+      openLimit: OPEN_LIMIT
+    });
+
+    if (result.kind === "limit") throw new ChangeRequestLimitError(OPEN_LIMIT);
+
+    if (result.kind === "stale") {
+      throw new ChangeRequestConflictError("CHANGE_REQUEST_STALE", STALE_MESSAGE);
+    }
+
+    return result.message;
   }
 
   async reopenAsClinic(
@@ -515,29 +600,19 @@ export class ChangeRequestService {
     }
 
     this.requireInsideWindow(ticket, now);
-    await this.requireRoomToReopen(clinicId);
 
     const previous = ticket.status;
-    let written: MessageRecord | null = null;
-
-    if (message !== undefined) {
-      written = await this.repo.appendMessage(
-        id,
-        { authorKind: "CLINIC", authorEmail: actor.email, body: message, createdAt: now },
-        previous
-      );
-
-      if (!written) throw new ChangeRequestConflictError("CHANGE_REQUEST_STALE", STALE_MESSAGE);
-    } else if (!(await this.repo.transition(id, previous, REOPEN_PATCH))) {
-      throw new ChangeRequestConflictError("CHANGE_REQUEST_STALE", STALE_MESSAGE);
-    }
-
+    const written = await this.reopen(
+      id,
+      previous,
+      message === undefined
+        ? undefined
+        : { authorKind: "CLINIC", authorEmail: actor.email, body: message, createdAt: now }
+    );
     const after = await this.requireForClinic(clinicId, id);
 
     if (written) {
-      const sent = written;
-
-      await this.notify("onOwnerReply", () => this.notifier.onOwnerReply(after, sent, previous));
+      await this.notify("onOwnerReply", () => this.notifier.onOwnerReply(after, written, previous));
     } else {
       await this.notify("onStatusChanged", () =>
         this.notifier.onStatusChanged(after, previous, "CLINIC")
@@ -577,7 +652,7 @@ export class ChangeRequestService {
     if (!ALLOWED_TRANSITIONS[previous].includes(update.status)) {
       throw new ChangeRequestConflictError(
         "CHANGE_REQUEST_INVALID_TRANSITION",
-        `No se puede pasar la solicitud de ${previous} a ${update.status}.`
+        `A request cannot move from ${previous} to ${update.status}.`
       );
     }
 
@@ -597,8 +672,17 @@ export class ChangeRequestService {
         }
       : { status: update.status, resolvedAt: null, resolvedByEmail: null, resolutionNote: null };
 
-    if (!(await this.repo.transition(id, previous, patch))) {
-      throw new ChangeRequestConflictError("CHANGE_REQUEST_STALE", STALE_MESSAGE);
+    const result = await this.repo.changeStatus(id, {
+      from: previous,
+      patch,
+      // Only a closed ticket going back to OPEN adds to the unresolved count.
+      openLimit: isClosed(previous) ? OPEN_LIMIT : undefined
+    });
+
+    if (result.kind === "limit") throw new ChangeRequestLimitError(OPEN_LIMIT, "en");
+
+    if (result.kind === "stale") {
+      throw new ChangeRequestConflictError("CHANGE_REQUEST_STALE", STALE_MESSAGE_EN);
     }
 
     const after = await this.requireAny(id);
@@ -620,7 +704,7 @@ export class ChangeRequestService {
       createdAt: this.now()
     });
 
-    if (!message) throw new ChangeRequestNotFoundError();
+    if (!message) throw new ChangeRequestNotFoundError("en");
 
     const after = await this.requireAny(id);
 
@@ -635,7 +719,11 @@ export class ChangeRequestService {
    * is refused the ticket stays open, and a second apply is a 409 because the first resolved it.
    * Never blocked by the programme: a warning is information, not a veto.
    */
-  async adminApply(id: string, actor: AdminActor, note?: string): Promise<ApplyResult> {
+  async adminApply(
+    id: string,
+    actor: AdminActor,
+    options: ApplyOptions = {}
+  ): Promise<ApplyResult> {
     const changes = this.changes;
 
     if (!changes) {
@@ -654,27 +742,48 @@ export class ChangeRequestService {
       );
     }
 
+    // Checked before the status: a reopened ticket is open again but was already applied.
+    if (ticket.appliedAt) throw alreadyApplied();
+
     if (isClosed(ticket.status)) throw alreadyClosed();
+
+    if (options.categoryId !== undefined && ticket.type !== "SERVICE_ADD") {
+      throw new ChangeRequestValidationError(
+        "A category can only be given when applying a SERVICE_ADD request."
+      );
+    }
 
     const previous = ticket.status;
     const now = this.now();
-    const done = await this.repo.resolveAtomically(id, async (db) => {
-      // Before the change, so a treatment about to be removed can still be found.
-      const warnings = (await changes.impact(ticket, { db, applied: true })) ?? [];
-      const applied = await changes.apply(db, ticket);
+
+    // Read-only and before the transaction: if a read fails inside a Postgres transaction the
+    // whole transaction is aborted, and a warning must never be able to break an apply. The
+    // treatment about to be removed still exists at this point, so rewards using it are found.
+    const warnings = await changes
+      .impact(ticket, { applied: true })
+      .then((found) => found ?? [])
+      .catch(() => []);
+
+    const done = await this.repo.applyAtomically(id, async (db) => {
+      const applied = await changes.apply(db, ticket, { categoryId: options.categoryId });
 
       return {
-        result: { applied, warnings },
+        result: applied,
         patch: {
           status: "RESOLVED" as const,
           resolvedAt: now,
           resolvedByEmail: actor.email,
-          resolutionNote: note?.trim() || `Applied: ${applied.summary}`
+          resolutionNote: options.note?.trim() || `Applied: ${applied.summary}`
         }
       };
     });
 
-    if (!done) throw alreadyClosed();
+    if (!done) {
+      // Someone got there between the read above and the transaction.
+      const latest = await this.requireAny(id);
+
+      throw latest.appliedAt ? alreadyApplied() : alreadyClosed();
+    }
 
     const after = await this.requireAny(id);
 
@@ -682,7 +791,7 @@ export class ChangeRequestService {
       this.notifier.onStatusChanged(after, previous, "VOONE")
     );
 
-    return { request: await this.withImpact(after), ...done };
+    return { request: await this.withImpact(after), applied: done, warnings };
   }
 
   /**
@@ -787,25 +896,35 @@ export class ChangeRequestService {
     const done: Array<{ id: string; previous: ChangeRequestStatus }> = [];
 
     for (const ticket of await this.repo.findUnresolvedByProgram(clinicId, programId)) {
-      const moved = await this.repo.transition(ticket.id, ticket.status, {
-        status: "RESOLVED",
-        resolvedAt: now,
-        resolvedByEmail: actor.email,
-        resolutionNote: text
+      const moved = await this.repo.changeStatus(ticket.id, {
+        from: ticket.status,
+        patch: {
+          status: "RESOLVED",
+          resolvedAt: now,
+          resolvedByEmail: actor.email,
+          resolutionNote: text
+        }
       });
 
       // A ticket someone else moved meanwhile is theirs; skip it rather than overwrite.
-      if (moved) done.push({ id: ticket.id, previous: ticket.status });
+      if (moved.kind === "ok") done.push({ id: ticket.id, previous: ticket.status });
     }
 
-    for (const { id, previous } of done) {
-      const after = await this.repo.find(id);
+    // N mails are not the response's business: one background task sends them in turn.
+    if (done.length > 0) {
+      await this.background(
+        (async () => {
+          for (const { id, previous } of done) {
+            const after = await this.repo.find(id).catch(() => null);
 
-      if (after) {
-        await this.notify("onStatusChanged", () =>
-          this.notifier.onStatusChanged(after, previous, "VOONE")
-        );
-      }
+            if (after) {
+              await this.attempt("onStatusChanged", () =>
+                this.notifier.onStatusChanged(after, previous, "VOONE")
+              );
+            }
+          }
+        })()
+      );
     }
 
     return { resolved: done.map((entry) => entry.id) };
@@ -814,7 +933,16 @@ export class ChangeRequestService {
   /* ---- shared ---- */
 
   private async withImpact(detail: ChangeRequestDetail): Promise<AdminRequestDetail> {
-    return adminDetail(detail, this.changes ? await this.changes.impact(detail) : null);
+    const changes = this.changes;
+
+    if (!changes) return adminDetail(detail, null, false);
+
+    const [impact, needsCategory] = await Promise.all([
+      changes.impact(detail).catch(() => null),
+      changes.needsCategory(detail).catch(() => false)
+    ]);
+
+    return adminDetail(detail, impact, needsCategory);
   }
 
   private async requireForClinic(clinicId: string, id: string): Promise<ChangeRequestDetail> {
@@ -828,7 +956,7 @@ export class ChangeRequestService {
   private async requireAny(id: string): Promise<ChangeRequestDetail> {
     const ticket = await this.repo.find(id);
 
-    if (!ticket) throw new ChangeRequestNotFoundError();
+    if (!ticket) throw new ChangeRequestNotFoundError("en");
 
     return ticket;
   }
@@ -841,13 +969,6 @@ export class ChangeRequestService {
         "CHANGE_REQUEST_REOPEN_WINDOW_CLOSED",
         WINDOW_CLOSED_MESSAGE
       );
-    }
-  }
-
-  /** A reopen makes a ticket count against the cap again, so it is held to it. */
-  private async requireRoomToReopen(clinicId: string): Promise<void> {
-    if ((await this.repo.countUnresolved(clinicId)) >= OPEN_LIMIT) {
-      throw new ChangeRequestLimitError(OPEN_LIMIT);
     }
   }
 
@@ -864,21 +985,24 @@ export class ChangeRequestService {
     };
   }
 
-  /** Hooks run after the commit and can never fail the request. */
+  /**
+   * Hooks run after the commit and can never fail the request: the work is started here, errors
+   * are caught and logged, and `background` decides whether anyone waits for it (nobody, unless
+   * a test says so).
+   */
   private async notify(hook: string, call: () => Promise<void>): Promise<void> {
+    await this.background(this.attempt(hook, call));
+  }
+
+  private async attempt(hook: string, call: () => Promise<void>): Promise<void> {
     try {
       await call();
     } catch (error) {
-      console.error(`[change-requests] notifier ${hook} failed`, error);
+      console.error(
+        `[change-requests] notifier ${hook} failed: ${error instanceof Error ? error.name : "Error"}`
+      );
     }
   }
 }
-
-const REOPEN_PATCH: StatusPatch = {
-  status: "OPEN",
-  resolvedAt: null,
-  resolvedByEmail: null,
-  resolutionNote: null
-};
 
 export type { StatusChangedBy };

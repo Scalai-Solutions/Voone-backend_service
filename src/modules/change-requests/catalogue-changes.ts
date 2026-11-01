@@ -12,6 +12,7 @@ import {
   listTreatments,
   removeTreatment,
   updateTreatment,
+  usesCatalogue,
   type TreatmentRow
 } from "../treatments/treatment-catalogue.service";
 import type { ChangeRequestDetail } from "./service";
@@ -41,9 +42,23 @@ export interface ImpactOptions {
   applied?: boolean;
 }
 
+export interface ApplyChangeOptions {
+  /** For a SERVICE_ADD whose ticket has no category: where to file it. */
+  categoryId?: string;
+}
+
 export interface CatalogueChanges {
   /** Performs the ticket's change on `db`, a transaction-bound client. Throws a 409 on refusal. */
-  apply(db: PrismaClient, ticket: ChangeRequestDetail): Promise<AppliedChange>;
+  apply(
+    db: PrismaClient,
+    ticket: ChangeRequestDetail,
+    options?: ApplyChangeOptions
+  ): Promise<AppliedChange>;
+  /**
+   * Whether applying needs a category from the admin: a SERVICE_ADD with none, still open, at a
+   * centre whose treatments live in the catalogue (where every treatment has a category).
+   */
+  needsCategory(ticket: ChangeRequestDetail): Promise<boolean>;
   /**
    * Warnings about the clinic's ACTIVE programme, or null when there is nothing to say (no
    * active programme, or a ticket that does not touch the catalogue, or one already closed).
@@ -109,14 +124,32 @@ const asRefusal = (error: unknown): never => {
 export class PrismaCatalogueChanges implements CatalogueChanges {
   constructor(private readonly db: PrismaClient) {}
 
-  async apply(db: PrismaClient, ticket: ChangeRequestDetail): Promise<AppliedChange> {
+  async needsCategory(ticket: ChangeRequestDetail): Promise<boolean> {
+    if (
+      ticket.type !== "SERVICE_ADD" ||
+      ticket.status === "RESOLVED" ||
+      ticket.status === "REJECTED"
+    ) {
+      return false;
+    }
+
+    if (str(fieldsOf(ticket.proposed).categoryId)) return false;
+
+    return usesCatalogue(this.db, ticket.clinicId);
+  }
+
+  async apply(
+    db: PrismaClient,
+    ticket: ChangeRequestDetail,
+    options: ApplyChangeOptions = {}
+  ): Promise<AppliedChange> {
     const target = fieldsOf(ticket.targetRef);
     const proposed = fieldsOf(ticket.proposed);
 
     try {
       switch (ticket.type) {
         case "SERVICE_ADD":
-          return await this.addTreatment(db, ticket.clinicId, proposed);
+          return await this.addTreatment(db, ticket.clinicId, proposed, options.categoryId);
         case "SERVICE_EDIT":
           return await this.editTreatment(db, ticket.clinicId, str(target.treatmentId), proposed);
         case "SERVICE_REMOVE":
@@ -179,12 +212,14 @@ export class PrismaCatalogueChanges implements CatalogueChanges {
   private async addTreatment(
     db: PrismaClient,
     clinicId: string,
-    proposed: Fields
+    proposed: Fields,
+    categoryOverride: string | undefined
   ): Promise<AppliedChange> {
     const treatment = await createTreatment(db, clinicId, {
       name: proposed.name as string,
       priceEuro: proposed.priceEuro as number,
-      categoryId: str(proposed.categoryId)
+      // What the owner asked for wins; the admin's category only fills in when there is none.
+      categoryId: str(proposed.categoryId) ?? categoryOverride
     });
 
     return {

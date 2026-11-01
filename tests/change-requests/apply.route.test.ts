@@ -47,7 +47,7 @@ describe("POST /admin/change-requests/:id/apply", () => {
     const again = await call("POST", `/admin/change-requests/${t.id}/apply`, ADMIN, {});
 
     expect(again.status).toBe(409);
-    expect(again.body.code).toBe("CHANGE_REQUEST_ALREADY_CLOSED");
+    expect(again.body.code).toBe("CHANGE_REQUEST_ALREADY_APPLIED");
   });
 
   it("422s a bad body and 404s an unknown ticket", async () => {
