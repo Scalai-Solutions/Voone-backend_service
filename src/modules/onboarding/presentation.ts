@@ -1,4 +1,6 @@
-import { MIN_TENURE, P, TIERS, TIER_BENEFITS, TIER_NAMES } from "./engine.config";
+import { benefitLinesFor, visibleBenefits, type PresentedBenefitLine } from "./benefit-lines";
+import { blockingReview, informationalNotes } from "./engine";
+import { MIN_TENURE, TIERS, TIER_BENEFITS, TIER_NAMES } from "./engine.config";
 import type { Program, TierCode } from "./engine.types";
 import { itemsTitle, rewardTitle } from "./reward-title";
 
@@ -22,7 +24,7 @@ import { itemsTitle, rewardTitle } from "./reward-title";
  * Neither what it costs the centre nor what it is worth at retail is here: the feedback is
  * explicit that a centre should see what it gives and what its clients spend, not what each gift
  * is worth. Value stays in the engine and the stored programme, because choosing rewards needs
- * it; it just never reaches this projection.
+ * it; it reaches this projection only as the admin-only `rewardValueEuro` on a milestone.
  */
 export interface PresentedItem {
   name: string;
@@ -45,6 +47,12 @@ export interface PresentedMilestone {
   month: number;
   /** For a tier-up row: the tier entered. */
   tier?: { key: TierCode; label: string };
+  /**
+   * ADMIN ONLY (see `PresentOptions.forAdmin`): what the reward is worth at retail, in whole euros,
+   * the sum of the items for a combo. The admin reads it to see what a swap does to the ladder; a
+   * centre's own presentation never carries it. Present only on reward milestones.
+   */
+  rewardValueEuro?: number;
   reward?: {
     name: string;
     items: PresentedItem[];
@@ -60,9 +68,19 @@ export interface PresentedTier {
   /** What a client has paid when she enters this tier. */
   threshold: number;
   minTenureMonths: number;
+  /**
+   * What a client reads, in order: the generated lines with the centre's display-only edits
+   * applied and the hidden ones left out, then the lines the centre wrote. The card, the pass and
+   * every other reader take this.
+   */
   benefits: string[];
-  /** The ones the centre wrote itself: the only ones it can add or remove. */
+  /** The ones the centre wrote itself, in its own list (the benefits route replaces this list). */
   customBenefits: string[];
+  /**
+   * Every line of the tier with its stable key, hidden ones included and flagged, so the admin
+   * screen can edit, hide, show and restore any of them. `benefits` is its visible texts.
+   */
+  benefitLines: PresentedBenefitLine[];
 }
 
 export interface PresentedProgram {
@@ -83,6 +101,11 @@ export interface PresentedProgram {
   adaptations: string[];
   /** Real problems to resolve before approving. Blocking. */
   review: string[];
+  /**
+   * Things Voone tells the admin that do not stop publishing (today: the cost note). Always empty
+   * unless the programme is presented for an admin: a centre's own view carries no warnings.
+   */
+  notes: string[];
 }
 
 /**
@@ -95,41 +118,20 @@ const COST_NOTE_PREFIX = "Algunos premios usan algo más de su presupuesto indiv
 const itemsOf = (items: Array<{ name: string }>): PresentedItem[] =>
   items.map((i) => ({ name: i.name }));
 
-const pct = (share: number): string => `${Math.round(share * 100)}%`;
+export interface PresentOptions {
+  /**
+   * Present the programme for Voone's admin screen, which may carry what a centre must never see:
+   * the informational notes and (A3) each reward's retail price. OFF by default, and only the
+   * admin routes turn it on, so a new caller (the owner dashboard, the pass, a sign-up page)
+   * gets the centre-safe projection without having to remember to ask for it.
+   */
+  forAdmin?: boolean;
+}
 
-/** Benefits a tier carries permanently, in the order a client would care about them. */
-const benefitsFor = (key: TierCode, program: Program): string[] => {
-  const b = TIER_BENEFITS[key];
-  const out: string[] = [];
-
-  if (b.mult > 1) {
-    out.push(`Cada euro suma ×${String(b.mult).replace(".", ",")} de progreso`);
-  }
-
-  if (b.discount > 0) {
-    out.push(
-      `Descuento del ${pct(b.discount)} en cosmética, hasta ${P.discountMaxProducts} productos al año`
-    );
-  }
-
-  const gift = program.gifts[key]?.birthday;
-
-  if (gift) out.push(`Regalo de cumpleaños: ${itemsTitle(gift.items)}`);
-
-  if (b.events > 0) {
-    out.push(
-      b.events === 1 ? "Un evento exclusivo al año" : `${b.events} eventos exclusivos al año`
-    );
-  }
-
-  if (b.tests) out.push("Prueba de nuevos tratamientos y aparatología");
-
-  out.push(...b.extra);
-
-  return out;
-};
-
-export const presentProgram = (program: Program): PresentedProgram => {
+export const presentProgram = (
+  program: Program,
+  options: PresentOptions = {}
+): PresentedProgram => {
   const levels = program.lad.ms.filter((m) => m.type === "nivel");
   // Whole euros: a centre reads "826 €", and an unrounded real spend is a long float whose last
   // digits differ between the engine's output and the copy stored and read back.
@@ -146,14 +148,19 @@ export const presentProgram = (program: Program): PresentedProgram => {
       annualSpend: program.est.A
     },
 
-    tiers: TIERS.map((key, i) => ({
-      key,
-      label: TIER_NAMES[key],
-      threshold: floors[i] ?? 0,
-      minTenureMonths: MIN_TENURE[key],
-      benefits: [...benefitsFor(key, program), ...(program.customBenefits?.[key] ?? [])],
-      customBenefits: program.customBenefits?.[key] ?? []
-    })),
+    tiers: TIERS.map((key, i) => {
+      const benefitLines = benefitLinesFor(key, program);
+
+      return {
+        key,
+        label: TIER_NAMES[key],
+        threshold: floors[i] ?? 0,
+        minTenureMonths: MIN_TENURE[key],
+        benefits: visibleBenefits(benefitLines),
+        customBenefits: program.customBenefits?.[key] ?? [],
+        benefitLines
+      };
+    }),
 
     ladder: program.lad.ms.map((m): PresentedMilestone => {
       const real = program.realTh[m.n];
@@ -179,6 +186,9 @@ export const presentProgram = (program: Program): PresentedProgram => {
             items: itemsOf(a.items)
           }))
         };
+
+        // The engine's own retail value for the reward (`o.value`, already the sum for a combo).
+        if (options.forAdmin) base.rewardValueEuro = euros(chosen.o.value);
       }
 
       if (m.type === "ventaja" && m.perk) {
@@ -211,6 +221,7 @@ export const presentProgram = (program: Program): PresentedProgram => {
     },
 
     adaptations: program.adapt.filter((note) => !note.startsWith(COST_NOTE_PREFIX)),
-    review: program.review
+    review: blockingReview(program.review),
+    notes: options.forAdmin ? informationalNotes(program.review) : []
   };
 };

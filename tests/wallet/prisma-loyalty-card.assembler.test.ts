@@ -680,6 +680,45 @@ describe("PrismaLoyaltyCardAssembler: the member's tier benefits", () => {
     expect(card.tierBenefits?.lines).toContain("Masaje de bienvenida");
   });
 
+  it("shows an edited generated line and leaves out a hidden one", async () => {
+    const plain = await assemblerFor(memberOf("Plata")).assemble(member.id);
+    const overridden = {
+      ...output,
+      benefitOverrides: {
+        plata: { priority: { text: "Te avisamos antes si hay hueco" }, discount: { hidden: true } }
+      }
+    };
+    const card = await assemblerFor(memberOf("Plata", overridden)).assemble(member.id);
+    const lines = card.tierBenefits!.lines;
+
+    expect(lines).toEqual(presented("Plata", overridden));
+    expect(lines).toContain("Te avisamos antes si hay hueco");
+    expect(lines.some((l) => l.startsWith("Prioridad en huecos"))).toBe(false);
+    expect(lines.some((l) => l.startsWith("Descuento del 3%"))).toBe(false);
+    expect(plain.tierBenefits!.lines.some((l) => l.startsWith("Descuento del 3%"))).toBe(true);
+    expect(lines).toHaveLength(plain.tierBenefits!.lines.length - 1);
+    expect(loyaltyCardSchema.safeParse(card).success).toBe(true);
+  });
+
+  it("has no tier benefits for a stored programme that leaves the tier no visible line (the API refuses to store one), so Apple shows the template text and Google nothing", async () => {
+    const hideAll = {
+      ...output,
+      benefitOverrides: {
+        bronce: Object.fromEntries(
+          presentProgram(output)
+            .tiers.find((t) => t.key === "bronce")!
+            .benefitLines.map((l) => [l.key, { hidden: true }])
+        )
+      }
+    };
+    const card = await assemblerFor(memberOf("Bronce", hideAll)).assemble(member.id);
+
+    expect(card.tierBenefits).toBeUndefined();
+    // The one field both wallets read: undefined, so Apple's back field falls back to the
+    // template's benefits text and Google's per-member module is removed.
+    expect(tierBenefitsText(card)).toBeUndefined();
+  });
+
   it("gives a member of another tier that tier's benefits, not Plata's", async () => {
     const bronce = await assemblerFor(memberOf("Bronce")).assemble(member.id);
     const oro = await assemblerFor(memberOf("Oro")).assemble(member.id);

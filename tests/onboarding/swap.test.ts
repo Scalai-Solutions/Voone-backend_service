@@ -16,10 +16,9 @@ import catalog from "./reference/sapphira.catalogo.json";
  * Swapping a reward, which is where a valid programme can be made invalid.
  *
  * The real Sapphira programme offers alternatives at three milestones (7, 17 and 22), so those
- * are exercised as they are. The rules a swap must REFUSE — a repeat, a falling ladder, a
- * broken Bronce — cannot be reached with the alternatives the engine itself proposes, because
- * it proposes only safe ones; so those are built by planting an unsafe alternative and
- * checking the swap catches it. A refusal that was never provoked would be an assumption.
+ * are exercised as they are. The rule a swap must REFUSE — a gift repeated in two milestones in a row — cannot be reached
+ * with the alternatives the engine itself proposes, because it proposes only safe ones; so it is
+ * built by planting an unsafe alternative and checking the swap catches it. A refusal that was never provoked would be an assumption.
  */
 const ANSWERS: Answers = {
   ticket: null,
@@ -146,45 +145,76 @@ describe("swapReward, refusing what it must", () => {
 
     expect(swapReward(p, ANSWERS, 9, 0)).toMatchObject({
       ok: false,
-      reason: "Ese cambio repetiría un regalo en dos hitos seguidos."
+      reason: expect.stringContaining("Ese cambio repetiría un regalo en dos hitos seguidos")
     });
   });
+});
 
-  it("refuses a swap that would drop a reward below the one before it", () => {
+describe("swapReward, where the ladder is free to fall or reorder", () => {
+  it("lets a later tier hold a cheaper reward than the one before it", () => {
     const p = fresh();
 
-    // Milestone 9 follows 7 (worth 20). An alternative worth 5 would fall below it.
+    // Milestone 9 follows 7 (worth 20). An alternative worth 5 falls below it, and is allowed.
     entry(p, 9).alts = [option(5, 1, "TINY")];
 
-    expect(swapReward(p, ANSWERS, 9, 0)).toMatchObject({
-      ok: false,
-      reason: expect.stringContaining("menos valor")
-    });
+    const result = swapReward(p, ANSWERS, 9, 0);
+
+    expect(result.ok).toBe(true);
+
+    const next = (result as { program: Program }).program;
+
+    expect(entry(next, 9).o.value).toBe(5);
+    // Otherwise valid: nothing else moved, no gift repeats, and cost and guarantees follow.
+    for (const c of p.chosen.filter((x) => x.m.n !== 9)) {
+      expect(idsOf(entry(next, c.m.n).o)).toBe(idsOf(c.o));
+    }
+
+    expect(
+      next.chosen.some(
+        (c, i) =>
+          i > 0 &&
+          c.o.items.some((it) => next.chosen[i - 1].o.items.some((prev) => prev.id === it.id))
+      )
+    ).toBe(false);
+    expect(next.totalCost).toBeCloseTo(
+      next.chosen.reduce((s, c) => s + c.o.cost, 0) + next.perkCost,
+      10
+    );
+    expect(next.review).toEqual(p.review);
   });
 
-  it("refuses a swap that stops Bronce leading with its best reward", () => {
+  it("lets Bronce be reordered so its best reward no longer leads", () => {
     const p = fresh();
     const first = entry(p, 1);
 
-    // 1 is worth 18, the best in Bronce. An alternative worth 4 would no longer lead.
+    // 1 is worth 18, the best in Bronce. An alternative worth 4 no longer leads, and is allowed.
     first.alts = [option(4, 1, "TINY")];
 
-    expect(swapReward(p, ANSWERS, 1, 0)).toMatchObject({
-      ok: false,
-      reason: expect.stringContaining("Bronce")
-    });
+    const result = swapReward(p, ANSWERS, 1, 0);
+
+    expect(result.ok).toBe(true);
+
+    const next = (result as { program: Program }).program;
+
+    expect(entry(next, 1).o.value).toBe(4);
+    // The guarantee tells the truth about it; it is not a refusal.
+    expect(next.guarantees.find(([t]) => t === "En Bronce el mejor premio es el primero")![1]).toBe(
+      false
+    );
   });
 
-  it("does not block on a Bronce rule the programme already could not hold", () => {
-    // A programme whose Bronce ordering was already given up (and said so) must not trap the
-    // centre: the swap is not what broke it.
+  it("returns no refusal at all for value order or Bronce order, whichever way it is asked", () => {
     const p = fresh();
-    p.guarantees = p.guarantees.map(([text, held]) =>
-      text === "En Bronce el mejor premio es el primero" ? [text, false] : [text, held]
-    );
-    entry(p, 1).alts = [option(4, 1, "TINY")];
 
-    expect(swapReward(p, ANSWERS, 1, 0)).toMatchObject({ ok: true });
+    entry(p, 9).alts = [option(5, 1, "TINY")];
+    entry(p, 1).alts = [option(4, 1, "TINY2")];
+
+    for (const n of [9, 1]) {
+      const r = swapReward(p, ANSWERS, n, 0);
+
+      expect(r.ok).toBe(true);
+      expect(r).not.toHaveProperty("reason");
+    }
   });
 });
 

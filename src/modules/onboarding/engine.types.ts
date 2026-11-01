@@ -228,6 +228,12 @@ export interface TierGift {
 }
 
 /** Everything the engine produces. Persist it whole, with the catalogue and answers. */
+/** One generated line's display override. An absent field means "as generated". */
+export interface BenefitOverride {
+  text?: string;
+  hidden?: boolean;
+}
+
 export interface Program {
   engineVersion: string;
   configVersion: string;
@@ -240,10 +246,16 @@ export interface Program {
   gifts: Record<TierCode, TierGift>;
   /**
    * Benefits the centre wrote itself, per tier (founders' E2E item 27). Shown after the ones the
-   * engine derives from its rules; they are text only and change nothing at runtime, which is
-   * why the rule-backed ones (multiplier, discount, events) are not editable.
+   * engine derives from its rules; they are text only and change nothing at runtime.
    */
   customBenefits?: Partial<Record<TierCode, string[]>>;
+  /**
+   * What the centre changed in the lines the engine GENERATES for a tier: new words, or hidden,
+   * by the line's stable key (see `benefit-lines.ts`). Display only, like `customBenefits`: the
+   * multiplier, the discount and every other rule keep running as generated, only the sentence a
+   * client reads changes. Absent until the centre edits one; the engine never writes it.
+   */
+  benefitOverrides?: Partial<Record<TierCode, Record<string, BenefitOverride>>>;
   perks: { kinds: string[]; pool: Candidate[]; dias: ClassifiedItem[] };
   refLad: ReferralStep[];
   /** Progress granted to a referred client when they join. */
@@ -259,6 +271,13 @@ export interface Program {
   diamondReal: number;
   /** Progress euros actually required at each milestone, after tier multipliers. */
   realTh: Record<number, number>;
+  /**
+   * The programme exactly as the engine generated it, before any edit (see `createDraft`). Written
+   * once when a draft is created, copied verbatim by a clone, and never modified: it is what the
+   * five-year comparison measures an edited plan against. The engine itself never sets it, and no
+   * presentation or response carries it. Absent on drafts made before it existed.
+   */
+  recommended?: Omit<Program, "recommended">;
 }
 
 /** Returned instead of a Program when the catalogue cannot support one. */

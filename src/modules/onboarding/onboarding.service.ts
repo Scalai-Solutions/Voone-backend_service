@@ -8,8 +8,14 @@ import {
 
 import { AppError } from "../../common/errors/app-error";
 import { refreshClinicCards } from "../wallet-refresh/clinic-card-refresh";
+import {
+  NO_VISIBLE_LINE,
+  applyBenefitOverrides,
+  visibleLineCount,
+  type BenefitOverrideEntry
+} from "./benefit-lines";
 import { toEngineCatalog, type CatalogRepository } from "./catalog.repository";
-import { run } from "./engine";
+import { blockingReview, run } from "./engine";
 import {
   ANSWER_LIMITS,
   CONFIG_VERSION,
@@ -164,7 +170,10 @@ export class OnboardingService {
           engineVersion: ENGINE_VERSION,
           configVersion: CONFIG_VERSION,
           answers: answers as unknown as object,
-          output: program as unknown as object,
+          // The engine's untouched output rides inside the stored output as the baseline of the
+          // five-year comparison. Replaying the snapshot later cannot stand in for it: the engine
+          // has changed without a version bump, so a replay would show a difference nobody made.
+          output: { ...program, recommended: structuredClone(program) } as unknown as object,
           catalogSnapshot: engineCatalog as unknown as object
         }
       });
@@ -215,10 +224,11 @@ export class OnboardingService {
   /**
    * Makes a draft live, retiring whatever was live before.
    *
-   * Refuses while the programme carries review notes. Those are raised only for things a
-   * centre must actually resolve — unclassified rows, answers that contradict the
-   * catalogue, a cost overrun — and publishing past them would put a programme in front
-   * of members that Voone has already judged wrong.
+   * Refuses while the programme carries blocking review notes. Those are raised only for things a
+   * centre must actually resolve — unclassified rows, answers that contradict the catalogue — and
+   * publishing past them would put a programme in front of members that Voone has already judged
+   * wrong. A cost overrun is told to the admin but does not block: she chose it with the number
+   * in front of her.
    *
    * The previous version is marked SUSTITUIDO, never deleted: members progressed against
    * its thresholds and the record of what they were promised has to survive.
@@ -241,7 +251,8 @@ export class OnboardingService {
       }
 
       const output = draft.output as unknown as Program;
-      const review = Array.isArray(output?.review) ? output.review : [];
+      // The cost note is information, not a defect: it never blocks (see `INFORMATIONAL_NOTES`).
+      const review = blockingReview(Array.isArray(output?.review) ? output.review : []);
 
       if (review.length) {
         throw new OnboardingError(
@@ -336,9 +347,55 @@ export class OnboardingService {
       customBenefits: { ...(output.customBenefits ?? {}), [tier]: benefits }
     };
 
+    // Removing the last line the centre wrote while every generated one is hidden would leave the
+    // tier with nothing to show: see NO_VISIBLE_LINE.
+    if (visibleLineCount(tier, next) === 0) throw new OnboardingError(NO_VISIBLE_LINE, 422);
+
     const updated = await this.prisma.onboardingProgram.updateMany({
       where: { id: row.id, updatedAt: row.updatedAt },
       data: { output: next as unknown as object }
+    });
+
+    if (updated.count === 0) {
+      throw new OnboardingError(
+        "El borrador ha cambiado mientras lo editabas. Recarga la página y vuelve a intentarlo.",
+        409
+      );
+    }
+
+    return this.getProgram(clinicId, programId);
+  }
+
+  /**
+   * Changes the words of, or hides, the lines the engine generates for one tier. Drafts only.
+   *
+   * Display only: the override is stored next to the programme (`benefitOverrides`) and read only
+   * when the programme is presented, so the multiplier, the discount and every other rule behave
+   * exactly as generated. Same rules as the other draft edits: BORRADOR only (409), optimistic on
+   * updatedAt, and a key the tier does not have is 422 with nothing stored.
+   */
+  async setBenefitOverrides(
+    clinicId: string,
+    programId: string,
+    tier: TierCode,
+    entries: BenefitOverrideEntry[]
+  ): Promise<OnboardingProgram> {
+    const row = await this.getProgram(clinicId, programId);
+
+    if (row.status !== OnboardingProgramStatus.BORRADOR) {
+      throw new OnboardingError(
+        "Solo se pueden editar los beneficios de un borrador. Genera un borrador nuevo para editar un programa activo.",
+        409
+      );
+    }
+
+    const result = applyBenefitOverrides(row.output as unknown as Program, tier, entries);
+
+    if (!result.ok) throw new OnboardingError(result.reason, 422);
+
+    const updated = await this.prisma.onboardingProgram.updateMany({
+      where: { id: row.id, updatedAt: row.updatedAt },
+      data: { output: result.program as unknown as object }
     });
 
     if (updated.count === 0) {

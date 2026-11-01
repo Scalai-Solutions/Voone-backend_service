@@ -14,7 +14,8 @@ import {
   toEngineCatalog,
   type CatalogRepository
 } from "../../modules/onboarding/catalog.repository";
-import { classify } from "../../modules/onboarding/engine";
+import { compareFiveYears } from "../../modules/onboarding/comparison";
+import { classify, isGiftable } from "../../modules/onboarding/engine";
 import { TIERS } from "../../modules/onboarding/engine.config";
 import type { CategoryCode, Program, TierCode } from "../../modules/onboarding/engine.types";
 import {
@@ -26,6 +27,7 @@ import {
   calculatorSchema,
   swapSchema,
   textsSchema,
+  benefitOverridesSchema,
   tierBenefitsSchema,
   visitSchema
 } from "../../modules/onboarding/onboarding.schema";
@@ -130,7 +132,7 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
       publishedAt: row.publishedAt,
       // What the centre answered, so the screens can pre-fill when it comes back to a draft.
       answers: row.answers,
-      program: presentProgram(output),
+      program: presentProgram(output, { forAdmin: true }),
       internal: {
         costPct: output.costPct,
         guarantees: output.guarantees.map(([text, held]) => ({ text, held }))
@@ -143,7 +145,8 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
   /**
    * The catalogue as the review screen needs it: each row with the category the engine
    * would give it and where that came from, so the centre can see why a row is filed where
-   * it is and correct the ones it cannot classify.
+   * it is and correct the ones it cannot classify. `giftable` says whether the admin may give the row
+   * as a reward by hand, so the swap dropdown can filter without repeating the rule.
    */
   const catalogView = async (clinicId: string) => {
     const rows = await deps.catalog.listForClinic(clinicId);
@@ -164,7 +167,10 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
         position: row.position,
         category: c?.cat ?? null,
         classifiedBy: c?.src ?? null,
-        needsReview: Boolean(c?.review)
+        needsReview: Boolean(c?.review),
+        // Whether the admin may hand-pick this row as a reward: the same function the item
+        // swap uses, so the dropdown never offers what the swap would refuse.
+        giftable: c ? isGiftable(c) : false
       };
     });
   };
@@ -291,7 +297,7 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
       const program = await deps.onboarding.preview(clinicId, answers);
 
       res.json({
-        program: presentProgram(program),
+        program: presentProgram(program, { forAdmin: true }),
         internal: {
           costPct: program.costPct,
           guarantees: program.guarantees.map(([text, held]) => ({ text, held }))
@@ -350,6 +356,22 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
     })
   );
 
+  /**
+   * The programme's five-year result against the engine's own recommendation for the same answers
+   * and catalogue, so the admin sees what her edits did to the money. Admin only, yearly totals
+   * only (no gift's cost or value), any programme status, no body. It reads and never writes.
+   */
+  router.post(
+    "/admin/clinics/:clinicId/onboarding/programs/:programId/comparison",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const clinicId = await clinicOr404(req.params.clinicId);
+      const row = await deps.onboarding.getProgram(clinicId, req.params.programId);
+
+      res.json(compareFiveYears(row));
+    })
+  );
+
   router.patch(
     "/admin/clinics/:clinicId/onboarding/programs/:programId/milestones/:milestone",
     requireStaff,
@@ -385,6 +407,34 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
       res.json(
         forAdmin(
           await deps.onboarding.setTierBenefits(clinicId, req.params.programId, tier, benefits)
+        )
+      );
+    })
+  );
+
+  /**
+   * Changes the words of, or hides, the lines the engine generates for a tier, on a DRAFT:
+   * `{ overrides: [{ key, text?, hidden? }] }` (see benefitOverridesSchema). The keys are the
+   * `benefitLines[].key` of the presented tier. Display only: the real multiplier, discount and
+   * gift are untouched. Answers 200 with the same body as `GET /programs/:programId`; 409 when the
+   * programme is not a draft or changed under the editor; 422 for invalid text or a key the tier
+   * does not have (nothing is stored).
+   */
+  router.put(
+    "/admin/clinics/:clinicId/onboarding/programs/:programId/tiers/:tier/benefit-overrides",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const clinicId = await clinicOr404(req.params.clinicId);
+      const { overrides } = parse(benefitOverridesSchema, req.body);
+      const tier = req.params.tier as TierCode;
+
+      if (!TIERS.includes(tier)) {
+        throw new MembershipValidationError("tier: indica un nivel válido");
+      }
+
+      res.json(
+        forAdmin(
+          await deps.onboarding.setBenefitOverrides(clinicId, req.params.programId, tier, overrides)
         )
       );
     })
