@@ -173,7 +173,17 @@ const envSchema = z.object({
   ),
 
   SENDGRID_API_KEY: z.string().min(1).optional(),
-  SENDGRID_FROM_EMAIL: z.string().email("SENDGRID_FROM_EMAIL must be a valid email").optional()
+  SENDGRID_FROM_EMAIL: z.string().email("SENDGRID_FROM_EMAIL must be a valid email").optional(),
+
+  /**
+   * Where Voone's own change-request mail goes (a new ticket, a clinic's reply, a reopen).
+   * Unset, those mails are skipped and the ticket records `lastEmailError`; clinic-bound mail
+   * is unaffected. Example: business@voone.ai.
+   */
+  VOONE_SUPPORT_EMAIL: z.preprocess(
+    blankIsUnset,
+    z.string().email("VOONE_SUPPORT_EMAIL must be a valid email").optional()
+  )
 });
 
 // Deprecated names from before the central dispatcher. A deployment that still sets them keeps

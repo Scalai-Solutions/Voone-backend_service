@@ -62,3 +62,22 @@ export const createRequireStaffKey = (secret: string | undefined): RequestHandle
     res.status(403).json({ code: "FORBIDDEN", message: "Forbidden" });
   };
 };
+
+/**
+ * Like createRequireStaffKey, but closed when it matters: with no key configured, production
+ * refuses every request (503) instead of letting everyone in. Outside production it is the
+ * permissive guard, so local development and CI need no key.
+ *
+ * For routes that trust headers the staff key vouches for (a role, a person), where an open
+ * door is not a gap that already existed but a way to act as an admin.
+ */
+export const createRequireStaffKeyInProduction = (
+  secret: string | undefined,
+  production: boolean
+): RequestHandler => {
+  if (secret || !production) return createRequireStaffKey(secret);
+
+  return (_req, res) => {
+    res.status(503).json({ code: "STAFF_KEY_NOT_CONFIGURED", message: "Service unavailable" });
+  };
+};
