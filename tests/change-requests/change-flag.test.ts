@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+import { logger } from "../../src/common/logger/logger";
 
 import { compareFiveYears } from "../../src/modules/onboarding/comparison";
 import { classify, manualCandidates, run } from "../../src/modules/onboarding/engine";
@@ -425,5 +427,25 @@ describe("whatIf never changes what it was given", () => {
 
     expect(stored).toEqual(storedBefore);
     expect(live).toEqual(liveBefore);
+  });
+});
+
+describe("whatIf never throws, and never hides a programming error", () => {
+  it("logs the error it swallows and still answers none", () => {
+    const spy = vi.spyOn(logger, "error").mockImplementation(() => undefined);
+    // A broken catalogue is a programming error, not a business refusal.
+    const result = whatIf(row(), null as unknown as ClassifiedItem[], reward(14, "L2"));
+
+    expect(result.status).toBe("none");
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(String(spy.mock.calls[0][0])).toContain("change-flag");
+    expect(spy.mock.calls[0][1]).toMatchObject({ error: expect.stringContaining("TypeError") });
+  });
+
+  it("does not log a plain refusal", () => {
+    const spy = vi.spyOn(logger, "error").mockImplementation(() => undefined);
+
+    expect(whatIf(row(), liveCatalogue(), reward(14, "NOT-A-ROW")).status).toBe("none");
+    expect(spy).not.toHaveBeenCalled();
   });
 });

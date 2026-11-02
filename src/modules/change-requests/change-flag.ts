@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 
+import { logger } from "../../common/logger/logger";
 import { compareFiveYears } from "../onboarding/comparison";
 import { isGiftable, manualCandidates, manualRefusal } from "../onboarding/engine";
 import type {
@@ -210,7 +211,12 @@ export const whatIf = (
       inputs: { clients: live.inputs.clients, ticket: live.inputs.ticket },
       reason: live.reason
     };
-  } catch {
+  } catch (error) {
+    // Still a none: a flag never blocks a ticket. But a throw here is a bug, not a refusal, so say so.
+    logger.error("[change-flag] what-if failed unexpectedly", {
+      error: error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+    });
+
     return none("The programme could not be simulated.");
   }
 };
