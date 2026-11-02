@@ -4,6 +4,10 @@ import { afterAll, beforeAll, beforeEach, expect } from "vitest";
 
 import { errorHandler } from "../../src/common/middleware/error-handler";
 import { findClinicBySlug } from "../../src/modules/clinics/clinic.service";
+import {
+  ChangeFlagService,
+  prismaChangeFlagDeps
+} from "../../src/modules/change-requests/change-flag.service";
 import { PrismaCatalogueChanges } from "../../src/modules/change-requests/catalogue-changes";
 import { PrismaProgramDrafts } from "../../src/modules/change-requests/program-drafts";
 import { PrismaCatalogRepository } from "../../src/modules/onboarding/catalog.repository";
@@ -43,12 +47,11 @@ export const useRouteHarness = (prefix: string) => {
   const slugB = `${prefix}-b`;
   const slugs = [slugA, slugB];
   const db = new PrismaClient();
+  const catalogRepository = new PrismaCatalogRepository(db);
+  const onboarding = new OnboardingService(db, catalogRepository);
   const service = new ChangeRequestService(new PrismaChangeRequestRepository(db), {
     changes: new PrismaCatalogueChanges(db),
-    programs: new PrismaProgramDrafts(
-      db,
-      new OnboardingService(db, new PrismaCatalogRepository(db))
-    )
+    programs: new PrismaProgramDrafts(db, onboarding)
   });
   const app = express();
 
@@ -57,6 +60,7 @@ export const useRouteHarness = (prefix: string) => {
     "/api/v1",
     createChangeRequestsRouter({
       service,
+      flag: new ChangeFlagService(prismaChangeFlagDeps(db, onboarding, catalogRepository)),
       findClinic: (slug) => findClinicBySlug(db, slug),
       clinicExists: async (id) => (await db.clinic.count({ where: { id } })) > 0
     })

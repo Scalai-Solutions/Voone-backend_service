@@ -37,6 +37,10 @@ import { cancelMemberBono, listForMember } from "../../modules/bonos/member-bono
 import { PrismaProgramDrafts } from "../../modules/change-requests/program-drafts";
 import { PrismaCatalogueChanges } from "../../modules/change-requests/catalogue-changes";
 import { EmailChangeRequestNotifier } from "../../modules/change-requests/email.notifier";
+import {
+  ChangeFlagService,
+  prismaChangeFlagDeps
+} from "../../modules/change-requests/change-flag.service";
 import { PrismaChangeRequestMailStore } from "../../modules/change-requests/prisma.mail-store";
 import { SendGridMailer } from "../../modules/mail/mailer";
 import { PrismaChangeRequestRepository } from "../../modules/change-requests/prisma.repository";
@@ -246,6 +250,7 @@ v1Router.use(
  */
 v1Router.use(
   createChangeRequestsRouter({
+    flag: new ChangeFlagService(prismaChangeFlagDeps(prisma, onboardingService, catalogRepository)),
     service: new ChangeRequestService(new PrismaChangeRequestRepository(prisma), {
       changes: new PrismaCatalogueChanges(prisma),
       programs: new PrismaProgramDrafts(prisma, onboardingService),

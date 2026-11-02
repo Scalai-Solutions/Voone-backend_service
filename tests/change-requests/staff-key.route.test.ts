@@ -2,6 +2,7 @@ import express from "express";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { errorHandler } from "../../src/common/middleware/error-handler";
+import type { ChangeFlagService } from "../../src/modules/change-requests/change-flag.service";
 import type { ChangeRequestService } from "../../src/modules/change-requests/service";
 import { createChangeRequestsRouter } from "../../src/routes/v1/change-requests.route";
 
@@ -18,6 +19,7 @@ const build = (options: { staffKey?: string; failClosed: boolean }) => {
     "/api/v1",
     createChangeRequestsRouter({
       service: {} as ChangeRequestService,
+      flag: {} as ChangeFlagService,
       findClinic: async () => ({ id: "c" }),
       clinicExists: async () => true,
       ...options
@@ -61,9 +63,11 @@ const ROUTES: Array<[string, string]> = [
   ["GET", "/clinics/aurea/change-requests/x"],
   ["POST", "/clinics/aurea/change-requests/x/messages"],
   ["POST", "/clinics/aurea/change-requests/x/reopen"],
+  ["POST", "/clinics/aurea/change-requests/preview"],
   ["GET", "/admin/change-requests"],
   ["GET", "/admin/clinics/c/change-requests"],
   ["GET", "/admin/change-requests/x"],
+  ["GET", "/admin/change-requests/x/comparison"],
   ["PATCH", "/admin/change-requests/x/status"],
   ["POST", "/admin/change-requests/x/apply"],
   ["POST", "/admin/change-requests/x/draft"],

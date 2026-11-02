@@ -672,7 +672,8 @@ describe("a centre's own staff", () => {
       name: expect.any(String),
       priceEuro: 75,
       category: "APF",
-      isProduct: false
+      isProduct: false,
+      giftable: true
     });
     expect(JSON.stringify(r.body)).not.toMatch(/cost/i);
   });
