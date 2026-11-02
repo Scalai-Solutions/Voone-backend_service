@@ -246,6 +246,67 @@ export const createChangeRequestSchema = strict({
   return { type: value.type, title: value.title, reason: value.reason, targetRef, proposed };
 });
 
+const PREVIEW_TYPES = ["REWARD", "SERVICE_EDIT"] as const;
+
+/**
+ * The owner's what-if preview: the two ticket types that can be simulated, with the very same
+ * `targetRef` / `proposed` shapes as a ticket (so a body that would be refused as a ticket is
+ * refused here too). No title or reason, and the clinic is never in the body.
+ */
+export const previewFlagSchema = strict({
+  type: z.enum(PREVIEW_TYPES, {
+    error: "Solo se puede simular un premio o el precio de un servicio."
+  }),
+  targetRef: z.unknown().optional(),
+  proposed: z.unknown().optional()
+}).transform((value, ctx) => {
+  const rule = RULES[value.type];
+  const fail = (message: string, path: Array<string | number>) => {
+    ctx.addIssue({ code: "custom", message, path });
+  };
+  const readPart = (
+    name: "targetRef" | "proposed",
+    schema: z.ZodType<Record<string, unknown>> | undefined,
+    raw: unknown
+  ): Record<string, unknown> | undefined => {
+    if (raw === undefined || raw === null || !schema) return undefined;
+
+    const parsed = schema.safeParse(raw);
+
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues)
+        fail(issue.message, [name, ...issue.path.map(String)]);
+
+      return undefined;
+    }
+
+    return isEmpty(parsed.data) ? undefined : parsed.data;
+  };
+
+  const targetRef = readPart("targetRef", rule.target, value.targetRef);
+  const proposed = readPart("proposed", rule.proposed, value.proposed);
+
+  if (rule.proposedRequired && value.proposed == null) {
+    fail("Indica los datos del cambio que propones.", ["proposed"]);
+  }
+
+  if (rule.targetRequired?.(proposed) && targetRef === undefined) {
+    fail("Indica sobre qué elemento quieres el cambio.", ["targetRef"]);
+  }
+
+  if (targetRef && proposed) {
+    for (const key of Object.keys(targetRef)) {
+      if (key in proposed && proposed[key] !== targetRef[key]) {
+        fail("Los datos propuestos no coinciden con el elemento indicado.", ["proposed", key]);
+      }
+    }
+  }
+
+  return { type: value.type, targetRef, proposed };
+});
+
+export type PreviewFlagBody = z.output<typeof previewFlagSchema>;
+
 const MESSAGE_ERROR = `Escribe un mensaje de hasta ${TEXT_MAX} caracteres.`;
 const MESSAGE_ERROR_EN = `Write a message of up to ${TEXT_MAX} characters.`;
 

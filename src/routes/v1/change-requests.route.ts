@@ -4,6 +4,7 @@ import type { ZodType } from "zod";
 import { ChangeRequestValidationError } from "../../common/errors/change-request.errors";
 import { ClinicNotFoundError } from "../../common/errors/membership.errors";
 import { asyncHandler } from "../../common/middleware/async-handler";
+import { createFixedWindowLimiter } from "../../common/middleware/rate-limit";
 import { createRequireStaffKeyInProduction } from "../../common/middleware/staff-key";
 import { config } from "../../config/env";
 import {
@@ -19,15 +20,19 @@ import {
   createChangeRequestSchema,
   messageSchema,
   ownerListQuerySchema,
+  previewFlagSchema,
   reopenSchema,
   resolveLinkedSchema,
   strictEmptySchema,
   statusUpdateSchema
 } from "../../modules/change-requests/schema";
+import type { ChangeFlagService } from "../../modules/change-requests/change-flag.service";
 import type { ChangeRequestService } from "../../modules/change-requests/service";
 
 export interface ChangeRequestsRouterDeps {
   service: ChangeRequestService;
+  /** The what-if flag: the owner's blurred preview and the admin's exact comparison. */
+  flag: ChangeFlagService;
   /** Resolves a clinic slug to its id, or throws the 404 the rest of the API uses. */
   findClinic: (slug: string) => Promise<{ id: string }>;
   clinicExists: (clinicId: string) => Promise<boolean>;
@@ -71,9 +76,39 @@ export const createChangeRequestsRouter = (deps: ChangeRequestsRouterDeps): Rout
     "staffKey" in deps ? deps.staffKey : config.STAFF_API_KEY,
     deps.failClosed ?? process.env.NODE_ENV === "production"
   );
-  const { service } = deps;
+  const { service, flag } = deps;
+
+  /**
+   * The preview runs a five-year simulation per call, so it is capped per clinic: 30 a minute,
+   * keyed by the path slug (the staff key is on every call, so there is no staff skip). In memory,
+   * per replica: with N replicas the real cap is N times this, and a deploy resets it.
+   */
+  const previewLimiter = createFixedWindowLimiter({
+    limit: 30,
+    windowMs: 60_000,
+    key: (req) => `flag:${req.params.slug}`
+  });
 
   /* ---- the clinic's side ---- */
+
+  // The owner's what-if for a ticket they have not sent yet. Nothing is stored.
+  router.post(
+    "/clinics/:slug/change-requests/preview",
+    requireStaff,
+    // The role first, so a refused caller never spends the clinic's allowance.
+    (req, _res, next) => {
+      requireClinicReader(req);
+      next();
+    },
+    previewLimiter,
+    asyncHandler(async (req, res) => {
+      // The clinic is the path's, never the body's (the schema refuses a body that names one).
+      const clinic = await deps.findClinic(req.params.slug);
+      const body = parse(previewFlagSchema, req.body);
+
+      res.json(await flag.preview(clinic.id, body));
+    })
+  );
 
   router.post(
     "/clinics/:slug/change-requests",
@@ -170,6 +205,19 @@ export const createChangeRequestsRouter = (deps: ChangeRequestsRouterDeps): Rout
       requireAdminReader(req);
 
       res.json(await service.adminGet(req.params.id));
+    })
+  );
+
+  // Exact figures for the admin screen only: the clinic's browser never reaches this route.
+  router.get(
+    "/admin/change-requests/:id/comparison",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      requireAdminReader(req);
+
+      const { clinicId, ...ticket } = await service.adminFlagSubject(req.params.id);
+
+      res.json(await flag.forTicket(clinicId, ticket));
     })
   );
 

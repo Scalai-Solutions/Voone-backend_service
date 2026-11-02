@@ -641,6 +641,15 @@ export class ChangeRequestService {
     return this.withImpact(await this.requireAny(id));
   }
 
+  /** What the admin comparison needs of a ticket: which clinic, and what it asks for. 404 when missing. */
+  async adminFlagSubject(
+    id: string
+  ): Promise<{ clinicId: string; type: string; targetRef: unknown; proposed: unknown }> {
+    const { clinicId, type, targetRef, proposed } = await this.requireAny(id);
+
+    return { clinicId, type, targetRef, proposed };
+  }
+
   async adminSetStatus(
     id: string,
     actor: AdminActor,
