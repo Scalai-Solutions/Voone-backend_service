@@ -87,14 +87,17 @@ const markOf = (delta: number, pct: number | null): Mark => {
 const ownerCell = (year: number, baseline: number, proposed: number): OwnerCell => {
   const delta = proposed - baseline;
   const pct = pctOf(delta, baseline);
-  const mark = markOf(delta, pct);
+  const euros = roundHalfAway(delta / 100) * 100;
+  // A cell whose rounded euros come to 0 reads as "same": the owner is never shown an
+  // up/down mark with nothing to say about it.
+  const mark = euros === 0 ? "same" : markOf(delta, pct);
   if (mark === "same") {
     return { year, mark, euros: null, percent: null, over20: false };
   }
   return {
     year,
     mark,
-    euros: roundHalfAway(delta / 100) * 100,
+    euros,
     percent: pct === null ? null : roundHalfAway((pct * 100) / 5) * 5,
     over20: pct !== null && Math.abs(pct) > OVER_PCT
   };

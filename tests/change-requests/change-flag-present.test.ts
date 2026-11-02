@@ -99,11 +99,76 @@ describe("presentOwnerFlag rounding rules", () => {
   it("never emits negative zero", () => {
     const flag = presentOwnerFlag(years(10_000, 10_000));
     expect(Object.is(flag.vsCurrent[0]!.euros, -0)).toBe(false);
-    // up by the percent rule but rounds to 0 euros / 0 percent
-    const tiny = firstCell(1_000, 1_020);
-    expect(tiny.mark).toBe("up");
-    expect(Object.is(tiny.euros, -0)).toBe(false);
-    expect(Object.is(tiny.percent, -0)).toBe(false);
+    expect(Object.is(firstCell(1_000, 1_020).euros, -0)).toBe(false);
+    expect(Object.is(firstCell(1_000, 980).euros, -0)).toBe(false);
+  });
+});
+
+describe("presentOwnerFlag rounded-zero cells read as same", () => {
+  const same = { year: 1, mark: "same", euros: null, percent: null, over20: false };
+
+  it("(1) +2% on 1000 (delta 20) rounds to 0 euros, so it is same", () => {
+    expect(firstCell(1_000, 1_020)).toEqual(same);
+    expect(firstCell(1_000, 980)).toEqual(same);
+  });
+
+  it("(2) delta 49 on 10000 (+0.49%) is same", () => {
+    expect(firstCell(10_000, 10_049)).toEqual(same);
+  });
+
+  it("(3) delta exactly 50 rounds up to 100 and stays up, delta -50 stays down", () => {
+    expect(firstCell(1_000, 1_050)).toEqual({
+      year: 1,
+      mark: "up",
+      euros: 100,
+      percent: 5,
+      over20: false
+    });
+    expect(firstCell(1_000, 950)).toEqual({
+      year: 1,
+      mark: "down",
+      euros: -100,
+      percent: -5,
+      over20: false
+    });
+  });
+
+  it("(3b) the rule also applies against the recommended plan", () => {
+    const flag = presentOwnerFlag(years(10_000, 11_200, 1_180));
+    expect(flag.vsRecommended![0]!.mark).toBe("up");
+    const near = presentOwnerFlag(years(10_000, 11_200, 11_180));
+    expect(near.vsRecommended![0]).toEqual(same);
+  });
+
+  it("(4) year 5 with delta 49 is similar with no headline euros; earlier years stay up", () => {
+    const input: WhatIfYear[] = [
+      { year: 1, liveCumulative: 1_000, proposedCumulative: 2_000, recommendedCumulative: null },
+      { year: 2, liveCumulative: 1_000, proposedCumulative: 2_000, recommendedCumulative: null },
+      { year: 3, liveCumulative: 1_000, proposedCumulative: 2_000, recommendedCumulative: null },
+      { year: 4, liveCumulative: 1_000, proposedCumulative: 2_000, recommendedCumulative: null },
+      { year: 5, liveCumulative: 1_000, proposedCumulative: 1_049, recommendedCumulative: null }
+    ];
+    const flag = presentOwnerFlag(input);
+    expect(flag.signal).toBe("similar");
+    expect(flag.fiveYearEuros).toBeNull();
+    expect(flag.vsCurrent.slice(0, 4).every((c) => c.mark === "up")).toBe(true);
+    expect(flag.vsCurrent[4]!.mark).toBe("same");
+  });
+
+  it("an owner cell is never up/down with euros 0, and fiveYearEuros is never 0", () => {
+    for (let delta = -300; delta <= 300; delta += 7) {
+      for (const base of [300, 499, 500, 1_000, 2_499, 10_000, -1_000]) {
+        const flag = presentOwnerFlag(years(base, base + delta, base + delta / 2));
+        for (const c of [...flag.vsCurrent, ...flag.vsRecommended!]) {
+          if (c.mark === "same") {
+            expect(c).toMatchObject({ euros: null, percent: null, over20: false });
+          } else {
+            expect(c.euros).not.toBe(0);
+          }
+        }
+        expect(flag.fiveYearEuros).not.toBe(0);
+      }
+    }
   });
 });
 
@@ -268,6 +333,13 @@ describe("presentAdminFlag", () => {
     expect(flag.years[0]!.vsLive).toEqual({ year: 1, euros: -125, percent: -1.2 });
     expect(Object.is(flag.years[0]!.vsLive.euros, -0)).toBe(false);
     expect(flag.reason).toBeNull();
+  });
+
+  it("(5) stays exact where the owner flag reads same (delta 49 keeps euros 49)", () => {
+    const flag = presentAdminFlag(years(1_000, 1_049), { clients: 1, ticket: 1 }, null);
+    expect(flag.years[0]!.vsLive).toEqual({ year: 1, euros: 49, percent: 4.9 });
+    const tiny = presentAdminFlag(years(1_000, 1_020), { clients: 1, ticket: 1 }, null);
+    expect(tiny.years[0]!.vsLive).toEqual({ year: 1, euros: 20, percent: 2 });
   });
 
   it("recommended and vsRecommended are null per year when the plan is missing", () => {
