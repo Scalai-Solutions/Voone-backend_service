@@ -96,7 +96,7 @@ export const swapRewardToItem = (
   );
 };
 
-const replaceReward = (
+export const replaceReward = (
   program: Program,
   answers: Answers,
   at: number,

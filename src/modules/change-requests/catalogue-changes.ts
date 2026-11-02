@@ -338,7 +338,7 @@ export class PrismaCatalogueChanges implements CatalogueChanges {
 }
 
 /** Live rewards whose items include the treatment (by the catalogue row's externalId). */
-const rewardsUsing = (output: Prisma.JsonValue, externalId: string): string[] => {
+export const rewardsUsing = (output: Prisma.JsonValue, externalId: string): string[] => {
   const program = fieldsOf(output);
   const uses = (option: unknown): boolean => {
     const items = fieldsOf(option).items;
