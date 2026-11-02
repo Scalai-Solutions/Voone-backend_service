@@ -757,8 +757,27 @@ adminClinicsRouter.patch(
       return;
     }
 
-    const voonePlan = typeof req.body?.voonePlan === "string" ? req.body.voonePlan : undefined;
-    const isActive = typeof req.body?.isActive === "boolean" ? req.body.isActive : undefined;
+    // This route serves two callers: the centre's own self-service save (Settings › Información
+    // del centro) and the Voone admin portal. The plan (and the notification quota it sets) and
+    // the active flag are the admin's alone, so they only take effect when the admin portal's
+    // proxy marks the request with `x-actor-role: voone_admin`; centre-info and billing fields
+    // work either way. The header is not authentication: like the staff key it travels with, it
+    // is only as trustworthy as the Next.js server that sets it, and the owner's proxy handler
+    // never sends it. It exists so a missing whitelist on that side cannot be turned into a plan
+    // or quota change (defence in depth). Fields sent without it are ignored and reported back
+    // in `ignoredFields` rather than rejected, so a client bug is visible but never loses the
+    // centre-info save that came with it.
+    const isVooneAdmin = req.header("x-actor-role") === "voone_admin";
+    const requestedPlan = typeof req.body?.voonePlan === "string" ? req.body.voonePlan : undefined;
+    const requestedActive = typeof req.body?.isActive === "boolean" ? req.body.isActive : undefined;
+    const voonePlan = isVooneAdmin ? requestedPlan : undefined;
+    const isActive = isVooneAdmin ? requestedActive : undefined;
+    const ignoredFields = isVooneAdmin
+      ? []
+      : [
+          ...(req.body?.voonePlan !== undefined ? ["voonePlan"] : []),
+          ...(req.body?.isActive !== undefined ? ["isActive"] : [])
+        ];
 
     // The centre's own details and billing information, from Settings › Información del centro.
     // Unknown keys (voonePlan, isActive) are stripped by the schema and handled above.
@@ -805,7 +824,10 @@ adminClinicsRouter.patch(
 
     const updated = await getAdminClinicSafe(clinic.id);
 
-    res.json(updated ? toAdminClinicSummary(updated) : { status: "ok" });
+    res.json({
+      ...(updated ? toAdminClinicSummary(updated) : { status: "ok" }),
+      ...(ignoredFields.length > 0 ? { ignoredFields } : {})
+    });
   })
 );
 

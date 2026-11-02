@@ -1,7 +1,7 @@
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 import { BORROWED_DEFAULT_IMAGE_URLS } from "../../src/modules/templates/own-logo";
-import { call, createClinicWithLogo, db, removeClinic } from "./admin-clinics.harness";
+import { ADMIN_ACTOR, call, createClinicWithLogo, db, removeClinic } from "./admin-clinics.harness";
 
 const DEFAULT_LOGO = vi.hoisted(() => "https://cdn.voone.example/voone-logo.png");
 const MESSAGE = "Añade el logo propio del centro antes de activarlo.";
@@ -129,7 +129,8 @@ describe("activation also refuses borrowed hero and dark-logo images", () => {
 });
 
 describe("PATCH /admin/clinics/:clinicId with isActive:true goes through the same gate", () => {
-  const patch = (id: string, body: unknown) => call("PATCH", `/admin/clinics/${id}`, body);
+  const patch = (id: string, body: unknown) =>
+    call("PATCH", `/admin/clinics/${id}`, body, ADMIN_ACTOR);
   const isActive = async (id: string) =>
     (await db.clinic.findUniqueOrThrow({ where: { id } })).isActive;
 
