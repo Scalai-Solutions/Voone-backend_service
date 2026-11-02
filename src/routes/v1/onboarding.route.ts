@@ -491,8 +491,9 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
   /* ----------------------------------------------------------------- a centre's own staff */
 
   /**
-   * The centre's own catalogue for the visit form: name, price and category only. The review
-   * view carries a per-item cost override, which a centre's staff must never see.
+   * The centre's own catalogue for the visit form and the reward picker: name, price, category
+   * and whether the row may be a reward. The review view carries a per-item cost override,
+   * which a centre's staff must never see.
    */
   router.get(
     "/clinics/:slug/catalog",
@@ -506,7 +507,8 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
           name: item.name,
           priceEuro: item.priceEuro,
           category: item.category,
-          isProduct: item.isProduct
+          isProduct: item.isProduct,
+          giftable: item.giftable
         }))
       });
     })
