@@ -185,7 +185,31 @@ answer for the same inputs and asserts none of its numbers is in the owner's JSO
 
 **Rate limit**: 30 previews per minute per clinic slug (429 `RATE_LIMITED`, Spanish, with `Retry-After`), applied
 without the staff skip because the staff key is on every call. It is an in-memory fixed window, per replica: with N
-replicas the real cap is N times that, and a deploy resets it (same caveat as `rate-limit.ts`).
+replicas the real cap is N times that, and a deploy resets it (same caveat as `rate-limit.ts`). A second cap of
+200 previews per 24 hours is keyed on the resolved clinic id (the slug and the uuid share one bucket), checked after
+the role and the clinic lookup, with the same 429 body.
+
+**Residual risk**: the owner's cells are linear in a SERVICE_EDIT price, so a determined owner could in principle
+reconstruct approximate gift costs by probing many prices. Mitigations: the rounding above, the simulated price
+being quantized to the nearest 5 EUR (min 5) for the owner only (Voone's comparison keeps the exact price), and the
+daily cap. Accepted as a known limit.
+
+**Known limits of the model** (documented, accepted):
+
+- A SERVICE_EDIT reprices only `chosen[]` and `rec`, not `refLad[0]` (the referral gift) or
+  `gifts[tier].birthday`. An item that is also the referral or birthday gift is therefore understated, and an
+  item that is ONLY a referral or birthday gift reads `none`.
+- A SERVICE_EDIT whose `proposed` also carries `categoryId` or `name` is `none` (admin reason "Category and name
+  changes are not modelled."; the owner gets a plain `none`).
+- SERVICE_EDIT is measured against the live plan at the item's price today: the stored plan was costed at
+  generation, so the baseline is re-priced at the current catalogue price and a no-op edit reads as exactly
+  nothing, even after the catalogue drifted. The REWARD path has a milder version of the same drift: choosing the
+  item a milestone already holds, after that item was repriced, is compared with the stored (older) cost.
+- A programme with no stored `recommended` is compared with a plan rebuilt by today's engine (`reason` is set).
+  The admin sees both rows and the reason; the owner only the live row (`vsRecommended: null`), because that plan
+  was never offered to them.
+- The admin's `reason` is always English: the swap's Spanish refusals are mapped to English at the what-if
+  boundary (unknown ones become "This swap is not allowed for this programme.").
 
 **Admin**: `GET /admin/change-requests/:id/comparison` (role `voone_admin`, 404 for a missing ticket, English) answers
 the exact figures: `{status: "ok", inputs: {clients, ticket}, years: [{year, live, proposed, recommended|null,

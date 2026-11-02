@@ -61,6 +61,16 @@ const text = (value: unknown): string | undefined =>
 const number = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
+const QUANTIZE_OWNER_PRICE = true;
+
+/**
+ * The owner's preview simulates the typed price rounded to the nearest 5 euros (never below 5).
+ * Each blurred cell is linear in the price, so with 1-cent steps an owner could bisect for the
+ * exact rounding edges and recover the gift's cost; on a 5-euro grid the same probing learns far
+ * less. Voone's comparison keeps the exact ticket price.
+ */
+const quantizedPrice = (priceEuro: number): number => Math.max(5, Math.round(priceEuro / 5) * 5);
+
 const none = (reason: string): WhatIf => ({ status: "none", reason });
 
 export class ChangeFlagService {
@@ -69,12 +79,19 @@ export class ChangeFlagService {
   /** The owner's flag for a ticket they are about to send. Never throws: any error is `none`. */
   async preview(clinicId: string, body: PreviewFlagBody): Promise<OwnerFlag> {
     try {
-      const result = await this.evaluate(clinicId, body);
+      const result = await this.evaluate(clinicId, body, undefined, QUANTIZE_OWNER_PRICE);
 
       if (result.status === "unpriced") return { status: "unpriced" };
       if (result.status === "none" || result.years.length !== YEARS) return { status: "none" };
 
-      return presentOwnerFlag(result.years);
+      // A recommendation rebuilt by today's engine (`reason`) is a plan Voone never made for this
+      // clinic, so the owner is not compared with it: only the live row.
+      const years =
+        result.reason === null
+          ? result.years
+          : result.years.map((year) => ({ ...year, recommendedCumulative: null }));
+
+      return presentOwnerFlag(years);
     } catch (error) {
       this.report("preview", error);
 
@@ -114,7 +131,8 @@ export class ChangeFlagService {
   private async evaluate(
     clinicId: string,
     subject: FlagSubject,
-    known?: ClassifiedItem[]
+    known?: ClassifiedItem[],
+    quantizePrice = false
   ): Promise<WhatIf> {
     if (subject.type !== "REWARD" && subject.type !== "SERVICE_EDIT") {
       return none("This type of request has no comparison.");
@@ -124,7 +142,7 @@ export class ChangeFlagService {
 
     if (!row) return none("The clinic has no active programme.");
 
-    const request = await this.requestOf(clinicId, subject);
+    const request = await this.requestOf(clinicId, subject, quantizePrice);
 
     if ("reason" in request) return none(request.reason);
 
@@ -134,7 +152,8 @@ export class ChangeFlagService {
   /** The ticket as a what-if request, resolving a treatment id inside THIS clinic only. */
   private async requestOf(
     clinicId: string,
-    subject: FlagSubject
+    subject: FlagSubject,
+    quantizePrice: boolean
   ): Promise<WhatIfRequest | { reason: string }> {
     const target = record(subject.targetRef);
     const proposed = record(subject.proposed);
@@ -152,12 +171,22 @@ export class ChangeFlagService {
 
     if (priceEuro === undefined) return { reason: "The edit does not change the price." };
 
+    // The simulation prices only the price; a rename or a new category would change how the item
+    // is costed too, and that is not modelled, so say nothing rather than something wrong.
+    if (proposed.categoryId !== undefined || proposed.name !== undefined) {
+      return { reason: "Category and name changes are not modelled." };
+    }
+
     const treatmentId = text(target.treatmentId) ?? text(proposed.treatmentId);
     const externalId = treatmentId ? await this.deps.externalIdOf(clinicId, treatmentId) : null;
 
     if (!externalId) return { reason: "That service is not in the clinic's catalogue." };
 
-    return { type: "SERVICE_EDIT", externalId, priceEuro };
+    return {
+      type: "SERVICE_EDIT",
+      externalId,
+      priceEuro: quantizePrice ? quantizedPrice(priceEuro) : priceEuro
+    };
   }
 
   private report(where: string, error: unknown): void {

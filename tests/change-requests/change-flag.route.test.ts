@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterAll } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PrismaCatalogRepository } from "../../src/modules/onboarding/catalog.repository";
 import { CONFIG_VERSION, ENGINE_VERSION } from "../../src/modules/onboarding/engine.config";
@@ -17,6 +17,7 @@ const h = useRouteHarness("test-cr-flagroute");
 const { db, call, make } = h;
 
 const SLUG_C = "test-cr-flagroute-c";
+const SLUG_D = "test-cr-flagroute-d";
 const ANSWERS: Answers = {
   ticket: null,
   freq: null,
@@ -44,7 +45,11 @@ const program = (): Program => {
   return result;
 };
 
-const publish = (clinicId: string, status: "ACTIVO" | "BORRADOR" = "ACTIVO") => {
+const publish = (
+  clinicId: string,
+  status: "ACTIVO" | "BORRADOR" = "ACTIVO",
+  withRecommended = true
+) => {
   const output = program();
 
   return db.onboardingProgram.create({
@@ -56,7 +61,9 @@ const publish = (clinicId: string, status: "ACTIVO" | "BORRADOR" = "ACTIVO") => 
       configVersion: CONFIG_VERSION,
       answers: ANSWERS as object,
       catalogSnapshot: catalog as object,
-      output: { ...output, recommended: structuredClone(output) } as object
+      output: (withRecommended
+        ? { ...output, recommended: structuredClone(output) }
+        : output) as object
     }
   });
 };
@@ -106,29 +113,32 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await wipeCatalogues();
-  await db.clinic.deleteMany({ where: { slug: SLUG_C } });
+  await db.clinic.deleteMany({ where: { slug: { in: [SLUG_C, SLUG_D] } } });
 });
 
-const OWNER_FORBIDDEN_KEYS = [
-  "years",
-  "live",
-  "proposed",
-  "recommended",
-  "rewardValueEuro",
-  "reason",
-  "itemName"
-];
+/** The owner's flag, key for key, at every depth: anything else is a leak. */
+const OWNER_TOP_KEYS = ["status", "signal", "vsCurrent", "vsRecommended", "fiveYearEuros"];
+const OWNER_CELL_KEYS = ["year", "mark", "euros", "percent", "over20"];
 
-const keysDeep = (value: unknown, into = new Set<string>()): Set<string> => {
-  if (Array.isArray(value)) value.forEach((v) => keysDeep(v, into));
-  else if (value && typeof value === "object") {
-    for (const [k, v] of Object.entries(value)) {
-      into.add(k);
-      keysDeep(v, into);
-    }
+type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+const expectOwnerKeysOnly = (body: Json) => {
+  if (body.status !== "ok") {
+    expect(Object.keys(body)).toEqual(["status"]);
+
+    return;
   }
 
-  return into;
+  expect(Object.keys(body).sort()).toEqual([...OWNER_TOP_KEYS].sort());
+
+  for (const series of [body.vsCurrent, body.vsRecommended]) {
+    if (series === null) continue;
+
+    expect(series).toHaveLength(5);
+
+    for (const cell of series)
+      expect(Object.keys(cell).sort()).toEqual([...OWNER_CELL_KEYS].sort());
+  }
 };
 
 describe("POST /clinics/:slug/change-requests/preview (the owner)", () => {
@@ -142,9 +152,7 @@ describe("POST /clinics/:slug/change-requests/preview (the owner)", () => {
     expect(owner.body.vsCurrent).toHaveLength(5);
     expect(["good", "costs-more", "similar"]).toContain(owner.body.signal);
 
-    const keys = keysDeep(owner.body);
-
-    for (const forbidden of OWNER_FORBIDDEN_KEYS) expect(keys.has(forbidden)).toBe(false);
+    expectOwnerKeysOnly(owner.body);
 
     const ticket = await make(h.slugA, OWNER, ticketBody);
     const admin = await call("GET", `/admin/change-requests/${ticket.id}/comparison`, ADMIN);
@@ -221,7 +229,7 @@ describe("POST /clinics/:slug/change-requests/preview (the owner)", () => {
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("ok");
     expect(res.body.vsCurrent).toHaveLength(5);
-    expect(keysDeep(res.body).has("priceEuro")).toBe(false);
+    expectOwnerKeysOnly(res.body);
   });
 
   it("(b) text only is exactly unpriced", async () => {
@@ -311,6 +319,132 @@ describe("POST /clinics/:slug/change-requests/preview (the owner)", () => {
     const res = await preview("no-such-clinic-slug", OWNER, rewardBody({ itemId: "L2" }));
 
     expect(res.status).toBe(404);
+  });
+
+  it("an old programme with no stored recommendation: the owner gets only the live row, Voone keeps both and the reason", async () => {
+    await db.onboardingProgram.deleteMany({ where: { clinicId: h.a.id } });
+    await publish(h.a.id, "ACTIVO", false);
+
+    const body = { milestone: 14, itemId: "L2" };
+    const res = await preview(h.slugA, OWNER, rewardBody(body));
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("ok");
+    expect(res.body.vsCurrent).toHaveLength(5);
+    expect(res.body.vsRecommended).toBeNull();
+    expectOwnerKeysOnly(res.body);
+
+    const ticket = await make(h.slugA, OWNER, {
+      type: "REWARD",
+      targetRef: { milestone: 14 },
+      proposed: body
+    });
+    const admin = await call("GET", `/admin/change-requests/${ticket.id}/comparison`, ADMIN);
+
+    expect(admin.body.status).toBe("ok");
+    expect(admin.body.reason).toMatch(/rebuilt|recalculated/i);
+    expect(admin.body.years.every((y: Json) => typeof y.recommended === "number")).toBe(true);
+    expect(admin.body.years.every((y: Json) => y.vsRecommended !== null)).toBe(true);
+  });
+
+  it("a no-op price edit after the catalogue drifted from the programme reads as nothing, not good or bad", async () => {
+    // The programme was built when F3 cost 50; today the catalogue says 90.
+    await db.catalogItem.updateMany({
+      where: { clinicId: h.a.id, externalId: "F3" },
+      data: { priceCents: 9000 }
+    });
+
+    const treatmentId = await treatmentIdOf(h.a.id, "F3");
+    const edit = (priceEuro: number) => ({
+      type: "SERVICE_EDIT",
+      targetRef: { treatmentId },
+      proposed: { priceEuro }
+    });
+    const same = await preview(h.slugA, OWNER, edit(90));
+
+    expect(same.body.status).toBe("ok");
+    expect(same.body.signal).toBe("similar");
+    expect(same.body.fiveYearEuros).toBeNull();
+    expect(same.body.vsCurrent.every((c: Json) => c.mark === "same")).toBe(true);
+
+    const ticket = await make(h.slugA, OWNER, edit(90));
+    const admin = await call("GET", `/admin/change-requests/${ticket.id}/comparison`, ADMIN);
+
+    expect(admin.body.years.map((y: Json) => y.vsLive.euros)).toEqual([0, 0, 0, 0, 0]);
+
+    // A different price still moves the right way.
+    expect((await preview(h.slugA, OWNER, edit(400))).body.signal).toBe("costs-more");
+    expect((await preview(h.slugA, OWNER, edit(10))).body.signal).not.toBe("costs-more");
+  });
+
+  it("quantizes the typed price to 5 euros for the owner, so probing 1-euro steps teaches nothing", async () => {
+    const treatmentId = await treatmentIdOf(h.a.id, "F3");
+    const edit = async (priceEuro: number) =>
+      (
+        await preview(h.slugA, OWNER, {
+          type: "SERVICE_EDIT",
+          targetRef: { treatmentId },
+          proposed: { priceEuro }
+        })
+      ).body;
+    const at400 = await edit(400);
+
+    expect(at400.fiveYearEuros).toBeLessThan(0);
+    expect(await edit(402)).toEqual(at400);
+    expect(await edit(398)).toEqual(at400);
+    // The floor is 5 euros, never zero.
+    expect(await edit(1)).toEqual(await edit(5));
+    expect((await edit(1)).status).toBe("ok");
+
+    // Voone's comparison keeps the exact ticket price.
+    const exact = async (priceEuro: number) => {
+      const ticket = await make(h.slugA, OWNER, {
+        type: "SERVICE_EDIT",
+        targetRef: { treatmentId },
+        proposed: { priceEuro }
+      });
+
+      return (await call("GET", `/admin/change-requests/${ticket.id}/comparison`, ADMIN)).body;
+    };
+
+    expect((await exact(402)).years[4].proposed).not.toBe((await exact(400)).years[4].proposed);
+  });
+
+  it("a price edit combined with a name or category change is none (owner plain, Voone says why)", async () => {
+    const treatmentId = await treatmentIdOf(h.a.id, "F3");
+
+    for (const extra of [{ name: "Mirada plus" }, { categoryId: "FAC" }]) {
+      const proposed = { priceEuro: 150, ...extra };
+      const owner = await preview(h.slugA, OWNER, {
+        type: "SERVICE_EDIT",
+        targetRef: { treatmentId },
+        proposed
+      });
+      const ticket = await make(h.slugA, OWNER, {
+        type: "SERVICE_EDIT",
+        targetRef: { treatmentId },
+        proposed
+      });
+      const admin = await call("GET", `/admin/change-requests/${ticket.id}/comparison`, ADMIN);
+
+      expect(owner.body).toEqual({ status: "none" });
+      expect(admin.body).toEqual({
+        status: "none",
+        reason: "Category and name changes are not modelled."
+      });
+    }
+  });
+
+  it("the admin never gets Spanish text in a reason, even when the swap refuses", async () => {
+    const ticket = await make(h.slugA, OWNER, {
+      type: "REWARD",
+      targetRef: { milestone: 2 },
+      proposed: { milestone: 2, itemId: "L2" }
+    });
+    const admin = await call("GET", `/admin/change-requests/${ticket.id}/comparison`, ADMIN);
+
+    expect(admin.body.status).toBe("none");
+    expect(admin.body.reason).toBe("That milestone has no reward that can be changed.");
   });
 
   it("(f) the 31st call within a minute for one slug is a 429; another slug is unaffected", async () => {
@@ -440,5 +574,52 @@ describe("GET /admin/change-requests/:id/comparison (Voone)", () => {
 
     expect(missing.status).toBe(404);
     expect(missing.body.message).toBe("Request not found.");
+  });
+});
+
+describe("the owner preview's daily cap", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("is 200 a day per clinic, shared by slug and uuid, refused like the per-minute cap, reset after a day", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+
+    const clinic = await db.clinic.upsert({
+      where: { slug: SLUG_D },
+      update: {},
+      create: { slug: SLUG_D, name: "Clinica Dia", addressLine: "Calle Prueba 4", pincode: "28001" }
+    });
+    const body = rewardBody({ text: "Un masaje" });
+    let ok = 0;
+
+    // The per-minute cap (30) is stepped around by moving the clock a minute every 25 calls.
+    for (let i = 0; i < 200; i++) {
+      if (i % 25 === 0) vi.setSystemTime(Date.now() + 61_000);
+
+      const res = await preview(i % 2 === 0 ? SLUG_D : clinic.id, OWNER, body);
+
+      if (res.status === 200) ok += 1;
+    }
+
+    expect(ok).toBe(200);
+
+    vi.setSystemTime(Date.now() + 61_000);
+
+    for (const who of [SLUG_D, clinic.id]) {
+      const limited = await preview(who, OWNER, body);
+
+      expect(limited.status).toBe(429);
+      expect(limited.body).toEqual({
+        code: "RATE_LIMITED",
+        message: "Demasiados intentos. Inténtalo de nuevo en unos minutos."
+      });
+    }
+
+    // A refused role does not use the day's allowance, and another clinic has its own.
+    expect((await preview(SLUG_D, ADMIN, body)).status).toBe(403);
+    expect((await preview(h.slugA, OWNER, body)).status).toBe(200);
+
+    vi.setSystemTime(Date.now() + 24 * 3_600_000);
+
+    expect((await preview(SLUG_D, OWNER, body)).status).toBe(200);
   });
 });

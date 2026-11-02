@@ -89,6 +89,17 @@ export const createChangeRequestsRouter = (deps: ChangeRequestsRouterDeps): Rout
     key: (req) => `flag:${req.params.slug}`
   });
 
+  /**
+   * And 200 a day per clinic, keyed on the RESOLVED clinic id (so the slug and the uuid share one
+   * bucket) and placed after the role check and the clinic lookup. Same body as the per-minute
+   * limiter, same per-replica caveat.
+   */
+  const previewDailyLimiter = createFixedWindowLimiter({
+    limit: 200,
+    windowMs: 24 * 60 * 60_000,
+    key: (req) => `flag-day:${String(req.res?.locals.flagClinicId)}`
+  });
+
   /* ---- the clinic's side ---- */
 
   // The owner's what-if for a ticket they have not sent yet. Nothing is stored.
@@ -101,12 +112,16 @@ export const createChangeRequestsRouter = (deps: ChangeRequestsRouterDeps): Rout
       next();
     },
     previewLimiter,
+    // The clinic is the path's, never the body's (the schema refuses a body that names one).
+    asyncHandler(async (req, res, next) => {
+      res.locals.flagClinicId = (await deps.findClinic(req.params.slug)).id;
+      next();
+    }),
+    previewDailyLimiter,
     asyncHandler(async (req, res) => {
-      // The clinic is the path's, never the body's (the schema refuses a body that names one).
-      const clinic = await deps.findClinic(req.params.slug);
       const body = parse(previewFlagSchema, req.body);
 
-      res.json(await flag.preview(clinic.id, body));
+      res.json(await flag.preview(String(res.locals.flagClinicId), body));
     })
   );
 

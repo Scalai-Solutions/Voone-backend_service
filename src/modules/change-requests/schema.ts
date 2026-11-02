@@ -264,6 +264,8 @@ export const previewFlagSchema = strict({
   const fail = (message: string, path: Array<string | number>) => {
     ctx.addIssue({ code: "custom", message, path });
   };
+  // Keep in step with createChangeRequestSchema: the same part shapes and the same rule that a key
+  // repeated in targetRef and proposed must agree (a body refused as a ticket is refused here).
   const readPart = (
     name: "targetRef" | "proposed",
     schema: z.ZodType<Record<string, unknown>> | undefined,

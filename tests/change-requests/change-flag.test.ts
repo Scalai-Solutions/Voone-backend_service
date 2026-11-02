@@ -11,8 +11,9 @@ import type {
   Program
 } from "../../src/modules/onboarding/engine.types";
 import { isEngineError } from "../../src/modules/onboarding/engine.types";
-import { swapRewardToItem } from "../../src/modules/onboarding/swap";
+import { MANUAL_REFUSALS, swapRewardToItem } from "../../src/modules/onboarding/swap";
 import {
+  englishRefusal,
   whatIf,
   type WhatIf,
   type WhatIfRequest,
@@ -180,9 +181,48 @@ describe("whatIf REWARD when the engine refuses the swap", () => {
 
     expect(result).toEqual({
       status: "none",
-      reason: "Ese hito no tiene un premio que se pueda cambiar."
+      reason: "That milestone has no reward that can be changed."
     });
     expect(whatIf(row(), liveCatalogue(), reward(999, "L2")).status).toBe("none");
+  });
+});
+
+describe("refusals reach Voone in English", () => {
+  const SPANISH = /[áéíóúñ¿¡]|\b(Ese|Esa|Asigna|Los)\b/;
+
+  it("maps every known swap refusal, and falls back to a generic English line", () => {
+    const known = [
+      "Ese hito no tiene un premio que se pueda cambiar.",
+      "Esa alternativa no existe.",
+      "Ese artículo no está en el catálogo.",
+      ...Object.values(MANUAL_REFUSALS),
+      "Ese cambio repetiría un regalo en dos hitos seguidos (hitos 14 y 22)."
+    ];
+
+    for (const message of known) {
+      const english = englishRefusal(message);
+
+      expect(english).not.toMatch(SPANISH);
+      expect(english).not.toBe("This swap is not allowed for this programme.");
+    }
+
+    expect(
+      englishRefusal("Ese cambio repetiría un regalo en dos hitos seguidos (hitos 14 y 22).")
+    ).toBe("That change would repeat a gift in two consecutive milestones (milestones 14 and 22).");
+    expect(englishRefusal("Algo que nadie previó.")).toBe(
+      "This swap is not allowed for this programme."
+    );
+  });
+
+  it("a real repeated-gift refusal comes out in English", () => {
+    const stored = row();
+    const chosen = (stored.output as Program).chosen;
+    const itemId = chosen[0].o.items[0].id;
+    const result = whatIf(stored, liveCatalogue(), reward(chosen[1].m.n, itemId));
+
+    expect(result.status).toBe("none");
+    expect(result.status === "none" && result.reason).not.toMatch(SPANISH);
+    expect(result.status === "none" && result.reason).toMatch(/consecutive milestones/);
   });
 });
 
@@ -370,6 +410,31 @@ describe("whatIf SERVICE_EDIT", () => {
     // The dearer the combo's K3, the less the plan nets; each price moves the series.
     expect(net5(200)).toBeLessThan(net5(100));
     expect(net5(100)).toBeLessThan(net5(5));
+  });
+
+  it("is measured against the live plan at TODAY's price: typing the current price changes nothing", () => {
+    const stored = row();
+    // The programme was built when F3 cost 50; the catalogue now says 90.
+    const drifted = liveCatalogue().map((item) =>
+      item.id === "F3" ? { ...item, price: 90 } : item
+    );
+    const edit = (priceEuro: number) =>
+      okOf(whatIf(stored, drifted, { type: "SERVICE_EDIT", externalId: "F3", priceEuro }));
+    const same = edit(90);
+
+    expect(same.years.map((y) => y.proposedCumulative)).toEqual(
+      same.years.map((y) => y.liveCumulative)
+    );
+    // The recommended series is the engine's own, untouched by the rebase.
+    expect(same.years.map((y) => y.recommendedCumulative)).toEqual(
+      compareFiveYears(stored).years.map((y) => y.recommendedCumulative)
+    );
+
+    const dearer = edit(150);
+    const cheaper = edit(60);
+
+    expect(dearer.years[4].proposedCumulative).toBeLessThan(dearer.years[4].liveCumulative);
+    expect(cheaper.years[4].proposedCumulative).toBeGreaterThan(cheaper.years[4].liveCumulative);
   });
 
   it("a cheaper price gives a better five-year net", () => {

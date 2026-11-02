@@ -10,7 +10,7 @@ import type {
   Program,
   RewardOption
 } from "../onboarding/engine.types";
-import { replaceReward, swapRewardToItem } from "../onboarding/swap";
+import { MANUAL_REFUSALS, replaceReward, swapRewardToItem } from "../onboarding/swap";
 import { rewardsUsing } from "./catalogue-changes";
 import type { WhatIfYear } from "./change-flag-present";
 
@@ -22,8 +22,8 @@ import type { WhatIfYear } from "./change-flag-present";
  * the engine's own swap and comparison on a copy, and never mutates what it was given. Every
  * failure is a `none` with a reason; nothing here throws, because a flag must never block a ticket.
  *
- * Three series: `live` (the programme as it stands), `proposed` (with the change) and
- * `recommended` (the engine's own plan). No gift, cost or value is in the result; the caller
+ * Three series: `live` (the programme as it stands; for a price edit, priced at the item's price
+ * today), `proposed` (with the change) and `recommended` (the engine's own plan). No gift, cost or value is in the result; the caller
  * decides how much of it a clinic's browser may see.
  */
 
@@ -52,10 +52,46 @@ export type WhatIf =
 
 const none = (reason: string): WhatIf => ({ status: "none", reason });
 
-/** A proposed programme, or why there is nothing to simulate. */
-type Proposal = { ok: true; program: Program } | { ok: false; result: WhatIf };
+/**
+ * A proposed programme, or why there is nothing to simulate. A price edit also carries the
+ * `baseline`: the programme priced at the item's CURRENT price, the fair "live" to compare with.
+ */
+type Proposal = { ok: true; program: Program; baseline?: Program } | { ok: false; result: WhatIf };
 
 const refused = (reason: string): Proposal => ({ ok: false, result: none(reason) });
+
+const GENERIC_REFUSAL = "This swap is not allowed for this programme.";
+
+/** The swap's refusals are Spanish copy for the admin screen of the engine; Voone's flag speaks English. */
+const KNOWN_REFUSALS = new Map<string, string>([
+  [
+    "Ese hito no tiene un premio que se pueda cambiar.",
+    "That milestone has no reward that can be changed."
+  ],
+  ["Esa alternativa no existe.", "That alternative does not exist."],
+  ["Ese artículo no está en el catálogo.", "That item is not in the programme's catalogue."],
+  [MANUAL_REFUSALS.price, "That item has no price, so it cannot be a reward."],
+  [
+    MANUAL_REFUSALS.category,
+    "That item needs a category in the catalogue before it can be a reward."
+  ],
+  [MANUAL_REFUSALS.medical, "Medical treatments and products cannot be given as a reward."]
+]);
+
+const REPEAT = /^Ese cambio repetiría un regalo en dos hitos seguidos \(hitos (\d+) y (\d+)\)\.$/;
+
+/** Never forwards Spanish: a known refusal is mapped, anything else becomes a generic English line. */
+export const englishRefusal = (reason: string): string => {
+  const known = KNOWN_REFUSALS.get(reason);
+
+  if (known) return known;
+
+  const repeat = REPEAT.exec(reason);
+
+  return repeat
+    ? `That change would repeat a gift in two consecutive milestones (milestones ${repeat[1]} and ${repeat[2]}).`
+    : GENERIC_REFUSAL;
+};
 
 /**
  * Today's classified row for the item, set in the programme's own catalogue. `program.catalog` is a
@@ -87,7 +123,9 @@ const proposeReward = (
 
   const swapped = swapRewardToItem(copy, answers, milestone, itemId);
 
-  return swapped.ok ? { ok: true, program: swapped.program } : refused(swapped.reason);
+  return swapped.ok
+    ? { ok: true, program: swapped.program }
+    : refused(englishRefusal(swapped.reason));
 };
 
 /** The option with every item `id` replaced by `item`; the totals are the sums over the items. */
@@ -104,23 +142,14 @@ const repricedOption = (option: RewardOption, id: string, item: Candidate): Rewa
 const usesItem = (option: RewardOption | undefined, id: string): boolean =>
   Array.isArray(option?.items) && option.items.some((it) => it.id === id);
 
-const proposeEdit = (
+/** The programme with every use of `externalId` priced as `priceEuro`, or why it cannot be. */
+const repriceItem = (
   output: Program,
   answers: Answers,
-  live: ClassifiedItem[],
+  current: ClassifiedItem,
   externalId: string,
   priceEuro: number
 ): Proposal => {
-  if (!Number.isFinite(priceEuro) || !(priceEuro > 0)) return refused("The price is not valid.");
-
-  if (rewardsUsing(output as unknown as Prisma.JsonValue, externalId).length === 0) {
-    return refused("That service is not a live reward.");
-  }
-
-  const current = live.find((item) => item.id === externalId);
-
-  if (!current) return refused("That service is not in the clinic's catalogue.");
-
   const repriced: ClassifiedItem = { ...structuredClone(current), price: priceEuro };
 
   if (manualRefusal(repriced)) return refused("That service cannot be given as a reward.");
@@ -144,7 +173,7 @@ const proposeEdit = (
       -1
     );
 
-    if (!next.ok) return refused(next.reason);
+    if (!next.ok) return refused(englishRefusal(next.reason));
 
     program = next.program;
   }
@@ -155,6 +184,38 @@ const proposeEdit = (
   }
 
   return { ok: true, program };
+};
+
+const proposeEdit = (
+  output: Program,
+  answers: Answers,
+  live: ClassifiedItem[],
+  externalId: string,
+  priceEuro: number
+): Proposal => {
+  if (!Number.isFinite(priceEuro) || !(priceEuro > 0)) return refused("The price is not valid.");
+
+  if (rewardsUsing(output as unknown as Prisma.JsonValue, externalId).length === 0) {
+    return refused("That service is not a live reward.");
+  }
+
+  const current = live.find((item) => item.id === externalId);
+
+  if (!current) return refused("That service is not in the clinic's catalogue.");
+
+  const proposed = repriceItem(output, answers, current, externalId, priceEuro);
+
+  if (!proposed.ok) return proposed;
+
+  // The stored plan was costed when it was generated; the proposal is priced from today's row. If
+  // the catalogue has drifted since (and every applied ticket makes it drift), comparing the two
+  // would credit or charge the edit with the drift. So the "live" side is the same programme
+  // priced at the item's price today, and a no-op edit reads as exactly nothing.
+  const baseline = repriceItem(output, answers, current, externalId, current.price);
+
+  if (!baseline.ok) return baseline;
+
+  return { ok: true, program: proposed.program, baseline: baseline.program };
 };
 
 const propose = (
@@ -195,8 +256,13 @@ export const whatIf = (
     // The same calculator inputs for both plans, so the difference is the change and nothing else.
     const live = compareFiveYears(row);
     const proposed = compareFiveYears({ ...row, output: proposal.program });
+    // For a price edit, "live" is the plan at today's price (see proposeEdit); the recommended
+    // series, the inputs and the reason always come from the stored row.
+    const baseline = proposal.baseline
+      ? compareFiveYears({ ...row, output: proposal.baseline })
+      : live;
 
-    if (live.years.length !== 5 || proposed.years.length !== 5) {
+    if (live.years.length !== 5 || proposed.years.length !== 5 || baseline.years.length !== 5) {
       return none("The programme could not be simulated.");
     }
 
@@ -204,7 +270,7 @@ export const whatIf = (
       status: "ok",
       years: live.years.map((year, i) => ({
         year: year.year,
-        liveCumulative: year.currentCumulative,
+        liveCumulative: baseline.years[i].currentCumulative,
         proposedCumulative: proposed.years[i].currentCumulative,
         recommendedCumulative: year.recommendedCumulative
       })),
