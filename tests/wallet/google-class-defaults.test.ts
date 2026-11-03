@@ -176,16 +176,32 @@ describe("the Spanish, neutral words on a Google card", () => {
   it("labels the default links, button and modules in Spanish", async () => {
     const body = await classWithLinks();
 
-    expect(body.linksModuleData.uris.map((link: { id: string }) => link.id)).toEqual([
-      "web",
-      "book"
-    ]);
+    expect(body.linksModuleData.uris.map((link: { id: string }) => link.id)).toEqual(["web"]);
     expect(body.appLinkData.displayText.defaultValue.value).toBe("Reservar cita");
     expect(
       body.textModulesData
         .map((module: { header: string }) => module.header)
         .filter((header: string) => ["Beneficios", "Información"].includes(header))
     ).toEqual(["Beneficios", "Información"]);
+  });
+
+  it("shows the appointment button once and no Web link when the clinic set no website", async () => {
+    const body = (await provision({
+      templateId: "tpl-1",
+      clinicName: "Centro Prueba",
+      template: {
+        programName: "Club Prueba",
+        backgroundColor: "#30221f",
+        pointsLabel: "Puntos",
+        tierLabel: "Nivel",
+        appointmentUrl: "https://clinica.example/reservar",
+        appLinkText: "Detalles"
+      }
+    })) as unknown as ClassBody;
+
+    // Sent as an empty list, not omitted, so the class PATCH clears links on existing passes.
+    expect(body.linksModuleData.uris).toEqual([]);
+    expect(body.appLinkData.displayText.defaultValue.value).toBe("Detalles");
   });
 
   it("describes the hero image in Spanish for a screen reader", async () => {

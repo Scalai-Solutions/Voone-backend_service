@@ -68,6 +68,57 @@ describe("Google Wallet notifications", () => {
     });
   });
 
+  describe("keeps only the latest 4 messages on a pass", () => {
+    const messages = (count: number) =>
+      Array.from({ length: count }, (_, i) => ({ id: `m${i + 1}`, header: "H", body: "B" }));
+
+    it("drops the oldest object message once a fifth arrives", async () => {
+      const { addObjectMessage } = await import("../../src/wallet/providers/google/objectService");
+      request.mockResolvedValueOnce({ resource: { messages: messages(5) } });
+      request.mockResolvedValueOnce({});
+
+      await addObjectMessage("issuer.member_1", { header: "H", body: "B", notify: false });
+
+      expect(request).toHaveBeenLastCalledWith("/loyaltyObject/issuer.member_1", {
+        method: "PATCH",
+        body: { messages: messages(5).slice(1) }
+      });
+    });
+
+    it("drops the oldest class message once a fifth arrives", async () => {
+      const { addClassMessage } = await import("../../src/wallet/providers/google/classService");
+      request.mockResolvedValueOnce({ resource: { messages: messages(5) } });
+      request.mockResolvedValueOnce({});
+
+      await addClassMessage("issuer.class_1", { header: "H", body: "B", notify: false });
+
+      expect(request).toHaveBeenLastCalledWith("/loyaltyClass/issuer.class_1", {
+        method: "PATCH",
+        body: { messages: messages(5).slice(1) }
+      });
+    });
+
+    it("does not patch while 4 or fewer are on the pass", async () => {
+      const { addObjectMessage } = await import("../../src/wallet/providers/google/objectService");
+      request.mockResolvedValueOnce({ resource: { messages: messages(4) } });
+
+      await addObjectMessage("issuer.member_1", { header: "H", body: "B", notify: false });
+
+      expect(request).toHaveBeenCalledTimes(1);
+    });
+
+    it("still returns the message id when the trim fails", async () => {
+      const { addObjectMessage } = await import("../../src/wallet/providers/google/objectService");
+      request.mockResolvedValueOnce({ resource: { messages: messages(6) } });
+      request.mockRejectedValueOnce(new Error("boom"));
+      vi.spyOn(console, "error").mockImplementation(() => {});
+
+      await expect(
+        addObjectMessage("issuer.member_1", { id: "new", header: "H", body: "B", notify: false })
+      ).resolves.toBe("new");
+    });
+  });
+
   it("sets notifyPreference on points patches only when a field-update push is wanted", async () => {
     const { patchObject } = await import("../../src/wallet/providers/google/objectService");
 
