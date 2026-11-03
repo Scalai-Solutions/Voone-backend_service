@@ -293,20 +293,10 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       linkModules: [
         // Tags are the uris' ids, referenced by the details template as
         // class.linksModuleData.uris['<id>'], so they stay plain slugs; the description is the
-        // text the member sees.
-        {
-          tag: "web",
-          description: "Web",
-          url: websiteUrl
-        },
-        ...(appointmentUrl
-          ? [
-              {
-                tag: "book",
-                description: template.appLinkText ?? "Reservar cita",
-                url: appointmentUrl
-              }
-            ]
+        // text the member sees. The appointment button is appLink only: a "book" link here would
+        // render it twice. "Web" only when the clinic set its own site, never the Voone fallback.
+        ...(template.websiteUrl
+          ? [{ tag: "web", description: "Web", url: template.websiteUrl }]
           : []),
         ...(template.extraButtons ?? []).map((button, index) => ({
           tag: `button_${index + 1}`,

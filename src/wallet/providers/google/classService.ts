@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 
 import { assertIssuerScopedId, getAuthenticatedClient, GoogleWalletApiError } from "./client";
 import type { LoyaltyClassInput, LoyaltyMerchantLocationInput, LoyaltyMessageInput } from "./types";
-import type { GoogleMessage } from "./objectService";
+import { trimPassMessages } from "./objectService";
+import type { GoogleAddMessageResponse, GoogleMessage } from "./objectService";
 
 interface GoogleImage {
   sourceUri: {
@@ -210,13 +211,14 @@ export const addClassMessage = async (
     message: toGoogleMessage({ ...message, id: messageId })
   };
 
-  await getAuthenticatedClient().request<unknown>(
+  const response = await getAuthenticatedClient().request<GoogleAddMessageResponse>(
     `/loyaltyClass/${encodeURIComponent(classId)}/addMessage`,
     {
       method: "POST",
       body
     }
   );
+  await trimPassMessages(`/loyaltyClass/${encodeURIComponent(classId)}`, response);
 
   return messageId;
 };

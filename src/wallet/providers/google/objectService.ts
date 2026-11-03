@@ -275,15 +275,46 @@ export const addObjectMessage = async (
     message: toGoogleMessage({ ...message, id: messageId })
   };
 
-  await getAuthenticatedClient().request<unknown>(
+  const response = await getAuthenticatedClient().request<GoogleAddMessageResponse>(
     `/loyaltyObject/${encodeURIComponent(objectId)}/addMessage`,
     {
       method: "POST",
       body
     }
   );
+  await trimPassMessages(`/loyaltyObject/${encodeURIComponent(objectId)}`, response);
 
   return messageId;
+};
+
+/** How many messages a pass keeps per list (class broadcasts, object messages). */
+export const MAX_PASS_MESSAGES = 4;
+
+export interface GoogleAddMessageResponse {
+  resource?: { messages?: GoogleMessage[] };
+}
+
+/**
+ * addMessage only appends, so drop all but the newest messages (Google keeps them in send order).
+ * Never throws: the message is already out, and a retry would send it again.
+ * shortcut: two sends racing on one pass may trim from a stale list, add a GET + version check if
+ * that ever happens.
+ */
+export const trimPassMessages = async (
+  path: string,
+  response: GoogleAddMessageResponse | undefined
+): Promise<void> => {
+  const messages = response?.resource?.messages ?? [];
+  if (messages.length <= MAX_PASS_MESSAGES) return;
+
+  try {
+    await getAuthenticatedClient().request<unknown>(path, {
+      method: "PATCH",
+      body: { messages: messages.slice(-MAX_PASS_MESSAGES) }
+    });
+  } catch (error) {
+    console.error("[wallet] Google pass messages were not trimmed", { path, error });
+  }
 };
 
 export const removeObjectMessage = async (objectId: string, messageId: string): Promise<void> => {
