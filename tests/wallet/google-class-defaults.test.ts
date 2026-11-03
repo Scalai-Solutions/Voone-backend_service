@@ -358,7 +358,8 @@ describe("the details template on the Google class", () => {
         pointsLabel: "Puntos",
         tierLabel: "Nivel",
         websiteUrl: "https://clinica.example",
-        appointmentUrl: "https://clinica.example/reservar"
+        appointmentUrl: "https://clinica.example/reservar",
+        extraButtons: [{ label: "Google Maps", url: "https://maps.example/x" }]
       }
     })) as unknown as ClassBody;
     const paths = body.classTemplateInfo.detailsTemplateOverride?.detailsItemInfos.map(
@@ -368,9 +369,11 @@ describe("the details template on the Google class", () => {
     expect(paths).toEqual(
       expect.arrayContaining([
         "class.linksModuleData.uris['web']",
-        "class.linksModuleData.uris['book']"
+        "class.linksModuleData.uris['button_1']"
       ])
     );
+    // The appointment button is the card's appLink only, never a second link.
+    expect(paths).not.toContain("class.linksModuleData.uris['book']");
     // Before the messages, which stay last.
     expect(paths?.slice(-2)).toEqual(["class.messages", "object.messages"]);
   });
