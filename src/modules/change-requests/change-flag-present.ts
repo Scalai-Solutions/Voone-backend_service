@@ -33,6 +33,7 @@ export type OwnerFlag =
       fiveYearEuros: number | null;
     }
   | { status: "unpriced" }
+  | { status: "blocked"; kind: "repeat" | "unavailable" }
   | { status: "none" };
 
 /** Exact: whole euros, percent to one decimal. */

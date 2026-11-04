@@ -82,7 +82,10 @@ export class ChangeFlagService {
       const result = await this.evaluate(clinicId, body, undefined, QUANTIZE_OWNER_PRICE);
 
       if (result.status === "unpriced") return { status: "unpriced" };
-      if (result.status === "none" || result.years.length !== YEARS) return { status: "none" };
+      if (result.status === "none") {
+        return result.blocked ? { status: "blocked", kind: result.blocked } : { status: "none" };
+      }
+      if (result.years.length !== YEARS) return { status: "none" };
 
       // A recommendation rebuilt by today's engine (`reason`) is a plan Voone never made for this
       // clinic, so the owner is not compared with it: only the live row.
