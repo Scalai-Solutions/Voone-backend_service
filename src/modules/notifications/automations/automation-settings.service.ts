@@ -23,7 +23,6 @@ export interface ClinicNotificationSettingsView {
   notifyOnCredit: ClinicNotificationSettings["notifyOnCredit"];
   marketingEnabled: boolean;
   googleReviewUrl: string | null;
-  referralRewardText: string | null;
   automations: AutomationSettingsMap;
   /** Flat birthday and bonoReminder fields, kept so a client from before the automation catalog
    *  still reads and renders the settings. New clients use `automations`. */
@@ -67,7 +66,6 @@ export const toSettingsView = (
     notifyOnCredit: settings.notifyOnCredit,
     marketingEnabled: settings.marketingEnabled,
     googleReviewUrl: settings.googleReviewUrl,
-    referralRewardText: settings.referralRewardText,
     automations,
     birthdayEnabled: automations.BIRTHDAY.enabled,
     birthdayHeader: automations.BIRTHDAY.header,

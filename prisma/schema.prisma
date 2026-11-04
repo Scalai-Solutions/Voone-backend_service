@@ -540,6 +540,8 @@ model ClinicNotificationSettings {
   /// Clinic-level template variables. Null until the clinic sets them; an automation that needs
   /// one cannot be switched on before then.
   googleReviewUrl    String?
+  /// DEPRECATED, no longer read or written: a referral message now names the reward the live
+  /// programme's referral ladder gives that member. Kept for one release; a later migration drops it.
   referralRewardText String?
 
   /// DEPRECATED, no longer read or written: the per-event copy moved to ClinicAutomation. Kept
