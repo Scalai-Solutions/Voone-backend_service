@@ -237,7 +237,7 @@ describe("Google card: a stale tier benefits module", () => {
     const ids = (stored().textModulesData ?? []).map((m) => m.id);
 
     expect(ids).not.toContain("tierbenefits");
-    expect(ids).toEqual(expect.arrayContaining(["points", "member_id", "tier", "rewards"]));
+    expect(ids).toEqual(expect.arrayContaining(["points", "tier", "rewards"]));
     expect(moduleOf("points")?.body).toBe("1900");
   });
 

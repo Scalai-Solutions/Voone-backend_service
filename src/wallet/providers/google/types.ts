@@ -15,6 +15,8 @@ export interface LoyaltyClassInput {
   appLink?: LoyaltyAppLinkInput;
   rewardsTierLabel?: string;
   rewardsTier?: string;
+  /** Where Google posts "pass saved / deleted" events for this class. */
+  callbackUrl?: string;
 }
 
 export interface LoyaltyTextModuleInput {
@@ -70,7 +72,10 @@ export interface LoyaltyObjectInput {
   objectId: string;
   classId: string;
   accountName: string;
+  /** The member number shown on the card, and under the barcode. */
   accountId: string;
+  /** What the QR encodes, when it is not the shown number (the long redemption code). */
+  barcodeValue?: string;
   memberSince?: string;
   loyaltyPointsLabel: string;
   loyaltyPointsBalance: number;
@@ -83,18 +88,31 @@ export interface LoyaltyObjectInput {
   tierBenefits?: LoyaltyTierBenefitsInput;
   /** Absent when no x2 is pending: the object then carries no `boost` module. */
   boost?: LoyaltyOptionalModuleInput;
+  /** Absent when the member has no next reward: the card then shows "Ver beneficios". */
+  nextReward?: LoyaltyOptionalModuleInput;
   /** Absent when the card has no referral share: the object then carries no `referral` module. */
-  referral?: LoyaltyOptionalModuleInput;
+  referral?: LoyaltyReferralInput;
+}
+
+/** The referral module's text, and the sign-up link as a tappable link on the pass. */
+export interface LoyaltyReferralInput {
+  text: string;
+  url: string;
 }
 
 export type LoyaltyObjectPatch = Partial<
-  Pick<LoyaltyObjectInput, "loyaltyPointsBalance" | "tier" | "state" | "rewards">
+  Pick<
+    LoyaltyObjectInput,
+    "loyaltyPointsBalance" | "tier" | "state" | "rewards" | "accountId" | "barcodeValue"
+  >
 > & {
   /** The module's text; `null` REMOVES a stale module (a card with no tier benefits). */
   tierBenefits?: LoyaltyTierBenefitsInput | null;
   /** The module's text; `null` REMOVES a stale module (nothing pending any more). */
   boost?: LoyaltyOptionalModuleInput | null;
-  /** The module's text; `null` REMOVES a stale module (the card no longer has a share link). */
-  referral?: LoyaltyOptionalModuleInput | null;
+  /** The module's text; `null` REMOVES a stale module (no next reward any more). */
+  nextReward?: LoyaltyOptionalModuleInput | null;
+  /** The module and link; `null` REMOVES both (the card no longer has a share link). */
+  referral?: LoyaltyReferralInput | null;
   notify?: boolean;
 };

@@ -237,11 +237,30 @@ describe("the Spanish, neutral words on a Google card", () => {
     };
 
     expect(JSON.stringify(body.classTemplateInfo.cardTemplateOverride)).toContain(
-      "object.secondaryLoyaltyPoints"
+      "object.textModulesData['rewards_count']"
     );
     expect(JSON.stringify(body.classTemplateInfo.detailsTemplateOverride)).toContain(
       "object.textModulesData['rewards']"
     );
+  });
+
+  it("shows the next reward beside the tier, and Ver beneficios when there is none", async () => {
+    const body = (await classWithLinks()) as unknown as {
+      classTemplateInfo: {
+        cardTemplateOverride: {
+          cardRowTemplateInfos: Array<{
+            twoItems?: { endItem: { firstValue: { fields: Array<{ fieldPath: string }> } } };
+          }>;
+        };
+      };
+    };
+    const tierRow = body.classTemplateInfo.cardTemplateOverride.cardRowTemplateInfos[1];
+
+    // Google shows the first of these that is not empty on the pass.
+    expect(tierRow.twoItems?.endItem.firstValue.fields.map((field) => field.fieldPath)).toEqual([
+      "object.textModulesData['next_reward']",
+      "class.textModulesData['benefit_cta']"
+    ]);
   });
 
   it("points the details at the member's own tier benefits module", async () => {
@@ -283,7 +302,7 @@ describe("the Spanish, neutral words on a Google card", () => {
     expect(JSON.stringify(await classWithLinks())).not.toMatch(/\bsocias?\b/i);
   });
 
-  it("labels the member number on the object with miembro", async () => {
+  it("shows the short member number once, under the QR, with the long code inside the QR", async () => {
     state.googleBodies.length = 0;
 
     await createObject({
@@ -291,16 +310,22 @@ describe("the Spanish, neutral words on a Google card", () => {
       classId: "issuer-1.class",
       accountName: "Ana",
       accountId: "ABC12",
+      barcodeValue: "LONGREDEMPTIONCODE234567AB",
       loyaltyPointsLabel: "Puntos",
       loyaltyPointsBalance: 10
     });
     const [body] = state.googleBodies as Array<{
-      textModulesData: Array<{ id: string; header: string }>;
+      accountId: string;
+      barcode: { value: string; alternateText: string };
+      textModulesData: Array<{ id: string }>;
     }>;
 
-    expect(body.textModulesData.find((module) => module.id === "member_id")?.header).toBe(
-      "N.º de miembro"
-    );
+    expect(body.accountId).toBe("ABC12");
+    expect(body.barcode).toMatchObject({
+      value: "LONGREDEMPTIONCODE234567AB",
+      alternateText: "ABC12"
+    });
+    expect(body.textModulesData.map((module) => module.id)).not.toContain("member_id");
   });
 });
 
@@ -333,15 +358,14 @@ describe("the details template on the Google class", () => {
       )
     ).toEqual([
       "class.textModulesData['clinic']",
-      "object.textModulesData['member_id']",
       "object.textModulesData['member_since']",
       "object.textModulesData['rewards']",
       "object.textModulesData['boost']",
       "object.textModulesData['tierbenefits']",
       "object.textModulesData['referral']",
+      "object.linksModuleData.uris['referral']",
       "class.textModulesData['benefits']",
       "object.accountName",
-      "object.accountId",
       "class.textModulesData['info']",
       "class.messages",
       "object.messages"

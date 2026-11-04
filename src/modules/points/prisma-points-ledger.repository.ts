@@ -8,6 +8,8 @@ import type {
   PointsLedgerRepository,
   SpendOutcome
 } from "./points-ledger.repository";
+import { TIERS, TIER_NAMES } from "../onboarding/engine.config";
+import { hasActiveProgram } from "../onboarding/runtime/program-tier.port";
 import { tierRewardsSchema } from "../templates/templates.schema";
 import { normaliseScale, type TierDefinition } from "./tier-engine";
 
@@ -62,11 +64,18 @@ export const tierScaleForClinic = async (
   }));
 };
 
+/**
+ * The tier a new member starts in. At a centre with a live programme that is the programme's first
+ * rung (Bronce), so the card shows its tier and benefits from sign-up and the first treatment is
+ * not mistaken for a promotion; elsewhere, the template's lowest tier.
+ */
 export const baseTierCodeForClinic = async (
   prisma: PrismaClient,
   clinicId: string
 ): Promise<string | null> =>
-  normaliseScale(await tierScaleForClinic(prisma, clinicId))[0]?.code ?? null;
+  (await hasActiveProgram(prisma, clinicId))
+    ? TIER_NAMES[TIERS[0]]
+    : (normaliseScale(await tierScaleForClinic(prisma, clinicId))[0]?.code ?? null);
 
 export class PrismaPointsLedgerRepository implements PointsLedgerRepository {
   constructor(private readonly prisma: PrismaClient) {}

@@ -252,10 +252,14 @@ export class PointsService {
               : this.crossedMilestone(previous.lifetimePoints, balance.lifetime, tier)
             : false,
           tierChanged: previous ? previous.tier !== (tier?.code ?? null) : false,
-          // Only a move UP the scale is an upgrade (EVT-008); a demotion is not celebrated.
+          // Only a move UP the scale is an upgrade (EVT-008); a demotion is not celebrated. Nor is
+          // landing on the floor tier (Bronce): every member starts there, and the first treatment
+          // of a member signed up on the old scheme is not a promotion. Its welcome goes out when
+          // the Google pass is saved (google-wallet-callback).
           tierUpgradedTo:
             previous &&
             tier &&
+            tier.minLifetimePoints > 0 &&
             previous.tier !== tier.code &&
             this.isHigherTier(scale, previous.tier, tier.code)
               ? tier.code

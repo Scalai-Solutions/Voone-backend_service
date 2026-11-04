@@ -18,18 +18,44 @@ export const TIER_BENEFITS_MODULE_HEADER = "Beneficios de tu nivel";
 /** The per-member module that says the next visit earns double. Present only while it does. */
 export const BOOST_MODULE_ID = "boost";
 export const BOOST_MODULE_HEADER = "Puntos dobles";
+/** The member's next reward and the distance to it, on the front of the card beside the tier. */
+export const NEXT_REWARD_MODULE_ID = "next_reward";
+export const NEXT_REWARD_MODULE_HEADER = "Próxima recompensa";
 /** The per-member module with the member's code and sign-up link, to recommend the clinic. */
 export const REFERRAL_MODULE_ID = "referral";
 export const REFERRAL_MODULE_HEADER = "Recomienda";
 
-interface GoogleSecondaryLoyaltyPoints {
-  label: string;
-  balance: { int: number };
+/**
+ * How many rewards are waiting, on the front of the card. A text module, not secondaryLoyaltyPoints:
+ * Google appends its own "puntos" to anything in a points field ("0 premios puntos"), and a text
+ * module is shown exactly as written.
+ */
+export const REWARDS_COUNT_MODULE_ID = "rewards_count";
+
+const toRewardsCountModule = (count: number) => ({
+  id: REWARDS_COUNT_MODULE_ID,
+  header: REWARDS_COUNT_LABEL,
+  body: `${count} ${count === 1 ? "premio" : "premios"}`
+});
+
+/** The id of the referral link on the object, referenced by the class details template. */
+export const REFERRAL_LINK_ID = "referral";
+export const REFERRAL_LINK_TEXT = "Compartir mi enlace";
+
+interface GoogleObjectLinks {
+  uris: Array<{ id: string; uri: string; description: string }>;
 }
 
-const toSecondaryPoints = (count: number): GoogleSecondaryLoyaltyPoints => ({
-  label: REWARDS_COUNT_LABEL,
-  balance: { int: count }
+// Google does not make a URL inside a text module tappable or copyable; a links-module uri is both.
+const toReferralLinks = (url: string | undefined): GoogleObjectLinks => ({
+  uris: url ? [{ id: REFERRAL_LINK_ID, uri: url, description: REFERRAL_LINK_TEXT }] : []
+});
+
+const toBarcode = (accountId: string, value?: string): GoogleBarcode => ({
+  type: "QR_CODE",
+  value: value ?? accountId,
+  // Only the label under the QR, as on Apple: the short member number reception reads aloud.
+  alternateText: accountId
 });
 
 interface GoogleLoyaltyPointsBalance {
@@ -62,7 +88,6 @@ interface GoogleLoyaltyObject {
   accountName?: string;
   accountId?: string;
   loyaltyPoints?: GoogleLoyaltyPoints;
-  secondaryLoyaltyPoints?: GoogleSecondaryLoyaltyPoints;
   state?: LoyaltyObjectState;
   textModulesData?: Array<{
     id: string;
@@ -70,6 +95,9 @@ interface GoogleLoyaltyObject {
     body: string;
   }>;
   messages?: GoogleMessage[];
+  linksModuleData?: { uris?: unknown[] };
+  /** Set by Google once someone has saved the pass to their wallet. */
+  hasUsers?: boolean;
   rewardsTier?: string;
   classReference?: {
     rewardsTier?: string;
@@ -87,7 +115,6 @@ interface GoogleLoyaltyObjectRequest {
       string: string;
     };
   };
-  secondaryLoyaltyPoints?: GoogleSecondaryLoyaltyPoints;
   state: LoyaltyObjectState;
   barcode: GoogleBarcode;
   textModulesData: Array<{
@@ -95,6 +122,7 @@ interface GoogleLoyaltyObjectRequest {
     header: string;
     body: string;
   }>;
+  linksModuleData: GoogleObjectLinks;
   rewardsTier?: string;
 }
 
@@ -107,7 +135,6 @@ interface GoogleLoyaltyObjectPatchRequest {
       string: string;
     };
   };
-  secondaryLoyaltyPoints?: GoogleSecondaryLoyaltyPoints;
   state?: LoyaltyObjectState;
   barcode?: GoogleBarcode;
   textModulesData?: Array<{
@@ -115,6 +142,7 @@ interface GoogleLoyaltyObjectPatchRequest {
     header: string;
     body: string;
   }>;
+  linksModuleData?: GoogleObjectLinks;
   rewardsTier?: string;
   messages?: GoogleMessage[];
   notifyPreference?: "notifyOnUpdate";
@@ -164,6 +192,7 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
     patch.rewards !== undefined ||
     patch.tierBenefits !== undefined ||
     patch.boost !== undefined ||
+    patch.nextReward !== undefined ||
     patch.referral !== undefined
   ) {
     // A PATCH of textModulesData REPLACES the whole array, so the object is read first and the
@@ -189,7 +218,10 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
         ? [{ id: "tier", header: existingHeaderFor("tier", "Nivel"), body: patch.tier }]
         : []),
       ...(patch.rewards !== undefined
-        ? [{ id: REWARDS_MODULE_ID, header: REWARDS_MODULE_HEADER, body: patch.rewards.text }]
+        ? [
+            { id: REWARDS_MODULE_ID, header: REWARDS_MODULE_HEADER, body: patch.rewards.text },
+            toRewardsCountModule(patch.rewards.count)
+          ]
         : []),
       ...(patch.tierBenefits
         ? [
@@ -203,6 +235,15 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
       ...(patch.boost
         ? [{ id: BOOST_MODULE_ID, header: BOOST_MODULE_HEADER, body: patch.boost.text }]
         : []),
+      ...(patch.nextReward
+        ? [
+            {
+              id: NEXT_REWARD_MODULE_ID,
+              header: NEXT_REWARD_MODULE_HEADER,
+              body: patch.nextReward.text
+            }
+          ]
+        : []),
       ...(patch.referral
         ? [{ id: REFERRAL_MODULE_ID, header: REFERRAL_MODULE_HEADER, body: patch.referral.text }]
         : [])
@@ -211,25 +252,31 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
     const staleIds = [
       ...(patch.tierBenefits === null ? [TIER_BENEFITS_MODULE_ID] : []),
       ...(patch.boost === null ? [BOOST_MODULE_ID] : []),
+      ...(patch.nextReward === null ? [NEXT_REWARD_MODULE_ID] : []),
       ...(patch.referral === null ? [REFERRAL_MODULE_ID] : [])
     ];
     const next = merged.filter((module) => !staleIds.includes(module.id));
-    const onlyRemoval =
-      patch.loyaltyPointsBalance === undefined &&
-      patch.tier === undefined &&
-      patch.rewards === undefined &&
-      !patch.tierBenefits &&
-      !patch.boost &&
-      !patch.referral;
 
-    // A removal with nothing to remove writes nothing: most clinics have no such module.
-    if (!onlyRemoval || next.length !== existingTextModules.length) {
+    // Unchanged modules write nothing: most syncs repeat what the card already says (the same next
+    // reward, a removal with nothing to remove), and a write per sync would be Google quota spent
+    // for no change on the pass.
+    if (JSON.stringify(next) !== JSON.stringify(existingTextModules)) {
       body.textModulesData = next;
+    }
+
+    // The object's only links are the referral one, so the whole list is written, or cleared
+    // when it holds one; a card that never had a referral link costs no write.
+    if (
+      patch.referral ||
+      (patch.referral === null && existingObject.linksModuleData?.uris?.length)
+    ) {
+      body.linksModuleData = toReferralLinks(patch.referral?.url);
     }
   }
 
-  if (patch.rewards !== undefined) {
-    body.secondaryLoyaltyPoints = toSecondaryPoints(patch.rewards.count);
+  if (patch.accountId !== undefined) {
+    body.accountId = patch.accountId;
+    body.barcode = toBarcode(patch.accountId, patch.barcodeValue);
   }
 
   if (patch.loyaltyPointsBalance !== undefined) {
@@ -385,6 +432,27 @@ export const getObject = async (objectId: string): Promise<LoyaltyObjectInput | 
   }
 };
 
+/**
+ * Whether a member has saved this pass to their Google Wallet: the platform sets `hasUsers` on
+ * the object the moment someone does. Unlike the save callback, this needs no public URL, so it
+ * works on every deployment. False for an object Google does not know.
+ */
+export const objectHasUsers = async (objectId: string): Promise<boolean> => {
+  assertIssuerScopedId(objectId, "objectId");
+
+  try {
+    const object = await getAuthenticatedClient().request<GoogleLoyaltyObject>(
+      `/loyaltyObject/${encodeURIComponent(objectId)}`
+    );
+
+    return object.hasUsers === true;
+  } catch (error) {
+    if (error instanceof GoogleWalletApiError && error.status === 404) return false;
+
+    throw error;
+  }
+};
+
 const toGoogleLoyaltyObjectBody = (input: LoyaltyObjectInput): GoogleLoyaltyObjectRequest => {
   const accountId = input.accountId ?? input.objectId;
 
@@ -399,24 +467,14 @@ const toGoogleLoyaltyObjectBody = (input: LoyaltyObjectInput): GoogleLoyaltyObje
         string: String(input.loyaltyPointsBalance)
       }
     },
-    ...(input.rewards ? { secondaryLoyaltyPoints: toSecondaryPoints(input.rewards.count) } : {}),
     state: input.state ?? "ACTIVE",
-    barcode: {
-      type: "QR_CODE",
-      value: accountId,
-      alternateText: accountId
-    },
+    barcode: toBarcode(accountId, input.barcodeValue),
     textModulesData: [
       // These reserved object-level IDs are referenced by LoyaltyClass.classTemplateInfo.
       {
         id: "points",
         header: input.loyaltyPointsLabel,
         body: String(input.loyaltyPointsBalance)
-      },
-      {
-        id: "member_id",
-        header: "N.º de miembro",
-        body: accountId
       },
       {
         id: "member_since",
@@ -429,7 +487,10 @@ const toGoogleLoyaltyObjectBody = (input: LoyaltyObjectInput): GoogleLoyaltyObje
         body: input.tier ?? "—"
       },
       ...(input.rewards
-        ? [{ id: REWARDS_MODULE_ID, header: REWARDS_MODULE_HEADER, body: input.rewards.text }]
+        ? [
+            { id: REWARDS_MODULE_ID, header: REWARDS_MODULE_HEADER, body: input.rewards.text },
+            toRewardsCountModule(input.rewards.count)
+          ]
         : []),
       ...(input.tierBenefits
         ? [
@@ -443,10 +504,20 @@ const toGoogleLoyaltyObjectBody = (input: LoyaltyObjectInput): GoogleLoyaltyObje
       ...(input.boost
         ? [{ id: BOOST_MODULE_ID, header: BOOST_MODULE_HEADER, body: input.boost.text }]
         : []),
+      ...(input.nextReward
+        ? [
+            {
+              id: NEXT_REWARD_MODULE_ID,
+              header: NEXT_REWARD_MODULE_HEADER,
+              body: input.nextReward.text
+            }
+          ]
+        : []),
       ...(input.referral
         ? [{ id: REFERRAL_MODULE_ID, header: REFERRAL_MODULE_HEADER, body: input.referral.text }]
         : [])
     ],
+    linksModuleData: toReferralLinks(input.referral?.url),
     // TODO: Verify object-level tier support against https://developers.google.com/wallet/retail/loyalty-cards/rest/v1/loyaltyclass before relying on this field in production.
     // As of now, this field has no effect when written on a LoyaltyObject; only LoyaltyClass.rewardsTier is real.
     rewardsTier: input.tier
@@ -459,10 +530,10 @@ const toGoogleLoyaltyObjectPatchBody = (
   const {
     accountId,
     loyaltyPoints,
-    secondaryLoyaltyPoints,
     state,
     barcode,
     textModulesData,
+    linksModuleData,
     rewardsTier
   } = toGoogleLoyaltyObjectBody(input);
 
@@ -470,10 +541,10 @@ const toGoogleLoyaltyObjectPatchBody = (
     accountName: input.accountName,
     accountId,
     loyaltyPoints,
-    secondaryLoyaltyPoints,
     state,
     barcode,
     textModulesData,
+    linksModuleData,
     rewardsTier
   };
 };

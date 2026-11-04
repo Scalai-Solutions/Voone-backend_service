@@ -61,8 +61,7 @@ describe("membershipSignupSchema", () => {
   });
 
   describe("consent", () => {
-    // The schema keeps the value free because staff cannot consent on a client's behalf;
-    // the QR route is what requires true now (see qrSignupRequirementMissing).
+    // Free in the schema and on the QR route: joining is never conditioned on marketing consent.
     it("creates a member when marketing consent is declined", () => {
       expect(membershipSignupSchema.parse({ ...VALID, consentMarketing: false })).toMatchObject({
         consentMarketing: false
@@ -423,8 +422,7 @@ describe("accepting the processing of personal data (founders' E2E item 44)", ()
 describe("qrSignupRequirementMissing", () => {
   const COMPLETE = {
     birthDate: new Date("1994-05-18T00:00:00.000Z"),
-    sex: "mujer" as const,
-    consentMarketing: true
+    sex: "mujer" as const
   };
 
   it("accepts a complete self sign-up", () => {
@@ -443,10 +441,10 @@ describe("qrSignupRequirementMissing", () => {
     );
   });
 
-  it("refuses a self sign-up with an unticked marketing box", () => {
-    expect(qrSignupRequirementMissing({ ...COMPLETE, consentMarketing: false }, "qr_signup")).toBe(
-      "Debes aceptar recibir novedades y ofertas para unirte."
-    );
+  it("accepts a self sign-up that declines marketing: consent is never a condition of joining", () => {
+    expect(
+      qrSignupRequirementMissing({ ...COMPLETE, consentMarketing: false } as never, "qr_signup")
+    ).toBeNull();
   });
 
   it("does not ask staff-entered members", () => {

@@ -86,7 +86,6 @@ const NAME_INVALID = "Introduce tu nombre y apellidos";
 const NAME_TOO_LONG = "El nombre es demasiado largo";
 const BIRTH_DATE_REQUIRED_MESSAGE = "Introduce tu fecha de nacimiento.";
 const SEX_REQUIRED_MESSAGE = "Selecciona una opción.";
-const MARKETING_CONSENT_REQUIRED_MESSAGE = "Debes aceptar recibir novedades y ofertas para unirte.";
 const UNDERAGE_MESSAGE = "Debes tener al menos 16 años para unirte.";
 
 /**
@@ -170,11 +169,9 @@ export const membershipSignupSchema = z
         return normalized;
       }),
 
-    // Mandatory field. The value stays free in the schema because staff cannot give
-    // consent on a client's behalf; the public sign-up route requires `true` (2026-10
-    // product decision, see qrSignupRequirementMissing). That does condition sign-up on
-    // marketing consent — the GDPR Art 7(4) bundling the original design avoided — and is
-    // the clinic's call to make, recorded here so the tension is not lost.
+    // Mandatory field, free value: the member must answer, and "no" is a full answer. Joining
+    // is never conditioned on marketing consent (GDPR Art 7(4), and LSSI art. 21 for SMS and
+    // WhatsApp), on the QR form or anywhere else; staff cannot consent on a client's behalf.
     //
     // Never z.coerce.boolean(): it turns the string "false" into true and fabricates
     // consent for every member whose form serializes booleans as strings.
@@ -307,14 +304,14 @@ export const privacyAcceptanceMissing = (
  * a demographic on the client's behalf.
  */
 export const qrSignupRequirementMissing = (
-  input: { birthDate?: Date; sex?: MemberSex; consentMarketing?: boolean },
+  input: { birthDate?: Date; sex?: MemberSex },
   source: "qr_signup" | "staff_entry"
 ): string | null => {
   if (source !== "qr_signup") return null;
   if (!input.birthDate) return BIRTH_DATE_REQUIRED_MESSAGE;
   if (!input.sex) return SEX_REQUIRED_MESSAGE;
-  if (input.consentMarketing !== true) return MARKETING_CONSENT_REQUIRED_MESSAGE;
 
+  // Marketing consent is deliberately not here: making it a condition of joining is unlawful.
   return null;
 };
 

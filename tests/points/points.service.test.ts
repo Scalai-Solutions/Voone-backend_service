@@ -148,6 +148,45 @@ describe("PointsService", () => {
     });
   });
 
+  describe("the tier upgrade a credit reports", () => {
+    const withPrevious = (previous: { tier: string | null; lifetimePoints: number }) => {
+      const flags: Array<{ tierChanged: boolean; tierUpgradedTo?: string }> = [];
+      const reading = Object.assign(cache, { read: async () => previous });
+      const notified = new PointsService(
+        ledger,
+        reading,
+        { enqueueMemberSync: async () => {}, close: async () => {} },
+        { onPointsCredited: async (_m, _b, f) => void flags.push(f) }
+      );
+
+      return { flags, notified };
+    };
+    const earn = (service: PointsService, points: number) =>
+      service.credit({
+        memberId: MEMBER,
+        clinicId: CLINIC,
+        points,
+        kind: PointsTransactionKind.EARN,
+        idempotencyKey: `visit-${points}`
+      });
+
+    it("never celebrates landing on the floor tier: every member starts there", async () => {
+      const { flags, notified } = withPrevious({ tier: null, lifetimePoints: 0 });
+
+      await earn(notified, 100);
+
+      expect(flags[0]).toMatchObject({ tierChanged: true, tierUpgradedTo: undefined });
+    });
+
+    it("still celebrates a real move up", async () => {
+      const { flags, notified } = withPrevious({ tier: "bronze", lifetimePoints: 0 });
+
+      await earn(notified, 600);
+
+      expect(flags[0]).toMatchObject({ tierChanged: true, tierUpgradedTo: "silver" });
+    });
+  });
+
   describe("crediting", () => {
     it("records the movement and reports both balances", async () => {
       const outcome = await credit(600, "visit-1");

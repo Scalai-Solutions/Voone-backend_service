@@ -32,10 +32,33 @@ import type {
 } from "./notifications.schema";
 import { AutomationSettingsService } from "./automations/automation-settings.service";
 import { AutomationDispatchService } from "./automations/dispatch.service";
-import { TierUpgradeNotifier } from "./automations/tier-upgrade";
+import { TierUpgradeNotifier, tierMessageKey } from "./automations/tier-upgrade";
+import { objectHasUsers } from "../../wallet/providers/google/objectService";
 import { ReviewRequestNotifier } from "./automations/triggers/review-request.trigger";
 import { NotificationQuotaService } from "./quota.service";
 import { linkifyForGoogle, personalise } from "./template";
+import { CLINIC_TIME_ZONE } from "../../common/utils/zoned-month";
+import { zonedDate, type ZonedDate } from "../../common/utils/zoned-time";
+
+/**
+ * Whole years on `today`, from the full birth date, or from the birth year alone for members
+ * captured before the form asked for a date. Null when neither is known.
+ * shortcut: a birth year alone can be one year high before the birthday; good enough to segment.
+ */
+export const memberAge = (
+  member: { birthDate: Date | null; birthYear: number | null },
+  today: ZonedDate
+): number | null => {
+  if (member.birthDate) {
+    const month = member.birthDate.getUTCMonth() + 1;
+    const beforeBirthday =
+      today.month < month || (today.month === month && today.day < member.birthDate.getUTCDate());
+
+    return today.year - member.birthDate.getUTCFullYear() - (beforeBirthday ? 1 : 0);
+  }
+
+  return member.birthYear ? today.year - member.birthYear : null;
+};
 
 const BROADCAST_LIMIT = 3;
 const BROADCAST_WINDOW_MS = 24 * 60 * 60 * 1_000;
@@ -62,10 +85,27 @@ export interface PointsCreditNotificationJob {
   tierUpgradedTo?: string;
 }
 
+/** One look at whether a member has saved their Google pass yet (see watchGooglePassSave). */
+export interface GoogleSaveCheckJob {
+  memberId: string;
+  /** Index into GOOGLE_SAVE_CHECK_DELAYS_MS of this check. */
+  attempt: number;
+}
+
+/**
+ * When to look, after the save link is handed out: at 30 s, 1, 2, 3, 4 and 5 minutes, then the
+ * watch stops (product decision 2026-11-04: the welcome belongs to the sign-up moment). A pass
+ * saved later is still welcomed by the save callback where GOOGLE_WALLET_CALLBACK_URL is set.
+ */
+export const GOOGLE_SAVE_CHECK_DELAYS_MS = [
+  30_000, 30_000, 60_000, 60_000, 60_000, 60_000
+] as const;
+
 export interface NotificationJobQueue {
   enqueueNotification(notificationId: string, delayMs?: number): Promise<void>;
   enqueueDelivery(deliveryId: string, delayMs?: number): Promise<void>;
   enqueuePointsCredit(job: PointsCreditNotificationJob): Promise<void>;
+  enqueueGoogleSaveCheck(job: GoogleSaveCheckJob, delayMs: number): Promise<void>;
 }
 
 /**
@@ -107,7 +147,9 @@ export class NotificationService {
     private readonly quota: NotificationQuotaService,
     private readonly jobs: NotificationJobQueue,
     /** Null where Apple cards cannot be refreshed (no signing material / card secret). */
-    private readonly appleCards: AppleCardRefresher | null = null
+    private readonly appleCards: AppleCardRefresher | null = null,
+    /** Whether a Google pass has been saved by anyone. Injected so tests need no Google. */
+    private readonly googlePassSaved: (objectId: string) => Promise<boolean> = objectHasUsers
   ) {
     this.automationSender = new AutomationDispatchService(prisma, jobs);
     this.automationSettings = new AutomationSettingsService(prisma);
@@ -309,6 +351,82 @@ export class NotificationService {
     flags: { milestoneReached: boolean; tierChanged: boolean; tierUpgradedTo?: string }
   ): Promise<void> {
     await this.jobs.enqueuePointsCredit({ memberId, newBalance, ...flags });
+  }
+
+  /**
+   * A member just saved their Google pass: congratulate them on the tier they start in (Bronce),
+   * now that a device holds the pass and the push can reach it. Not after the first treatment:
+   * they were in that tier from the start. The same automation and idempotency key as a real
+   * upgrade, so a Google retry, or a later move into the same tier, never sends it twice.
+   */
+  async onGooglePassSaved(memberId: string) {
+    const member = await this.prisma.member.findFirst({
+      where: { id: memberId, erasedAt: null },
+      select: { id: true, clinicId: true, tier: true }
+    });
+
+    if (!member?.tier) return null;
+
+    return this.tierUpgrades.notify({
+      memberId: member.id,
+      clinicId: member.clinicId,
+      newTier: member.tier
+    });
+  }
+
+  /**
+   * Starts watching for the member to save their Google pass, so the tier welcome above goes out
+   * then. Google's save callback is instant but needs a public URL Google can reach
+   * (GOOGLE_WALLET_CALLBACK_URL); this needs nothing, so it is what makes the welcome work on every
+   * deployment, localhost included. Whichever sees the save first sends it; the other finds it sent.
+   * shortcut: each hand-out of the save link starts its own watch (a few cheap reads each); store
+   * a watch per member if that ever shows up in Google's quota.
+   */
+  async watchGooglePassSave(memberId: string): Promise<void> {
+    await this.jobs.enqueueGoogleSaveCheck(
+      { memberId, attempt: 0 },
+      GOOGLE_SAVE_CHECK_DELAYS_MS[0]
+    );
+  }
+
+  async processGoogleSaveCheck({ memberId, attempt }: GoogleSaveCheckJob): Promise<void> {
+    const member = await this.prisma.member.findFirst({
+      where: { id: memberId, erasedAt: null },
+      select: {
+        id: true,
+        clinicId: true,
+        tier: true,
+        walletObjects: {
+          where: { provider: WalletProviderType.GOOGLE, status: WalletSyncStatus.SYNCED },
+          select: { externalObjectId: true }
+        }
+      }
+    });
+    const object = member?.walletObjects[0];
+
+    if (!member?.tier || !object) return;
+
+    // Already welcomed to this tier (by the callback, another watch, or a real upgrade): done.
+    const welcomed = await this.prisma.notification.findFirst({
+      where: { clinicId: member.clinicId, idempotencyKey: tierMessageKey(member.id, member.tier) },
+      select: { id: true }
+    });
+
+    if (welcomed) return;
+
+    if (await this.googlePassSaved(object.externalObjectId)) {
+      await this.onGooglePassSaved(member.id);
+      return;
+    }
+
+    const next = attempt + 1;
+
+    if (next < GOOGLE_SAVE_CHECK_DELAYS_MS.length) {
+      await this.jobs.enqueueGoogleSaveCheck(
+        { memberId, attempt: next },
+        GOOGLE_SAVE_CHECK_DELAYS_MS[next]
+      );
+    }
   }
 
   async processNotification(notificationId: string): Promise<void> {
@@ -1144,6 +1262,8 @@ export class NotificationService {
         clinicId,
         erasedAt: null,
         ...(segment.tier ? { tier: segment.tier } : {}),
+        ...(segment.sex ? { sex: segment.sex } : {}),
+        ...(segment.joinedAfter ? { createdAt: { gte: segment.joinedAfter } } : {}),
         // The auto-created segment: every member holding a bono with sessions left.
         ...(segment.activeBono ? { bonos: { some: { status: MemberBonoStatus.ACTIVE } } } : {})
       },
@@ -1154,7 +1274,23 @@ export class NotificationService {
       ? new Date(Date.now() - segment.inactiveDays * 24 * 60 * 60 * 1_000)
       : segment.lastVisitBefore;
 
+    const today = zonedDate(new Date(), CLINIC_TIME_ZONE);
+    const byAge = segment.ageMin !== undefined || segment.ageMax !== undefined;
+
     return members.filter((member) => {
+      if (byAge) {
+        const age = memberAge(member, today);
+
+        if (age === null) return false;
+        if (segment.ageMin !== undefined && age < segment.ageMin) return false;
+        if (segment.ageMax !== undefined && age > segment.ageMax) return false;
+      }
+
+      // UTC getters: a DATE column comes back as midnight UTC, as the birthday trigger reads it.
+      if (segment.birthMonth && member.birthDate?.getUTCMonth() !== segment.birthMonth - 1) {
+        return false;
+      }
+
       if (cutoff) {
         const lastVisitAt = member.pointsLedger[0]?.createdAt ?? member.createdAt;
         if (lastVisitAt >= cutoff) return false;

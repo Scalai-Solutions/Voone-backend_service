@@ -90,7 +90,7 @@ const withReferral: LoyaltyCard = {
   tier: "Plata",
   referral: { code: "AB2CD", url: URL_ }
 };
-const TEXT = `Tu código: AB2CD. Comparte este enlace: ${URL_}`;
+const TEXT = "Tu código: AB2CD";
 const OBJECT_ID = `issuer-1.member_${rewardsPass.memberId.replace(/-/g, "_")}`;
 
 const repo = {
@@ -116,10 +116,14 @@ beforeEach(() => {
 });
 
 describe("Google card: the referral share", () => {
-  it("creates the object with a referral module, the same words as the Apple field", async () => {
+  it("creates the object with the code in a module and the link as a tappable link", async () => {
     await issue(withReferral);
 
     expect(moduleOf("referral")).toEqual({ id: "referral", header: "Recomienda", body: TEXT });
+    // A URL inside a text module can be neither tapped nor copied on Google; a link can.
+    expect(stored().linksModuleData).toEqual({
+      uris: [{ id: "referral", uri: URL_, description: "Compartir mi enlace" }]
+    });
   });
 
   it("adds no such module when the card has no referral", async () => {
@@ -216,7 +220,8 @@ describe("Google card: a stale referral module", () => {
     const ids = (stored().textModulesData ?? []).map((m) => m.id);
 
     expect(ids).not.toContain("referral");
-    expect(ids).toEqual(expect.arrayContaining(["points", "member_id", "tier", "rewards"]));
+    expect(stored().linksModuleData).toEqual({ uris: [] });
+    expect(ids).toEqual(expect.arrayContaining(["points", "tier", "rewards"]));
     expect(moduleOf("points")?.body).toBe("1900");
   });
 

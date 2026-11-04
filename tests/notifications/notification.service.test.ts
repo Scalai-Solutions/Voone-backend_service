@@ -2,7 +2,10 @@ import { NotificationDeliveryStatus, WalletProviderType, WalletSyncStatus } from
 import { describe, expect, it } from "vitest";
 
 import { PERMISSIONS } from "../../src/modules/auth/rbac";
-import { NotificationService } from "../../src/modules/notifications/notification.service";
+import {
+  memberAge,
+  NotificationService
+} from "../../src/modules/notifications/notification.service";
 
 const queuedDelivery = {
   id: "delivery-1",
@@ -289,5 +292,62 @@ describe("active-bono segment", () => {
 
     expect(members.map((member) => member.id)).toEqual(["member-1"]);
     expect(wheres[0]).toMatchObject({ bonos: { some: { status: "ACTIVE" } } });
+  });
+});
+
+describe("member-field segments", () => {
+  const born = (date: string) => new Date(`${date}T00:00:00Z`);
+  const today = { dateKey: "2026-11-04", year: 2026, month: 11, day: 4 };
+
+  it("counts age in whole years, the day of the birthday included", () => {
+    expect(memberAge({ birthDate: born("1990-11-04"), birthYear: null }, today)).toBe(36);
+    expect(memberAge({ birthDate: born("1990-11-05"), birthYear: null }, today)).toBe(35);
+    expect(memberAge({ birthDate: null, birthYear: 1990 }, today)).toBe(36);
+    expect(memberAge({ birthDate: null, birthYear: null }, today)).toBeNull();
+  });
+
+  it("filters by sex and sign-up in the query, and by age and birthday month after it", async () => {
+    const wheres: unknown[] = [];
+    const thisYear = new Date().getUTCFullYear();
+    const member = (id: string, birthDate: Date | null, birthYear: number | null = null) => ({
+      id,
+      birthDate,
+      birthYear,
+      createdAt: new Date(),
+      pointsLedger: []
+    });
+    const service = new NotificationService(
+      {
+        member: {
+          findMany: async ({ where }: { where: unknown }) => {
+            wheres.push(where);
+
+            return [
+              member("thirty-march", born(`${thisYear - 31}-03-01`)),
+              member("thirty-july", born(`${thisYear - 31}-07-01`)),
+              member("sixty-march", born(`${thisYear - 61}-03-01`)),
+              // A birth year alone has no month to match.
+              member("year-only", null, thisYear - 31),
+              member("unknown", null)
+            ];
+          }
+        }
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never
+    );
+    const joinedAfter = new Date("2026-01-01T00:00:00Z");
+
+    const members = await service.resolveSegment("clinic-1", {
+      sex: "mujer",
+      ageMin: 25,
+      ageMax: 40,
+      birthMonth: 3,
+      joinedAfter
+    });
+
+    expect(members.map((m) => m.id)).toEqual(["thirty-march"]);
+    expect(wheres[0]).toMatchObject({ sex: "mujer", createdAt: { gte: joinedAfter } });
   });
 });

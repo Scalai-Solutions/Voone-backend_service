@@ -99,7 +99,7 @@ describe("refreshGoogleClasses", () => {
 
     const template = JSON.stringify(google.patches[0].body.classTemplateInfo);
 
-    expect(template).toContain("object.secondaryLoyaltyPoints");
+    expect(template).toContain("object.textModulesData['rewards_count']");
     expect(template).toContain("object.textModulesData['rewards']");
     expect(google.patches[0].body.programName).toBe("Club");
   });

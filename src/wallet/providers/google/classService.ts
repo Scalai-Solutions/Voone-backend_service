@@ -69,6 +69,7 @@ interface GoogleLoyaltyClassRequest {
   appLinkData?: GoogleAppLinkData;
   rewardsTierLabel?: string;
   rewardsTier?: string;
+  callbackOptions?: { url: string };
   merchantLocations?: GoogleMerchantLocation[];
   messages?: GoogleMessage[];
   classTemplateInfo: {
@@ -315,6 +316,7 @@ const toGoogleLoyaltyClassBody = (
     : undefined,
   rewardsTierLabel: input.rewardsTierLabel,
   rewardsTier: input.rewardsTier,
+  ...(input.callbackUrl ? { callbackOptions: { url: input.callbackUrl } } : {}),
   classTemplateInfo: buildClassTemplateInfo(
     options,
     (input.linkModules ?? []).map((linkModule) => linkModule.tag)
@@ -365,7 +367,7 @@ const toGoogleMessage = (message: LoyaltyMessageInput): GoogleMessage => ({
  */
 export const PRODUCTION_DETAILS_TEMPLATE_FIELD_PATHS = [
   "class.textModulesData['clinic']",
-  "object.textModulesData['member_id']",
+  // No member number here or as object.accountId: it is under the QR on the front, once.
   "object.textModulesData['member_since']",
   "object.textModulesData['rewards']",
   // Per member: a pending x2 (a waiting perk, or a referred member's first visit). Absent from the
@@ -377,9 +379,10 @@ export const PRODUCTION_DETAILS_TEMPLATE_FIELD_PATHS = [
   // Per member: the code and sign-up link to recommend the clinic. Absent from the object when
   // the card has no share link, where the item simply does not render.
   "object.textModulesData['referral']",
+  // The sign-up link itself, tappable: a URL inside the text module above is not.
+  "object.linksModuleData.uris['referral']",
   "class.textModulesData['benefits']",
   "object.accountName",
-  "object.accountId",
   "class.textModulesData['info']"
 ] as const;
 
@@ -413,18 +416,23 @@ export const buildClassTemplateInfo = (
           endItem: toTemplateItem("object.textModulesData['points']")
         }
       },
+      // The member number is not a cell here: it is the label under the QR, as on Apple. Beside the
+      // tier, the next reward and the distance to it; Google shows the first non-empty field, so a
+      // member with none (no programme, or nothing left to earn) sees "Ver beneficios" instead.
       {
-        threeItems: {
-          startItem: toTemplateItem("object.textModulesData['member_id']"),
-          middleItem: toTemplateItem("object.textModulesData['tier']"),
-          endItem: toTemplateItem("class.textModulesData['benefit_cta']")
+        twoItems: {
+          startItem: toTemplateItem("object.textModulesData['tier']"),
+          endItem: toTemplateItem(
+            "object.textModulesData['next_reward']",
+            "class.textModulesData['benefit_cta']"
+          )
         }
       },
       // How many rewards are waiting: the stamp-card count, on the front of the card. Absent
       // from objects of a clinic with no programme, where the row simply does not render.
       {
         oneItem: {
-          item: toTemplateItem("object.secondaryLoyaltyPoints")
+          item: toTemplateItem("object.textModulesData['rewards_count']")
         }
       }
     ]
@@ -446,13 +454,10 @@ export const buildClassTemplateInfo = (
       })
 });
 
-export const toTemplateItem = (fieldPath: string): GoogleTemplateItem => ({
+/** One cell. Given several paths, Google shows the first that is not empty on the pass. */
+export const toTemplateItem = (...fieldPaths: string[]): GoogleTemplateItem => ({
   firstValue: {
-    fields: [
-      {
-        fieldPath
-      }
-    ]
+    fields: fieldPaths.map((fieldPath) => ({ fieldPath }))
   }
 });
 

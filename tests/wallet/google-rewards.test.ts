@@ -36,10 +36,13 @@ vi.mock("../../src/wallet/providers/google/client", async (importOriginal) => {
 
     google.calls.push({ path, method, body: options?.body });
 
+    // Google refusing the rewards WRITE: the create that adds them, or the best-effort patch. Not
+    // the balance patch, which only repeats the modules already on the object, because a PATCH of
+    // textModulesData has to send the whole list.
     if (
       google.rejectRewards &&
-      method !== "GET" &&
-      JSON.stringify(options?.body).includes("secondaryLoyaltyPoints")
+      (method === "POST" || (method === "PATCH" && !("loyaltyPoints" in (options?.body ?? {})))) &&
+      JSON.stringify(options?.body).includes("rewards_count")
     ) {
       throw new original.GoogleWalletApiError("bad rewards field", 400, "Bad Request", {
         member: "private-data"
@@ -104,7 +107,11 @@ describe("Google card: redeemable rewards", () => {
   it("creates the object with the gift count and the rewards module", async () => {
     await issue(rewardsPass);
 
-    expect(stored().secondaryLoyaltyPoints).toEqual({ label: "Regalos", balance: { int: 2 } });
+    expect(moduleOf("rewards_count")).toEqual({
+      id: "rewards_count",
+      header: "Regalos",
+      body: "2 premios"
+    });
     expect(moduleOf("rewards")).toEqual({
       id: "rewards",
       header: "Recompensas disponibles",
@@ -119,14 +126,18 @@ describe("Google card: redeemable rewards", () => {
   it("creates a zero count and the empty text for a programme member with none", async () => {
     await issue({ ...rewardsPass, rewards: { available: [] } });
 
-    expect(stored().secondaryLoyaltyPoints).toEqual({ label: "Regalos", balance: { int: 0 } });
+    expect(moduleOf("rewards_count")).toEqual({
+      id: "rewards_count",
+      header: "Regalos",
+      body: "0 premios"
+    });
     expect(moduleOf("rewards")?.body).toContain("Aún no tienes recompensas disponibles.");
   });
 
   it("adds neither for a clinic with no programme", async () => {
     await issue({ ...rewardsPass, rewards: undefined });
 
-    expect(stored().secondaryLoyaltyPoints).toBeUndefined();
+    expect(moduleOf("rewards_count")).toBeUndefined();
     expect(moduleOf("rewards")).toBeUndefined();
   });
 
@@ -140,7 +151,11 @@ describe("Google card: redeemable rewards", () => {
 
     expect(moduleOf("rewards")?.body).toContain("🎁 Premio 8 · hasta 12 sept");
     expect(moduleOf("rewards")?.body).toContain("… y 1 más");
-    expect(stored().secondaryLoyaltyPoints).toMatchObject({ balance: { int: 9 } });
+    expect(moduleOf("rewards_count")).toEqual({
+      id: "rewards_count",
+      header: "Regalos",
+      body: "9 premios"
+    });
   });
 
   it("a sync updates the count and the module and keeps every other object module", async () => {
@@ -163,10 +178,14 @@ describe("Google card: redeemable rewards", () => {
     expect(after.map((m) => m.id).sort()).toEqual([...(before ?? [])].sort());
     expect(after.find((m) => m.id === "benefits")?.body).toBe("Ventajas.");
     expect(after.find((m) => m.id === "info")?.body).toBe("Info.");
-    expect(after.find((m) => m.id === "member_id")).toBeDefined();
+    expect(after.find((m) => m.id === "tier")).toBeDefined();
     expect(after.find((m) => m.id === "rewards")?.body).toContain("Aún no tienes");
     expect(after.find((m) => m.id === "points")?.body).toBe("1900");
-    expect(stored().secondaryLoyaltyPoints).toEqual({ label: "Regalos", balance: { int: 0 } });
+    expect(moduleOf("rewards_count")).toEqual({
+      id: "rewards_count",
+      header: "Regalos",
+      body: "0 premios"
+    });
   });
 
   it("a sync adds the module to an object created before rewards existed", async () => {
@@ -177,7 +196,11 @@ describe("Google card: redeemable rewards", () => {
     expect(moduleOf("rewards")?.body).toContain("🎁 Limpieza facial");
     expect(moduleOf("tier")).toBeDefined();
     expect(moduleOf("member_since")).toBeDefined();
-    expect(stored().secondaryLoyaltyPoints).toMatchObject({ balance: { int: 2 } });
+    expect(moduleOf("rewards_count")).toEqual({
+      id: "rewards_count",
+      header: "Regalos",
+      body: "2 premios"
+    });
   });
 
   it("a sync for a clinic with no programme leaves the rewards parts untouched", async () => {
@@ -193,9 +216,9 @@ describe("Google card: redeemable rewards", () => {
     await provider().syncCard(ref, { ...rewardsPass, rewards: undefined });
 
     expect(moduleOf("rewards")?.body).toBe("kept");
-    expect(google.calls.filter((c) => c.method === "PATCH").at(-1)?.body).not.toHaveProperty(
-      "secondaryLoyaltyPoints"
-    );
+    expect(
+      JSON.stringify(google.calls.filter((c) => c.method === "PATCH").at(-1)?.body)
+    ).not.toContain("rewards_count");
   });
 
   it("the points-credit patch does not drop the rewards module", async () => {
@@ -205,6 +228,47 @@ describe("Google card: redeemable rewards", () => {
 
     expect(moduleOf("rewards")?.body).toContain("🎁 Limpieza facial");
     expect(moduleOf("points")?.body).toBe("2000");
+  });
+});
+
+describe("Google card: the next reward beside the tier", () => {
+  it("names the next reward and the points still to earn, on two lines", async () => {
+    await issue(rewardsPass);
+
+    expect(moduleOf("next_reward")).toEqual({
+      id: "next_reward",
+      header: "Próxima recompensa",
+      body: "Sérum reparador\nTe faltan 250 puntos"
+    });
+  });
+
+  it("keeps the whole description when the name and distance are not known apart", async () => {
+    await issue({
+      ...rewardsPass,
+      reward: { description: "Hydrafacial · te faltan 2 visitas", progressPercent: 80 }
+    });
+
+    expect(moduleOf("next_reward")?.body).toBe("Hydrafacial · te faltan 2 visitas");
+  });
+
+  it("is removed once there is no next reward, so the card falls back to Ver beneficios", async () => {
+    await issue(rewardsPass);
+
+    await provider().syncCard(ref, { ...rewardsPass, reward: undefined });
+
+    expect(moduleOf("next_reward")).toBeUndefined();
+    expect(moduleOf("rewards")).toBeDefined();
+  });
+
+  it("costs an unchanged sync no text-module write", async () => {
+    await issue(rewardsPass);
+    google.calls.length = 0;
+
+    await provider().syncCard(ref, rewardsPass);
+
+    const patches = google.calls.filter((c) => c.method === "PATCH");
+
+    expect(patches.some((patch) => "textModulesData" in (patch.body ?? {}))).toBe(false);
   });
 });
 
@@ -224,7 +288,11 @@ describe("Google card: the rewards text is bounded", () => {
     expect(shown).toBeGreaterThanOrEqual(1);
     expect(body).toContain(`… y ${12 - shown} más`);
     // The count on the card is still every reward.
-    expect(stored().secondaryLoyaltyPoints).toMatchObject({ balance: { int: 12 } });
+    expect(moduleOf("rewards_count")).toEqual({
+      id: "rewards_count",
+      header: "Regalos",
+      body: "12 premios"
+    });
   });
 });
 
@@ -240,9 +308,9 @@ describe("Google card: the new fields can never stop the points updating", () =>
     expect(patches).toHaveLength(2);
     expect(patches[0].body).toHaveProperty("loyaltyPoints");
     expect(patches[0].body).toHaveProperty("state", "ACTIVE");
-    expect(JSON.stringify(patches[0].body)).not.toContain("secondaryLoyaltyPoints");
+    expect(JSON.stringify(patches[0].body)).not.toContain("rewards_count");
     expect(JSON.stringify(patches[0].body)).not.toContain("Recompensas disponibles");
-    expect(patches[1].body).toHaveProperty("secondaryLoyaltyPoints");
+    expect(JSON.stringify(patches[1].body)).toContain("rewards_count");
   });
 
   it("still updates the points, and still succeeds, when Google rejects the rewards fields", async () => {
@@ -250,8 +318,15 @@ describe("Google card: the new fields can never stop the points updating", () =>
     google.rejectRewards = true;
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
+    // The rewards change too, so the best-effort patch has something to write for Google to refuse
+    // (an unchanged module is not written at all).
     await expect(
-      provider().syncCard(ref, { ...rewardsPass, points: 1900, tier: "Oro" })
+      provider().syncCard(ref, {
+        ...rewardsPass,
+        points: 1900,
+        tier: "Oro",
+        rewards: { available: [] }
+      })
     ).resolves.toBeUndefined();
 
     expect(moduleOf("points")?.body).toBe("1900");
@@ -269,7 +344,7 @@ describe("Google card: the new fields can never stop the points updating", () =>
     await expect(issue(rewardsPass)).resolves.toBeDefined();
 
     expect(stored()).toBeDefined();
-    expect(stored().secondaryLoyaltyPoints).toBeUndefined();
+    expect(moduleOf("rewards_count")).toBeUndefined();
     expect(moduleOf("rewards")).toBeUndefined();
     expect(moduleOf("points")).toBeDefined();
     error.mockRestore();

@@ -70,6 +70,13 @@ const envSchema = z.object({
    * tell the admin panel that real members can save cards when they cannot.
    */
   GOOGLE_WALLET_PUBLISHING_STATUS: z.enum(["demo", "live"]).default("demo"),
+  // Optional. The public https URL of POST /api/v1/google-wallet/callback, written into each
+  // Google class's callbackOptions so Google tells us when a member saves a pass (the moment the
+  // Bronce welcome goes out). Unset, the route is not mounted and classes carry no callback.
+  GOOGLE_WALLET_CALLBACK_URL: z.preprocess(
+    blankIsUnset,
+    httpsUrlWithoutTrailingSlash("GOOGLE_WALLET_CALLBACK_URL").optional()
+  ),
 
   // Optional, and read at startup rather than at first use, because whether the Apple
   // pass web service is mounted at all depends on it. Without a certificate there is no
