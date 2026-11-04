@@ -26,6 +26,9 @@ interface World {
   stored?: { notificationId: string | null; sentAt: Date };
   /** Creation time of the notification the stored message came from. */
   storedNotificationCreatedAt?: Date;
+  /** The text as typed by the clinic, and the member's full name. */
+  text?: { header: string; body: string };
+  memberName?: string;
 }
 
 /** An in-memory stand-in for the handful of tables processDelivery touches, with an event log. */
@@ -49,8 +52,8 @@ const buildWorld = (world: World = {}) => {
       id: "notification-1",
       clinicId: "clinic-1",
       type: world.type ?? NotificationType.SINGLE,
-      header: "Título",
-      body: "cuerpo",
+      header: world.text?.header ?? "Título",
+      body: world.text?.body ?? "cuerpo",
       actionUrl: null,
       notify: true,
       createdAt: world.createdAt ?? new Date("2026-10-27T09:00:00Z"),
@@ -59,6 +62,7 @@ const buildWorld = (world: World = {}) => {
       status: world.notificationStatus ?? NotificationStatus.QUEUED
     },
     member: {
+      name: world.memberName,
       walletObjects: (
         world.walletObjects ?? [
           { provider: WalletProviderType.APPLE, status: WalletSyncStatus.SYNCED }
@@ -157,6 +161,22 @@ const serviceFor = (
     {} as never,
     refreshMemberCard ? { refreshMemberCard } : null
   );
+
+describe("a hand-written message to an Apple card", () => {
+  it("greets the member by first name in the message stored on their card", async () => {
+    const { prisma, state } = buildWorld({
+      text: { header: "Hola {first_name}", body: "{first_name}, tienes un regalo" },
+      memberName: "Lucía Fernández"
+    });
+
+    await serviceFor(prisma, async () => undefined).processDelivery("delivery-apple");
+
+    expect(state.messages[0]).toMatchObject({
+      header: "Hola Lucía",
+      body: "Lucía, tienes un regalo"
+    });
+  });
+});
 
 describe("processDelivery for an Apple card", () => {
   it("stores the message, refreshes the card once, and marks SENT only after the refresh resolved", async () => {

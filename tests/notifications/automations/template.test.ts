@@ -4,6 +4,7 @@ import { AUTOMATION_CATALOG } from "../../../src/modules/notifications/automatio
 import {
   firstName,
   linkifyForGoogle,
+  personalise,
   renderTemplate,
   unknownVariables
 } from "../../../src/modules/notifications/template";
@@ -24,6 +25,21 @@ describe("renderTemplate", () => {
 
   it("leaves braces that are not variables alone", () => {
     expect(renderTemplate("{ 10% } {first_name}", { first_name: "Ana" })).toBe("{ 10% } Ana");
+  });
+});
+
+describe("personalise", () => {
+  it("uses the member's first name", () => {
+    expect(personalise("¡Hola {first_name}!", "María José López")).toBe("¡Hola María!");
+  });
+
+  it("closes up punctuation when there is no name to put in", () => {
+    expect(personalise("¡Hola {first_name}!", null)).toBe("¡Hola!");
+    expect(personalise("Hola {first_name}, tienes un 20%", "")).toBe("Hola, tienes un 20%");
+  });
+
+  it("leaves text without the variable alone", () => {
+    expect(personalise("Tienes un 20% de descuento", "Ana")).toBe("Tienes un 20% de descuento");
   });
 });
 

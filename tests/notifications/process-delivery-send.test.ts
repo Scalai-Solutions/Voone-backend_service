@@ -14,13 +14,16 @@ interface Setup {
   markFails?: boolean;
   /** Per addObjectMessage call (1-based); throw to fail it. */
   send?: (call: number) => void;
+  /** The text as typed by the clinic, and the member's full name. */
+  text?: { header: string; body: string };
+  memberName?: string;
 }
 
 const build = (setup: Setup = {}) => {
   const state = {
     deliveryStatus: NotificationDeliveryStatus.QUEUED as NotificationDeliveryStatus,
     errorCode: undefined as string | null | undefined,
-    messages: [] as Array<{ notify: boolean }>,
+    messages: [] as Array<{ notify: boolean; header?: string; body?: string }>,
     recordPushCalls: 0
   };
   const prisma = {
@@ -34,13 +37,14 @@ const build = (setup: Setup = {}) => {
           id: "notification-1",
           clinicId: "clinic-1",
           type: "SINGLE",
-          header: "Hi",
-          body: "There",
+          header: setup.text?.header ?? "Hi",
+          body: setup.text?.body ?? "There",
           actionUrl: null,
           notify: setup.notify ?? false,
           status: "QUEUED"
         },
         member: {
+          name: setup.memberName,
           walletObjects: [
             {
               provider: WalletProviderType.GOOGLE,
@@ -66,7 +70,10 @@ const build = (setup: Setup = {}) => {
     clinic: { update: async () => undefined }
   };
   const wallet = {
-    addObjectMessage: async (_id: string, message: { notify: boolean }) => {
+    addObjectMessage: async (
+      _id: string,
+      message: { notify: boolean; header?: string; body?: string }
+    ) => {
       state.messages.push(message);
       setup.send?.(state.messages.length);
       return { messageId: `message-${state.messages.length}` };
@@ -101,6 +108,29 @@ afterEach(() => {
 
 const loggedText = () =>
   JSON.stringify([...vi.mocked(console.error).mock.calls, ...vi.mocked(console.warn).mock.calls]);
+
+describe("a hand-written message to a Google member", () => {
+  it("greets the member by first name", async () => {
+    const { service, state } = build({
+      text: { header: "Hola {first_name}", body: "{first_name}, te esperamos" },
+      memberName: "María José López"
+    });
+
+    await service.processDelivery("delivery-1");
+
+    expect(state.messages[0]).toMatchObject({ header: "Hola María", body: "María, te esperamos" });
+  });
+
+  it("drops the placeholder cleanly for a member with no name", async () => {
+    const { service, state } = build({
+      text: { header: "Hola {first_name}!", body: "Hola {first_name}, te esperamos" }
+    });
+
+    await service.processDelivery("delivery-1");
+
+    expect(state.messages[0]).toMatchObject({ header: "Hola!", body: "Hola, te esperamos" });
+  });
+});
 
 describe("processDelivery after a Google message went out", () => {
   it("marks SENT and records the push once on the normal path", async () => {

@@ -27,6 +27,18 @@ export const renderTemplate = (template: string, values: TemplateValues): string
 export const firstName = (fullName: string | null | undefined): string =>
   (fullName ?? "").trim().split(/\s+/)[0] ?? "";
 
+/** The one variable a message typed by hand may use; the rest belong to automations. */
+export const MANUAL_VARIABLES = ["first_name"] as const;
+
+/**
+ * A hand-written message for one member: {first_name} becomes their first name. With no name
+ * (a member who gave none, or Google's one shared broadcast message) the placeholder simply
+ * disappears and the punctuation closes up, so "¡Hola {first_name}, hoy…" reads "¡Hola, hoy…"
+ * and never shows a stray "{first_name}" or a space before a comma.
+ */
+export const personalise = (text: string, memberName: string | null | undefined): string =>
+  renderTemplate(text, { first_name: firstName(memberName) }).replace(/\s+([,.;:!?])/g, "$1");
+
 const BARE_URL = /https?:\/\/[^\s<>"']+/g;
 const TRAILING_PUNCTUATION = /[.,;:!?)\]]+$/;
 

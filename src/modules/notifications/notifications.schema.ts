@@ -1,6 +1,8 @@
 import { AutomationEvent } from "@prisma/client";
 import { z } from "zod";
 
+import { MANUAL_VARIABLES, unknownVariables } from "./template";
+
 const httpsUrl = z
   .string()
   .url()
@@ -8,9 +10,25 @@ const httpsUrl = z
     message: "URL must use https"
   });
 
+/** Refuses a {variable} a hand-written message cannot fill in, so a typo never reaches a phone. */
+const usesOnlyManualVariables = (text: string): boolean =>
+  unknownVariables(text, MANUAL_VARIABLES).length === 0;
+
+const VARIABLE_MESSAGE = "Solo puedes usar la variable {first_name} en un mensaje manual.";
+
 export const notificationMessageSchema = z.object({
-  header: z.string().trim().min(1).max(60),
-  body: z.string().trim().min(1).max(500),
+  header: z
+    .string()
+    .trim()
+    .min(1)
+    .max(60)
+    .refine(usesOnlyManualVariables, { message: VARIABLE_MESSAGE }),
+  body: z
+    .string()
+    .trim()
+    .min(1)
+    .max(500)
+    .refine(usesOnlyManualVariables, { message: VARIABLE_MESSAGE }),
   actionUrl: httpsUrl.optional(),
   notify: z.boolean(),
   scheduledAt: z.coerce.date().optional()
