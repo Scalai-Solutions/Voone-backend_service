@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import { run } from "../../../src/modules/onboarding/engine";
+import type { Answers, CatalogItem, Program } from "../../../src/modules/onboarding/engine.types";
+import { isEngineError } from "../../../src/modules/onboarding/engine.types";
+import { itemsTitle } from "../../../src/modules/onboarding/reward-title";
 import { BirthdayTrigger } from "../../../src/modules/notifications/automations/triggers/birthday.trigger";
 import { BonoInactiveTrigger } from "../../../src/modules/notifications/automations/triggers/bono-inactive.trigger";
 import { ReferralPromoTrigger } from "../../../src/modules/notifications/automations/triggers/referral-promo.trigger";
@@ -7,6 +11,7 @@ import {
   ReviewRequestNotifier,
   ReviewRequestTrigger
 } from "../../../src/modules/notifications/automations/triggers/review-request.trigger";
+import catalog from "../../onboarding/reference/sapphira.catalogo.json";
 
 const DAY = 86_400_000;
 const now = new Date("2026-11-01T20:00:00Z");
@@ -19,20 +24,60 @@ const today = (day: number) => ({
 });
 const ctx = { clinicId: "c1", today: today(1), now };
 
+const ANSWERS: Answers = {
+  ticket: null,
+  freq: null,
+  objective: "equilibrado",
+  investment: "equilibrado",
+  occupancy: "o2",
+  members: "m3"
+};
+const livePrograms = (): { program: Program; prisma: { findFirst: () => Promise<unknown> } } => {
+  const result = run(catalog as CatalogItem[], ANSWERS);
+
+  if (isEngineError(result)) throw new Error(result.error);
+
+  return { program: result, prisma: { findFirst: async () => ({ output: result }) } };
+};
+
 describe("BirthdayTrigger", () => {
   it("picks members whose birthday is today, whatever year they were born", async () => {
+    const { prisma: program } = livePrograms();
     const prisma = {
       member: {
         findMany: async () => [
-          { id: "today", birthDate: new Date("1990-11-01T00:00:00Z") },
-          { id: "tomorrow", birthDate: new Date("1990-11-02T00:00:00Z") }
+          { id: "today", birthDate: new Date("1990-11-01T00:00:00Z"), tier: "Bronce" },
+          { id: "tomorrow", birthDate: new Date("1990-11-02T00:00:00Z"), tier: "Bronce" }
         ]
-      }
+      },
+      onboardingProgram: program
     };
 
     const recipients = await new BirthdayTrigger(prisma as never).findRecipients(ctx);
 
     expect(recipients.map((r) => r.memberId)).toEqual(["today"]);
+  });
+
+  it("gives each member the birthday gift of their own tier, from the live programme", async () => {
+    const { program, prisma: live } = livePrograms();
+    const prisma = {
+      member: {
+        findMany: async () => [
+          { id: "gold", birthDate: new Date("1990-11-01T00:00:00Z"), tier: "Oro" },
+          { id: "bronze", birthDate: new Date("1985-11-01T00:00:00Z"), tier: "Bronce" }
+        ]
+      },
+      onboardingProgram: live
+    };
+
+    const recipients = await new BirthdayTrigger(prisma as never).findRecipients(ctx);
+    const gift = (tier: "oro" | "bronce") => itemsTitle(program.gifts[tier].birthday!.items);
+
+    expect(recipients).toEqual([
+      { memberId: "gold", values: { birthday_gift: gift("oro") } },
+      { memberId: "bronze", values: { birthday_gift: gift("bronce") } }
+    ]);
+    expect(gift("oro")).not.toBe(gift("bronce"));
   });
 });
 
@@ -195,23 +240,55 @@ describe("ReferralPromoTrigger", () => {
 
   it("selects consenting members active in the last 90 days", async () => {
     const wheres: Array<Record<string, unknown>> = [];
+    const { program, prisma: live } = livePrograms();
     const prisma = {
       member: {
         findMany: async ({ where }: { where: Record<string, unknown> }) => (
           wheres.push(where),
           [{ id: "m1" }]
         )
-      }
+      },
+      onboardingProgram: live,
+      referral: { groupBy: async () => [] }
     };
 
     const recipients = await new ReferralPromoTrigger(prisma as never, 1).findRecipients(ctx);
 
-    expect(recipients).toEqual([{ memberId: "m1" }]);
+    expect(recipients).toEqual([
+      { memberId: "m1", values: { referral_reward: program.refLad[0].name } }
+    ]);
     expect(wheres[0].consentMarketing).toBe(true);
     const where = wheres[0] as {
       OR: Array<{ paidVisits: { some: { occurredAt: { gte: Date } } } }>;
     };
 
     expect(where.OR[0].paidVisits.some.occurredAt.gte.getTime()).toBe(daysAgo(90).getTime());
+  });
+
+  it("names the reward of each member's own next referral", async () => {
+    const { program, prisma: live } = livePrograms();
+    const prisma = {
+      member: { findMany: async () => [{ id: "new" }, { id: "veteran" }] },
+      onboardingProgram: live,
+      referral: { groupBy: async () => [{ referrerId: "veteran", _count: { _all: 3 } }] }
+    };
+
+    const recipients = await new ReferralPromoTrigger(prisma as never, 1).findRecipients(ctx);
+    const step = (n: number) => program.refLad.find((candidate) => candidate.n === n)!.name;
+
+    expect(recipients).toEqual([
+      { memberId: "new", values: { referral_reward: step(1) } },
+      { memberId: "veteran", values: { referral_reward: step(5) } }
+    ]);
+  });
+
+  it("sends to nobody when the clinic has no live programme", async () => {
+    const prisma = {
+      member: { findMany: async () => [{ id: "m1" }] },
+      onboardingProgram: { findFirst: async () => null },
+      referral: { groupBy: async () => [] }
+    };
+
+    expect(await new ReferralPromoTrigger(prisma as never, 1).findRecipients(ctx)).toEqual([]);
   });
 });

@@ -60,7 +60,6 @@ export const notificationSettingsPatchSchema = z
     notifyOnCredit: z.enum(["NEVER", "MILESTONE_AND_TIER", "ALWAYS"]),
     marketingEnabled: z.boolean(),
     googleReviewUrl: httpsUrl.max(500).nullable(),
-    referralRewardText: z.string().trim().min(1).max(120).nullable(),
     automations: z.partialRecord(z.enum(AutomationEvent), automationPatchSchema)
   })
   .partial()

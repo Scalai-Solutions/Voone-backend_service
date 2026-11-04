@@ -14,8 +14,8 @@ import { automationDefinition } from "./catalog";
 export interface AutomationRecipient {
   memberId: string;
   /**
-   * Values specific to this send (new_tier, benefits_summary, …). first_name, clinic_name,
-   * google_maps_link and referral_reward are filled in by the dispatcher.
+   * Values specific to this send (new_tier, benefits_summary, referral_reward, birthday_gift, …).
+   * first_name, clinic_name and google_maps_link are filled in by the dispatcher.
    */
   values?: TemplateValues;
 }
@@ -92,8 +92,7 @@ export class AutomationDispatchService {
 
     const clinicValues: Record<string, string> = {
       clinic_name: clinic.name,
-      google_maps_link: settings?.googleReviewUrl ?? "",
-      referral_reward: settings?.referralRewardText ?? ""
+      google_maps_link: settings?.googleReviewUrl ?? ""
     };
     const members = await this.eligibleMembers(
       clinicId,

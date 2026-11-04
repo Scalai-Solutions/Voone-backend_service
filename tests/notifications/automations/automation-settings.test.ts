@@ -18,7 +18,6 @@ const build = (
           notifyOnCredit: "MILESTONE_AND_TIER",
           marketingEnabled: true,
           googleReviewUrl: null,
-          referralRewardText: null,
           ...stored.settings
         };
       }

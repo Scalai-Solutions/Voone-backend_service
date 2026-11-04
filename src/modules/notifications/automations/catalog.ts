@@ -1,13 +1,14 @@
 import { AutomationEvent, NotificationType } from "@prisma/client";
 
 /** Clinic-level values an automation can depend on; stored on ClinicNotificationSettings. */
-export type ClinicVariableKey = "googleReviewUrl" | "referralRewardText";
+export type ClinicVariableKey = "googleReviewUrl";
 
 export type TemplateVariable =
   | "first_name"
   | "clinic_name"
   | "google_maps_link"
   | "referral_reward"
+  | "birthday_gift"
   | "new_tier"
   | "benefits_summary";
 
@@ -38,13 +39,13 @@ export const AUTOMATION_CATALOG: readonly AutomationDefinition[] = [
     event: AutomationEvent.BIRTHDAY,
     notificationType: NotificationType.BIRTHDAY,
     label: "Cumpleaños",
-    description: "Felicita a tus clientes el día de su cumpleaños.",
-    variables: ["first_name", "clinic_name"],
+    description: "Felicita a tus clientes el día de su cumpleaños con el regalo de su nivel.",
+    variables: ["first_name", "clinic_name", "birthday_gift"],
     marketing: true,
     defaults: {
       enabled: true,
       header: "¡Feliz cumpleaños!",
-      body: "¡Feliz cumpleaños! Disfruta de un 10% de descuento en nuestros servicios. Esperamos verte pronto.",
+      body: "¡Feliz cumpleaños, {first_name}! Tu regalo de cumpleaños en {clinic_name}: {birthday_gift}. Esperamos verte pronto.",
       notify: true
     }
   },
@@ -81,10 +82,11 @@ export const AUTOMATION_CATALOG: readonly AutomationDefinition[] = [
     event: AutomationEvent.REFERRAL_PROMO,
     notificationType: NotificationType.REFERRAL_PROMO,
     label: "Programa de referidos",
-    description: "Cada mes, recuerda a tus clientes activos que pueden compartir su código.",
+    description:
+      "Cada mes, recuerda a tus clientes activos que pueden compartir su código y el premio que ganarán.",
+    // Filled per member from the live programme: the reward their next referral earns.
     variables: ["first_name", "clinic_name", "referral_reward"],
     marketing: true,
-    requires: "referralRewardText",
     defaults: {
       enabled: false,
       header: "¡Comparte la experiencia y gana! 🎁",
