@@ -104,6 +104,16 @@ describe("refreshGoogleClasses", () => {
     expect(google.patches[0].body.programName).toBe("Club");
   });
 
+  it("clears on Google what the template no longer has, rather than leaving the old one", async () => {
+    // This template has no hero image and no appointment link. A PATCH keeps any field it omits,
+    // so they are sent as null, which is how Google clears a field.
+    const { prisma: db } = prismaWith([row("c1", "issuer-1.club_1")]);
+
+    await refreshGoogleClasses({ prisma: db, provider: provider(), clinicId: "c1", apply: true });
+
+    expect(google.patches[0].body).toMatchObject({ heroImage: null, appLinkData: null });
+  });
+
   it("leaves the hand-typed benefits off the class of a clinic with a live programme", async () => {
     const programme = row("c1", "issuer-1.club_1");
 

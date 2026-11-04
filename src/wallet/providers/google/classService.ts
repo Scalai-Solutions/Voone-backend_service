@@ -135,6 +135,23 @@ interface GoogleTemplateItem {
   };
 }
 
+/**
+ * The fields a template can take away (no logo, no hero image, no appointment button). The body
+ * leaves them out, and a PATCH leaves an omitted field as it was, so a removed hero image or button
+ * stayed on every pass. Google clears a field sent as null (Wallet performance tips, "patch").
+ */
+const CLEARABLE_CLASS_FIELDS = ["programLogo", "heroImage", "appLinkData"] as const;
+
+const withClearedFields = (body: GoogleLoyaltyClassRequest): Record<string, unknown> => ({
+  ...body,
+  ...Object.fromEntries(
+    CLEARABLE_CLASS_FIELDS.filter((field) => body[field] === undefined).map((field) => [
+      field,
+      null
+    ])
+  )
+});
+
 export const createOrUpdateClass = async (
   input: LoyaltyClassInput,
   options: GoogleClassBuildOptions = {}
@@ -151,7 +168,7 @@ export const createOrUpdateClass = async (
 
     const patchResponse = await client.requestWithResponse<unknown>(classPath, {
       method: "PATCH",
-      body
+      body: withClearedFields(body)
     });
 
     logFullObject("Google Wallet LoyaltyClass PATCH response", {
