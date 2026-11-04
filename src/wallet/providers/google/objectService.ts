@@ -266,7 +266,10 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
 
     // The object's only links are the referral one, so the whole list is written, or cleared
     // when it holds one; a card that never had a referral link costs no write.
-    if (patch.referral || (patch.referral === null && existingObject.linksModuleData?.uris?.length)) {
+    if (
+      patch.referral ||
+      (patch.referral === null && existingObject.linksModuleData?.uris?.length)
+    ) {
       body.linksModuleData = toReferralLinks(patch.referral?.url);
     }
   }

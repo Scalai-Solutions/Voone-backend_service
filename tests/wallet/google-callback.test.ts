@@ -24,7 +24,11 @@ const signB64 = (key: KeyObject, data: Buffer) => sign("sha256", data, key).toSt
 const root = ec();
 const intermediate = ec();
 const rootKeys: GoogleRootKey[] = [
-  { keyValue: spki(root.publicKey), protocolVersion: "ECv2SigningOnly", keyExpiration: String(NOW + 1e9) }
+  {
+    keyValue: spki(root.publicKey),
+    protocolVersion: "ECv2SigningOnly",
+    keyExpiration: String(NOW + 1e9)
+  }
 ];
 
 const callback = (
@@ -54,7 +58,12 @@ const callback = (
     signedMessage,
     signature: signB64(
       intermediate.privateKey,
-      lengthPrefixed("GooglePayPasses", overrides.recipient ?? ISSUER, "ECv2SigningOnly", signedMessage)
+      lengthPrefixed(
+        "GooglePayPasses",
+        overrides.recipient ?? ISSUER,
+        "ECv2SigningOnly",
+        signedMessage
+      )
     )
   };
 };
@@ -97,9 +106,16 @@ describe("verifyGoogleCallback", () => {
     expect(
       verifyGoogleCallback(callback({ message: { expTimeMillis: NOW - 1 } }), rootKeys, ISSUER, NOW)
     ).toBeNull();
-    expect(verifyGoogleCallback(callback({ keyExpiration: NOW - 1 }), rootKeys, ISSUER, NOW)).toBeNull();
     expect(
-      verifyGoogleCallback(callback(), [{ ...rootKeys[0], keyExpiration: String(NOW - 1) }], ISSUER, NOW)
+      verifyGoogleCallback(callback({ keyExpiration: NOW - 1 }), rootKeys, ISSUER, NOW)
+    ).toBeNull();
+    expect(
+      verifyGoogleCallback(
+        callback(),
+        [{ ...rootKeys[0], keyExpiration: String(NOW - 1) }],
+        ISSUER,
+        NOW
+      )
     ).toBeNull();
   });
 
@@ -159,7 +175,11 @@ describe("POST /google-wallet/callback", () => {
   });
 
   it("acknowledges a deletion or an unknown pass without acting, so Google does not retry", async () => {
-    expect(await post(live({ eventType: "del" }))).toEqual({ status: 200, synced: [], welcomed: [] });
+    expect(await post(live({ eventType: "del" }))).toEqual({
+      status: 200,
+      synced: [],
+      welcomed: []
+    });
     expect(await post(live(), false)).toEqual({ status: 200, synced: [], welcomed: [] });
   });
 });

@@ -54,7 +54,11 @@ export class BullNotificationQueue implements NotificationJobQueue {
   }
 
   async enqueueGoogleSaveCheck(job: GoogleSaveCheckJob, delayMs: number): Promise<void> {
-    await this.queue.add("google-save-check", { kind: "google-save-check", ...job }, { delay: delayMs });
+    await this.queue.add(
+      "google-save-check",
+      { kind: "google-save-check", ...job },
+      { delay: delayMs }
+    );
   }
 
   async close(): Promise<void> {

@@ -57,7 +57,9 @@ export const notificationSegmentSchema = z
   })
   .refine(
     (segment) =>
-      segment.ageMin === undefined || segment.ageMax === undefined || segment.ageMin <= segment.ageMax,
+      segment.ageMin === undefined ||
+      segment.ageMax === undefined ||
+      segment.ageMin <= segment.ageMax,
     { message: "La edad mínima no puede ser mayor que la máxima", path: ["ageMax"] }
   );
 

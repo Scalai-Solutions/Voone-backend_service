@@ -354,8 +354,13 @@ export class GoogleWalletProvider extends BaseWalletProvider {
    * code kept inside the QR, which is what reception scans. A member not yet given a code keeps
    * the redemption code as both.
    */
-  private toMemberNumber(card: LoyaltyCard): Pick<LoyaltyObjectInput, "accountId" | "barcodeValue"> {
-    return { accountId: card.member.code ?? card.redemptionCode, barcodeValue: card.redemptionCode };
+  private toMemberNumber(
+    card: LoyaltyCard
+  ): Pick<LoyaltyObjectInput, "accountId" | "barcodeValue"> {
+    return {
+      accountId: card.member.code ?? card.redemptionCode,
+      barcodeValue: card.redemptionCode
+    };
   }
 
   /** The code in the text, the link as the object's tappable link (a URL in text is neither). */

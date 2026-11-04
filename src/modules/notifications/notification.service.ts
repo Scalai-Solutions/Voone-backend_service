@@ -97,7 +97,9 @@ export interface GoogleSaveCheckJob {
  * watch stops (product decision 2026-11-04: the welcome belongs to the sign-up moment). A pass
  * saved later is still welcomed by the save callback where GOOGLE_WALLET_CALLBACK_URL is set.
  */
-export const GOOGLE_SAVE_CHECK_DELAYS_MS = [30_000, 30_000, 60_000, 60_000, 60_000, 60_000] as const;
+export const GOOGLE_SAVE_CHECK_DELAYS_MS = [
+  30_000, 30_000, 60_000, 60_000, 60_000, 60_000
+] as const;
 
 export interface NotificationJobQueue {
   enqueueNotification(notificationId: string, delayMs?: number): Promise<void>;
@@ -381,7 +383,10 @@ export class NotificationService {
    * a watch per member if that ever shows up in Google's quota.
    */
   async watchGooglePassSave(memberId: string): Promise<void> {
-    await this.jobs.enqueueGoogleSaveCheck({ memberId, attempt: 0 }, GOOGLE_SAVE_CHECK_DELAYS_MS[0]);
+    await this.jobs.enqueueGoogleSaveCheck(
+      { memberId, attempt: 0 },
+      GOOGLE_SAVE_CHECK_DELAYS_MS[0]
+    );
   }
 
   async processGoogleSaveCheck({ memberId, attempt }: GoogleSaveCheckJob): Promise<void> {

@@ -7,7 +7,12 @@ import {
 } from "../../src/modules/notifications/notification.service";
 
 /** The watch that sends the tier welcome once a member has saved their Google pass. */
-const build = (opts: { saved: boolean; welcomed?: boolean; tier?: string | null; pass?: boolean }) => {
+const build = (opts: {
+  saved: boolean;
+  welcomed?: boolean;
+  tier?: string | null;
+  pass?: boolean;
+}) => {
   const scheduled: Array<{ job: GoogleSaveCheckJob; delayMs: number }> = [];
   const keys: unknown[] = [];
   const prisma = {

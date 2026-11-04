@@ -104,7 +104,11 @@ describe("Google card: redeemable rewards", () => {
   it("creates the object with the gift count and the rewards module", async () => {
     await issue(rewardsPass);
 
-    expect(moduleOf("rewards_count")).toEqual({ id: "rewards_count", header: "Regalos", body: "2 premios" });
+    expect(moduleOf("rewards_count")).toEqual({
+      id: "rewards_count",
+      header: "Regalos",
+      body: "2 premios"
+    });
     expect(moduleOf("rewards")).toEqual({
       id: "rewards",
       header: "Recompensas disponibles",
@@ -119,7 +123,11 @@ describe("Google card: redeemable rewards", () => {
   it("creates a zero count and the empty text for a programme member with none", async () => {
     await issue({ ...rewardsPass, rewards: { available: [] } });
 
-    expect(moduleOf("rewards_count")).toEqual({ id: "rewards_count", header: "Regalos", body: "0 premios" });
+    expect(moduleOf("rewards_count")).toEqual({
+      id: "rewards_count",
+      header: "Regalos",
+      body: "0 premios"
+    });
     expect(moduleOf("rewards")?.body).toContain("Aún no tienes recompensas disponibles.");
   });
 
@@ -140,7 +148,11 @@ describe("Google card: redeemable rewards", () => {
 
     expect(moduleOf("rewards")?.body).toContain("🎁 Premio 8 · hasta 12 sept");
     expect(moduleOf("rewards")?.body).toContain("… y 1 más");
-    expect(moduleOf("rewards_count")).toEqual({ id: "rewards_count", header: "Regalos", body: "9 premios" });
+    expect(moduleOf("rewards_count")).toEqual({
+      id: "rewards_count",
+      header: "Regalos",
+      body: "9 premios"
+    });
   });
 
   it("a sync updates the count and the module and keeps every other object module", async () => {
@@ -166,7 +178,11 @@ describe("Google card: redeemable rewards", () => {
     expect(after.find((m) => m.id === "tier")).toBeDefined();
     expect(after.find((m) => m.id === "rewards")?.body).toContain("Aún no tienes");
     expect(after.find((m) => m.id === "points")?.body).toBe("1900");
-    expect(moduleOf("rewards_count")).toEqual({ id: "rewards_count", header: "Regalos", body: "0 premios" });
+    expect(moduleOf("rewards_count")).toEqual({
+      id: "rewards_count",
+      header: "Regalos",
+      body: "0 premios"
+    });
   });
 
   it("a sync adds the module to an object created before rewards existed", async () => {
@@ -177,7 +193,11 @@ describe("Google card: redeemable rewards", () => {
     expect(moduleOf("rewards")?.body).toContain("🎁 Limpieza facial");
     expect(moduleOf("tier")).toBeDefined();
     expect(moduleOf("member_since")).toBeDefined();
-    expect(moduleOf("rewards_count")).toEqual({ id: "rewards_count", header: "Regalos", body: "2 premios" });
+    expect(moduleOf("rewards_count")).toEqual({
+      id: "rewards_count",
+      header: "Regalos",
+      body: "2 premios"
+    });
   });
 
   it("a sync for a clinic with no programme leaves the rewards parts untouched", async () => {
@@ -193,9 +213,9 @@ describe("Google card: redeemable rewards", () => {
     await provider().syncCard(ref, { ...rewardsPass, rewards: undefined });
 
     expect(moduleOf("rewards")?.body).toBe("kept");
-    expect(JSON.stringify(google.calls.filter((c) => c.method === "PATCH").at(-1)?.body)).not.toContain(
-      "rewards_count"
-    );
+    expect(
+      JSON.stringify(google.calls.filter((c) => c.method === "PATCH").at(-1)?.body)
+    ).not.toContain("rewards_count");
   });
 
   it("the points-credit patch does not drop the rewards module", async () => {
@@ -265,7 +285,11 @@ describe("Google card: the rewards text is bounded", () => {
     expect(shown).toBeGreaterThanOrEqual(1);
     expect(body).toContain(`… y ${12 - shown} más`);
     // The count on the card is still every reward.
-    expect(moduleOf("rewards_count")).toEqual({ id: "rewards_count", header: "Regalos", body: "12 premios" });
+    expect(moduleOf("rewards_count")).toEqual({
+      id: "rewards_count",
+      header: "Regalos",
+      body: "12 premios"
+    });
   });
 });
 

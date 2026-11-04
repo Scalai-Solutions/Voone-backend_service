@@ -70,7 +70,11 @@ export const lengthPrefixed = (...parts: string[]): Buffer =>
 
 const signedBy = (keyBase64: string, data: Buffer, signatureBase64: string): boolean => {
   try {
-    const key = createPublicKey({ key: Buffer.from(keyBase64, "base64"), format: "der", type: "spki" });
+    const key = createPublicKey({
+      key: Buffer.from(keyBase64, "base64"),
+      format: "der",
+      type: "spki"
+    });
 
     return verify("sha256", data, key, Buffer.from(signatureBase64, "base64"));
   } catch {

@@ -54,7 +54,8 @@ export const tierBenefitsSummary = async (
 };
 
 /** One congratulation per member per tier, however many times the job retries. */
-export const tierMessageKey = (memberId: string, tier: string): string => `tier:${memberId}:${tier}`;
+export const tierMessageKey = (memberId: string, tier: string): string =>
+  `tier:${memberId}:${tier}`;
 
 /** EVT-008: congratulates a member the moment they cross into a higher tier. */
 export class TierUpgradeNotifier {
