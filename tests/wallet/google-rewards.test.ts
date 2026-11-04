@@ -36,9 +36,12 @@ vi.mock("../../src/wallet/providers/google/client", async (importOriginal) => {
 
     google.calls.push({ path, method, body: options?.body });
 
+    // Google refusing the rewards WRITE: the create that adds them, or the best-effort patch. Not
+    // the balance patch, which only repeats the modules already on the object, because a PATCH of
+    // textModulesData has to send the whole list.
     if (
       google.rejectRewards &&
-      method !== "GET" &&
+      (method === "POST" || (method === "PATCH" && !("loyaltyPoints" in (options?.body ?? {})))) &&
       JSON.stringify(options?.body).includes("rewards_count")
     ) {
       throw new original.GoogleWalletApiError("bad rewards field", 400, "Bad Request", {
@@ -315,8 +318,15 @@ describe("Google card: the new fields can never stop the points updating", () =>
     google.rejectRewards = true;
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
+    // The rewards change too, so the best-effort patch has something to write for Google to refuse
+    // (an unchanged module is not written at all).
     await expect(
-      provider().syncCard(ref, { ...rewardsPass, points: 1900, tier: "Oro" })
+      provider().syncCard(ref, {
+        ...rewardsPass,
+        points: 1900,
+        tier: "Oro",
+        rewards: { available: [] }
+      })
     ).resolves.toBeUndefined();
 
     expect(moduleOf("points")?.body).toBe("1900");
