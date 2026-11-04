@@ -49,9 +49,11 @@ const uniqueViolation = () =>
     meta: { target: ["clinicId", "phone"] }
   });
 
-const db = (member: Record<string, unknown>) =>
+const db = (member: Record<string, unknown>, livePrograms = 0) =>
   ({
     member,
+    // A clinic without a live programme unless asked: new members take the template's lowest tier.
+    onboardingProgram: { count: vi.fn().mockResolvedValue(livePrograms) },
     clinicTemplate: {
       findUnique: vi.fn().mockResolvedValue({
         tierRewards: [
@@ -63,6 +65,24 @@ const db = (member: Record<string, unknown>) =>
   }) as unknown as PrismaClient;
 
 describe("signUpMember", () => {
+  it("starts a new member in the template's lowest tier at a clinic without a programme", async () => {
+    const create = vi.fn().mockImplementation(async ({ data }) => ({ id: "m1", ...data }));
+
+    await signUpMember(db({ create }), AUREA, INPUT, "qr_signup", NOW);
+
+    expect(create.mock.calls[0][0].data.tier).toBe("Bronze");
+  });
+
+  it("starts a new member in Bronce at a clinic with a live programme", async () => {
+    // Its first rung, so the card shows tier and benefits from sign-up and the first treatment
+    // is not mistaken for a promotion.
+    const create = vi.fn().mockImplementation(async ({ data }) => ({ id: "m1", ...data }));
+
+    await signUpMember(db({ create }, 1), AUREA, INPUT, "qr_signup", NOW);
+
+    expect(create.mock.calls[0][0].data.tier).toBe("Bronce");
+  });
+
   it("gives the new member the code that goes on their card", async () => {
     // The number reception asks for out loud. Assigned at insert rather than later, so
     // there is never a member whose card has no identifier on it.
