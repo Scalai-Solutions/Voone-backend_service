@@ -177,6 +177,77 @@ describe("the cost note no longer blocks publishing", () => {
   });
 });
 
+describe("a swap reads the catalogue as it is today, not the draft's snapshot", () => {
+  const firstReward = (program: { ladder: Array<{ n: number; type: string }> }): number =>
+    program.ladder.find((m) => m.type === "premio")!.n;
+
+  const rewardValue = (
+    body: { program: { ladder: Array<{ n: number; rewardValueEuro?: number }> } },
+    milestone: number
+  ): number | undefined => body.program.ladder.find((m) => m.n === milestone)?.rewardValueEuro;
+
+  it("accepts an item added to the catalogue after the draft was generated", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const draft = await call("POST", admin("/programs"), ANSWERS);
+    const milestone = firstReward(draft.body.program);
+
+    await call("PUT", admin("/catalog"), {
+      items: [...fixtureItems, { externalId: "WNEW", name: "Cera piernas nueva", priceEuro: 55 }]
+    });
+
+    const swapped = await call(
+      "PATCH",
+      admin(`/programs/${draft.body.id}/milestones/${milestone}`),
+      {
+        itemId: "WNEW"
+      }
+    );
+
+    expect(swapped.status).toBe(200);
+    expect(rewardValue(swapped.body, milestone)).toBe(55);
+  });
+
+  it("prices an item with the price it has now when it was repriced after the draft", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const draft = await call("POST", admin("/programs"), ANSWERS);
+    const milestone = firstReward(draft.body.program);
+    const target = fixtureItems.find(
+      (i) => i.name.toLowerCase().includes("cera") && i.priceEuro > 0
+    )!;
+
+    await call("PUT", admin("/catalog"), {
+      items: fixtureItems.map((i) =>
+        i.externalId === target.externalId ? { ...i, priceEuro: 77 } : i
+      )
+    });
+
+    const swapped = await call(
+      "PATCH",
+      admin(`/programs/${draft.body.id}/milestones/${milestone}`),
+      {
+        itemId: target.externalId
+      }
+    );
+
+    // Either the swap is refused for a reason that is not the catalogue (a repeat), or it is priced now.
+    if (swapped.status === 200) expect(rewardValue(swapped.body, milestone)).toBe(77);
+    else expect(JSON.stringify(swapped.body)).not.toContain("no está en el catálogo");
+  });
+
+  it("still names an id that is nowhere in the catalogue", async () => {
+    await call("PUT", admin("/catalog"), { items: fixtureItems });
+    const draft = await call("POST", admin("/programs"), ANSWERS);
+    const refused = await call(
+      "PATCH",
+      admin(`/programs/${draft.body.id}/milestones/${firstReward(draft.body.program)}`),
+      { itemId: "NOT-A-ROW" }
+    );
+
+    expect(refused.status).toBe(409);
+    expect(JSON.stringify(refused.body)).toContain("no está en el catálogo");
+  });
+});
+
 describe("the reward's retail price, for the admin only", () => {
   const live = async (): Promise<string> => {
     await call("PUT", admin("/catalog"), { items: fixtureItems });
