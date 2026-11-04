@@ -537,7 +537,12 @@ export class OnboardingService {
     const answers = row.answers as unknown as Answers;
     const result =
       "itemId" in choice
-        ? swapRewardToItem(program, answers, milestone, choice.itemId)
+        ? swapRewardToItem(
+            await this.withCurrentRow(clinicId, program, choice.itemId),
+            answers,
+            milestone,
+            choice.itemId
+          )
         : swapReward(program, answers, milestone, choice.alternative);
 
     if (!result.ok) throw new OnboardingError(result.reason, 409);
@@ -555,6 +560,34 @@ export class OnboardingService {
     }
 
     return this.getProgram(clinicId, programId);
+  }
+
+  /**
+   * The programme with `itemId` read from the centre's catalogue as it is today.
+   *
+   * `program.catalog` is a snapshot taken when the draft was generated. The swap picker lists
+   * today's catalogue, so an item added or repriced since would be refused ("not in the
+   * catalogue") or priced stale. The current row replaces the snapshot's (or is appended when the
+   * snapshot never had it). An unknown id leaves the programme as it is: the swap then refuses
+   * it by name. The stored programme is never touched here; the swap writes its own result.
+   */
+  private async withCurrentRow(
+    clinicId: string,
+    program: Program,
+    itemId: string
+  ): Promise<Program> {
+    const rows = await this.catalog.listForClinic(clinicId);
+    const current = classify(toEngineCatalog(rows)).find((item) => item.id === itemId);
+
+    if (!current) return program;
+
+    const copy = structuredClone(program);
+    const at = copy.catalog.findIndex((item) => item.id === itemId);
+
+    if (at < 0) copy.catalog.push(current);
+    else copy.catalog[at] = current;
+
+    return copy;
   }
 
   /**
