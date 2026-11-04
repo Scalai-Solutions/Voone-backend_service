@@ -170,6 +170,9 @@ SERVICE_EDIT `treatmentId` is resolved inside that clinic only. Answers 200 with
 - `{status: "ok", signal: "good"|"costs-more"|"similar", vsCurrent: Cell[5], vsRecommended: Cell[5]|null, fiveYearEuros: number|null}`
   with `Cell = {year, mark: "up"|"same"|"down", euros: number|null, percent: number|null, over20: boolean}`
 - `{status: "unpriced"}`
+- `{status: "blocked", kind: "repeat"|"unavailable"}`: the pick itself cannot be simulated, because it would
+  repeat a gift in two consecutive milestones (`repeat`) or the item cannot be a reward (`unavailable`: no price,
+  no category, medical). The kind is all the owner gets: no reason text, no milestone numbers, no figures.
 - `{status: "none"}` (never a reason: the reasons are internal)
 
 Rounding (the frontend pins the same rules): per year `delta = proposedCumulative - baselineCumulative`;
