@@ -116,13 +116,13 @@ Where: **Customer care**, then the ticket.
 
 ## C. Quick answers
 
-| Question | Answer |
-| --- | --- |
-| I resolved the ticket but Rewards did not change. | Resolving does not edit the programme. Open the programme editor, swap, publish. |
-| "Cambiar" says there is no reward at that milestone. | You are on a perk or level row. Swap on a reward row. |
-| I clicked the pencil and the value did not change. | The pencil renames only. Use **Cambiar**. |
-| The chart did not change after a swap. | It refreshes after each swap now. Reload if the page predates the fix. |
-| An item the owner picked says "not in the catalogue". | It is not in the clinic's catalogue. Add it first. |
-| I edited a treatment price and the programme still shows the old value. | The programme keeps its own copy of the catalogue. Generate a new draft and publish it. |
-| The owner sees no comparison. | No estimate was possible (see the edge-cases document, section 4.1). They can still submit. |
-| Which number is the reward's price? | "Reward value" under the title. The number on the right is the customer's spend. |
+| Question                                                                | Answer                                                                                      |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| I resolved the ticket but Rewards did not change.                       | Resolving does not edit the programme. Open the programme editor, swap, publish.            |
+| "Cambiar" says there is no reward at that milestone.                    | You are on a perk or level row. Swap on a reward row.                                       |
+| I clicked the pencil and the value did not change.                      | The pencil renames only. Use **Cambiar**.                                                   |
+| The chart did not change after a swap.                                  | It refreshes after each swap now. Reload if the page predates the fix.                      |
+| An item the owner picked says "not in the catalogue".                   | It is not in the clinic's catalogue. Add it first.                                          |
+| I edited a treatment price and the programme still shows the old value. | The programme keeps its own copy of the catalogue. Generate a new draft and publish it.     |
+| The owner sees no comparison.                                           | No estimate was possible (see the edge-cases document, section 4.1). They can still submit. |
+| Which number is the reward's price?                                     | "Reward value" under the title. The number on the right is the customer's spend.            |
