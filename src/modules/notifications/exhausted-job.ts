@@ -4,7 +4,8 @@ import type { NotificationService } from "./notification.service";
 export type ClosableJob =
   | { kind: "notification"; notificationId: string }
   | { kind: "delivery"; deliveryId: string }
-  | { kind: "points-credit" };
+  | { kind: "points-credit" }
+  | { kind: "google-save-check" };
 
 /**
  * True when the queue will not run this job again: its last attempt is used (attemptsMade
@@ -23,7 +24,7 @@ export const isFinalFailure = (attemptsMade: number, attempts: number, error: Er
  * finalised. Terminal on purpose, never a re-enqueue: a Google message may have been written
  * before the job failed, and running it again could post a duplicate.
  *
- * Null for a job kind with nothing to close (points-credit). The service methods are written
+ * Null for a job kind with nothing to close (points-credit, google-save-check). The service methods are written
  * never to reject; callers still catch, so no unhandled rejection can come out of this.
  */
 export const closeExhaustedJob = (

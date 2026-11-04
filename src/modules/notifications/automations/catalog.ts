@@ -8,6 +8,7 @@ export type TemplateVariable =
   | "clinic_name"
   | "google_maps_link"
   | "referral_reward"
+  | "birthday_gift"
   | "new_tier"
   | "benefits_summary";
 
@@ -38,13 +39,15 @@ export const AUTOMATION_CATALOG: readonly AutomationDefinition[] = [
     event: AutomationEvent.BIRTHDAY,
     notificationType: NotificationType.BIRTHDAY,
     label: "Cumpleaños",
-    description: "Felicita a tus clientes el día de su cumpleaños.",
-    variables: ["first_name", "clinic_name"],
+    description:
+      "Felicita a tus clientes el día de su cumpleaños con el regalo que su nivel tiene asignado en tu programa.",
+    // birthday_gift is the gift of the member's tier in the live programme, filled per member.
+    variables: ["first_name", "clinic_name", "birthday_gift"],
     marketing: true,
     defaults: {
       enabled: true,
       header: "¡Feliz cumpleaños!",
-      body: "¡Feliz cumpleaños! Disfruta de un 10% de descuento en nuestros servicios. Esperamos verte pronto.",
+      body: "¡Feliz cumpleaños, {first_name}! En {clinic_name} te regalamos {birthday_gift}. Esperamos verte pronto.",
       notify: true
     }
   },
@@ -81,14 +84,15 @@ export const AUTOMATION_CATALOG: readonly AutomationDefinition[] = [
     event: AutomationEvent.REFERRAL_PROMO,
     notificationType: NotificationType.REFERRAL_PROMO,
     label: "Programa de referidos",
-    description: "Cada mes, recuerda a tus clientes activos que pueden compartir su código.",
+    description:
+      "Cada mes, recuerda a tus clientes activos que pueden compartir su código, con el próximo premio que les toca por recomendar.",
+    // referral_reward is the member's next step on the programme's referral ladder, per member.
     variables: ["first_name", "clinic_name", "referral_reward"],
     marketing: true,
-    requires: "referralRewardText",
     defaults: {
       enabled: false,
       header: "¡Comparte la experiencia y gana! 🎁",
-      body: "¡Hola {first_name}! Recuerda que por cada amigo o familiar que venga de tu parte, ambos recibiréis {referral_reward}. ¡Comparte tu código de referido desde la app y empieza a sumar ventajas!",
+      body: "¡Hola {first_name}! Recomienda {clinic_name} con el código de tu tarjeta. Tu próximo premio por recomendar: {referral_reward}. Cuenta cuando tu amigo venga y haga su primer tratamiento.",
       notify: true
     }
   },

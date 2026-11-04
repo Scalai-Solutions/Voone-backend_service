@@ -1,6 +1,8 @@
 import { AutomationEvent } from "@prisma/client";
 import { z } from "zod";
 
+import { memberSexSchema } from "../members/membership.schema";
+
 const httpsUrl = z
   .string()
   .url()
@@ -16,14 +18,31 @@ export const notificationMessageSchema = z.object({
   scheduledAt: z.coerce.date().optional()
 });
 
-export const notificationSegmentSchema = z.object({
-  tier: z.string().trim().min(1).max(80).optional(),
-  inactiveDays: z.number().int().positive().max(3650).optional(),
-  lastVisitBefore: z.coerce.date().optional(),
-  categoryNotVisited: z.string().trim().min(1).max(120).optional(),
-  /** The auto-created segment: members holding a bono with sessions left. */
-  activeBono: z.boolean().optional()
-});
+const age = z.number().int().min(0).max(120);
+
+export const notificationSegmentSchema = z
+  .object({
+    tier: z.string().trim().min(1).max(80).optional(),
+    inactiveDays: z.number().int().positive().max(3650).optional(),
+    lastVisitBefore: z.coerce.date().optional(),
+    categoryNotVisited: z.string().trim().min(1).max(120).optional(),
+    /** The auto-created segment: members holding a bono with sessions left. */
+    activeBono: z.boolean().optional(),
+    /** As the member declared it at sign-up. */
+    sex: memberSexSchema.optional(),
+    /** Inclusive, in whole years on today's Madrid date. Members with no birth data never match. */
+    ageMin: age.optional(),
+    ageMax: age.optional(),
+    /** 1-12. Members with only a birth year never match. */
+    birthMonth: z.number().int().min(1).max(12).optional(),
+    /** Signed up on or after this date. */
+    joinedAfter: z.coerce.date().optional()
+  })
+  .refine(
+    (segment) =>
+      segment.ageMin === undefined || segment.ageMax === undefined || segment.ageMin <= segment.ageMax,
+    { message: "La edad mínima no puede ser mayor que la máxima", path: ["ageMax"] }
+  );
 
 export const segmentNotificationSchema = notificationMessageSchema.extend({
   segment: notificationSegmentSchema

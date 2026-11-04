@@ -5,7 +5,7 @@ import { prisma } from "./infrastructure/database/prisma-client";
 import { buildNotificationDispatcher } from "./modules/notifications/automations/registry";
 import { startNotificationDispatcher } from "./modules/notifications/automations/dispatcher";
 import {
-  buildNotificationService,
+  sharedNotificationService,
   startInProcessNotificationWorker
 } from "./modules/notifications/notification.composition";
 import { syncMembersWithExpiredRewards } from "./modules/wallet-refresh/expired-rewards-sync";
@@ -41,7 +41,7 @@ if (!isAppleWalletConfigured()) {
 // Consumes the wallet sync queue in this process unless a dedicated worker service has
 // been given the job. A durable queue nobody consumes is worse than no queue: jobs pile
 // up, every card goes stale, and nothing looks broken.
-const notificationService = buildNotificationService(prisma);
+const notificationService = sharedNotificationService(prisma);
 const walletWorker = startInProcessWalletWorker(prisma);
 const notificationWorker = startInProcessNotificationWorker(prisma, notificationService);
 const notificationDispatcher = config.NOTIFICATION_DISPATCHER_ENABLED

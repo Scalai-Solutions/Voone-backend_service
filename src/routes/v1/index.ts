@@ -13,7 +13,7 @@ import {
   PrismaPointsLedgerRepository
 } from "../../modules/points/prisma-points-ledger.repository";
 import { PointsService } from "../../modules/points/points.service";
-import { buildNotificationService } from "../../modules/notifications/notification.composition";
+import { sharedNotificationService } from "../../modules/notifications/notification.composition";
 import { buildWalletSyncQueue } from "../../wallet/wallet.composition";
 import { buildImageStorage } from "../../modules/media/image-storage";
 import { createBonosRouter } from "./bonos.route";
@@ -68,6 +68,12 @@ import { createAppleWalletProvider } from "../../wallet/providers/apple/apple-wa
 import { adminClinicsRouter } from "./admin-clinics.route";
 import { createAdminNotificationsRouter } from "./admin-notifications.route";
 import { createApplePassesRouter } from "./apple-passes.route";
+import { createGoogleWalletCallbackRouter } from "./google-wallet-callback.route";
+import { createGoogleRootKeySource } from "../../wallet/providers/google/callback-verifier";
+import {
+  getGoogleWalletIssuerId,
+  isGoogleWalletConfigured
+} from "../../wallet/providers/google/client";
 import { clinicUsersRouter } from "./clinic-users.route";
 import { clinicsRouter } from "./clinics.route";
 import { healthRouter } from "./health.route";
@@ -78,7 +84,7 @@ import { templatesRouter } from "./templates.route";
 import { walletTestRouter } from "./wallet-test.route";
 
 export const v1Router = Router();
-const notificationService = buildNotificationService(prisma);
+const notificationService = sharedNotificationService(prisma);
 
 v1Router.use(healthRouter);
 v1Router.use(adminClinicsRouter);
@@ -149,6 +155,27 @@ if (config.APPLE_PASS_WEB_SERVICE_URL && config.CARD_REDEMPTION_SECRET) {
  * throw after it had already been recorded. Better absent than half-working.
  */
 const walletSyncQueue = buildWalletSyncQueue(prisma);
+
+/**
+ * Google Wallet's "pass saved" callback. Mounted only when its public URL is configured (the same
+ * URL every Google class is given as callbackOptions) and Google Wallet itself is: without both,
+ * Google never calls it.
+ */
+if (config.GOOGLE_WALLET_CALLBACK_URL && isGoogleWalletConfigured()) {
+  const rootKeys = createGoogleRootKeySource();
+
+  v1Router.use(
+    createGoogleWalletCallbackRouter({
+      prisma,
+      rootKeys,
+      issuerId: getGoogleWalletIssuerId,
+      enqueueMemberSync: async (memberId) => {
+        await walletSyncQueue?.enqueueMemberSync(memberId);
+      },
+      welcome: (memberId) => notificationService.onGooglePassSaved(memberId)
+    })
+  );
+}
 
 /**
  * The points service every route here shares, built once.

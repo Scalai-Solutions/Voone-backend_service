@@ -69,6 +69,7 @@ import {
   recordAppleDownload
 } from "../../wallet/apple-updates-registered";
 import { PrismaPassDeviceRepository } from "../../wallet/prisma-pass-device.repository";
+import { sharedNotificationService } from "../../modules/notifications/notification.composition";
 
 export const membersRouter = Router();
 
@@ -366,6 +367,19 @@ const issueWalletPasses = async (memberId: string) => {
 
   if (issuedProviderCount === 0) {
     throw new WalletConfigurationError("No Wallet provider could issue this member pass");
+  }
+
+  // The member now holds a Google save link: watch for the save, so the tier welcome goes out the
+  // moment the pass is on their phone. Best effort: a failed watch must not fail the sign-up.
+  if (passes.google.available) {
+    void sharedNotificationService(prisma)
+      .watchGooglePassSave(member.id)
+      .catch((error: unknown) => {
+        console.warn("[wallet] could not watch for the Google pass save", {
+          memberId: member.id,
+          error: error instanceof Error ? error.name : "UNKNOWN"
+        });
+      });
   }
 
   return {
@@ -766,8 +780,8 @@ membersRouter.post(
     }
 
     // The QR form asks for everything up front (2026-10 product decision): a self sign-up
-    // is refused over a blank profile field, an unticked box, or — in the schema itself —
-    // a date of birth under 16. Enforced here rather than only in the form, so a direct
+    // is refused over a blank profile field or — in the schema itself — a date of birth under
+    // 16. Never over the marketing box: that one is optional by law. Enforced here rather than only in the form, so a direct
     // API caller cannot skip what the form requires; staff entry stays exempt, per
     // qrSignupRequirementMissing.
     const missingRequirement = qrSignupRequirementMissing(

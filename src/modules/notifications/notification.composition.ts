@@ -19,6 +19,7 @@ import { closeExhaustedJob, isFinalFailure, type ClosableJob } from "./exhausted
 import { InMemoryNotificationQuotaRedis, NotificationQuotaService } from "./quota.service";
 import {
   AppleCardRefresher,
+  GoogleSaveCheckJob,
   NotificationJobQueue,
   NotificationService,
   PointsCreditNotificationJob
@@ -57,6 +58,15 @@ export class InlineNotificationQueue implements NotificationJobQueue {
       `points-credit-${job.memberId}`,
       () => this.requiredService().processPointsCredit(job),
       { kind: "points-credit" }
+    );
+  }
+
+  async enqueueGoogleSaveCheck(job: GoogleSaveCheckJob, delayMs: number): Promise<void> {
+    this.runLater(
+      delayMs,
+      `google-save-check-${job.memberId}`,
+      () => this.requiredService().processGoogleSaveCheck(job),
+      { kind: "google-save-check" }
     );
   }
 
@@ -177,6 +187,15 @@ export const buildNotificationService = (prisma: PrismaClient): NotificationServ
     buildAppleCardRefresher(prisma)
   );
 };
+
+let shared: NotificationService | null = null;
+
+/**
+ * The API process's one notification service. Routes built at import time (members.route) use
+ * it rather than building their own, so the process has one inline queue and one quota client.
+ */
+export const sharedNotificationService = (prisma: PrismaClient): NotificationService =>
+  (shared ??= buildNotificationService(prisma));
 
 export const startInProcessNotificationWorker = (
   prisma: PrismaClient,

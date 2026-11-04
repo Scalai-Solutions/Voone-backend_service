@@ -1,6 +1,8 @@
 import { AutomationEvent, type PrismaClient } from "@prisma/client";
 
 import type { ZonedDate } from "../../../../common/utils/zoned-time";
+import { activeProgramView } from "../../../onboarding/runtime/program-tier.port";
+import { nextReferralReward } from "../../../onboarding/runtime/rules";
 import type { AutomationRecipient } from "../dispatch.service";
 import { DAY_MS, type ScheduledTrigger, type TriggerContext } from "./types";
 
@@ -25,7 +27,16 @@ export class ReferralPromoTrigger implements ScheduledTrigger {
     return `referral:${clinicId}:${today.dateKey.slice(0, 7)}`;
   }
 
+  /**
+   * Each active member with the next reward THEY can earn by recommending, from the live
+   * programme's referral ladder and their own counted referrals: nobody types it in. A clinic
+   * without a programme has no referral rewards to promise, so it sends nothing.
+   */
   async findRecipients({ clinicId, now }: TriggerContext): Promise<AutomationRecipient[]> {
+    const programme = await activeProgramView(this.prisma, clinicId);
+
+    if (!programme) return [];
+
     const since = new Date(now.getTime() - REFERRAL_ACTIVE_DAYS * DAY_MS);
     const members = await this.prisma.member.findMany({
       where: {
@@ -39,7 +50,21 @@ export class ReferralPromoTrigger implements ScheduledTrigger {
       },
       select: { id: true }
     });
+    // Counted the way the visit service ranks a referral: only once the referred person paid.
+    const counted = new Map(
+      (
+        await this.prisma.referral.groupBy({
+          by: ["referrerId"],
+          where: { clinicId, countedAt: { not: null } },
+          _count: { _all: true }
+        })
+      ).map((row) => [row.referrerId, row._count._all])
+    );
 
-    return members.map(({ id }) => ({ memberId: id }));
+    return members.flatMap(({ id }) => {
+      const reward = nextReferralReward(programme.view, counted.get(id) ?? 0);
+
+      return reward ? [{ memberId: id, values: { referral_reward: reward.title } }] : [];
+    });
   }
 }

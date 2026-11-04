@@ -3,7 +3,7 @@ import { WalletProviderType } from "@prisma/client";
 import { config } from "../../../config/env";
 import { DEFAULT_WALLET_BENEFIT_CTA } from "../../../modules/templates/default-voone-template";
 import { availableRewardCount, availableRewardsText } from "../../engine/rewards-text";
-import { boostText, referralText } from "../../engine/boost-text";
+import { boostText } from "../../engine/boost-text";
 import { tierBenefitsText } from "../../engine/tier-benefits-text";
 import { BaseWalletProvider } from "../../engine/base-wallet-provider";
 import type { LoyaltyCard } from "../../engine/loyalty-card";
@@ -34,6 +34,7 @@ import type {
   LoyaltyObjectInput,
   LoyaltyRewardsInput,
   LoyaltyOptionalModuleInput,
+  LoyaltyReferralInput,
   LoyaltyTierBenefitsInput
 } from "./types";
 import {
@@ -91,7 +92,11 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       // The rewards and the tier benefits are additions to the card: if Google refuses them the
       // member still gets a card, and the next sync tries them again on their own.
       if (
-        (!input.rewards && !input.tierBenefits && !input.boost && !input.referral) ||
+        (!input.rewards &&
+          !input.tierBenefits &&
+          !input.boost &&
+          !input.referral &&
+          !input.nextReward) ||
         !(error instanceof GoogleWalletApiError) ||
         error.status !== 400
       ) {
@@ -110,6 +115,7 @@ export class GoogleWalletProvider extends BaseWalletProvider {
         rewards: undefined,
         tierBenefits: undefined,
         boost: undefined,
+        nextReward: undefined,
         referral: undefined
       });
     }
@@ -128,7 +134,9 @@ export class GoogleWalletProvider extends BaseWalletProvider {
     await patchObject(ref.externalId, {
       loyaltyPointsBalance: card.points,
       tier: card.tier,
-      state: "ACTIVE"
+      state: "ACTIVE",
+      // Every sync, so a pass issued with the long code as its number picks up the short one.
+      ...this.toMemberNumber(card)
     });
 
     // The rewards and the tier benefits go in a patch of their own, after the one that matters: a
@@ -138,6 +146,7 @@ export class GoogleWalletProvider extends BaseWalletProvider {
     const rewards = this.toRewards(card);
     const tierBenefits = this.toTierBenefits(card);
     const boost = this.toBoost(card);
+    const nextReward = this.toNextReward(card);
     const referral = this.toReferral(card);
 
     try {
@@ -146,6 +155,7 @@ export class GoogleWalletProvider extends BaseWalletProvider {
         tierBenefits: tierBenefits ?? null,
         // Nothing pending removes a stale module, exactly as for the tier benefits.
         boost: boost ?? null,
+        nextReward: nextReward ?? null,
         referral: referral ?? null
       });
     } catch (error) {
@@ -255,6 +265,7 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       heroImageUrl: template.heroImageUrl,
       heroImageDescription: `Imagen de ${template.programName}`,
       homepageUrl: websiteUrl,
+      callbackUrl: config.GOOGLE_WALLET_CALLBACK_URL,
       accountNameLabel: "Nombre de miembro",
       accountIdLabel: "N.º de miembro",
       rewardsTierLabel: template.tierLabel,
@@ -323,7 +334,7 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       objectId,
       classId,
       accountName: card.member.fullName,
-      accountId: card.redemptionCode,
+      ...this.toMemberNumber(card),
       memberSince: card.member.memberSince,
       loyaltyPointsLabel: card.template.pointsLabel,
       loyaltyPointsBalance: card.points,
@@ -332,19 +343,45 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       rewards: this.toRewards(card),
       tierBenefits: this.toTierBenefits(card),
       boost: this.toBoost(card),
+      nextReward: this.toNextReward(card),
       referral: this.toReferral(card),
       state: "ACTIVE"
     };
   }
 
-  /** The same words the Apple back field carries (the link plain here), so the wallets agree. */
-  private toReferral(card: LoyaltyCard): LoyaltyOptionalModuleInput | undefined {
-    const text = referralText(card);
+  /**
+   * The member number as Apple shows it (the short code, under the QR), with the long redemption
+   * code kept inside the QR, which is what reception scans. A member not yet given a code keeps
+   * the redemption code as both.
+   */
+  private toMemberNumber(card: LoyaltyCard): Pick<LoyaltyObjectInput, "accountId" | "barcodeValue"> {
+    return { accountId: card.member.code ?? card.redemptionCode, barcodeValue: card.redemptionCode };
+  }
 
-    return text === undefined ? undefined : { text };
+  /** The code in the text, the link as the object's tappable link (a URL in text is neither). */
+  private toReferral(card: LoyaltyCard): LoyaltyReferralInput | undefined {
+    return card.referral
+      ? { text: `Tu código: ${card.referral.code}`, url: card.referral.url }
+      : undefined;
   }
 
   /** The same words the Apple back field carries, so the two wallets never disagree. */
+  /**
+   * The next reward and how far it is, two lines as the cell shows them ("Kit de minitallas" /
+   * "Te faltan 300 puntos"). The whole description where the name and distance are not known apart.
+   */
+  private toNextReward(card: LoyaltyCard): LoyaltyOptionalModuleInput | undefined {
+    const { reward } = card;
+
+    if (!reward) return undefined;
+
+    return reward.title !== undefined && reward.remainingPoints !== undefined
+      ? {
+          text: `${reward.title}\nTe faltan ${reward.remainingPoints.toLocaleString("es-ES")} puntos`
+        }
+      : { text: reward.description };
+  }
+
   private toBoost(card: LoyaltyCard): LoyaltyOptionalModuleInput | undefined {
     const text = boostText(card);
 

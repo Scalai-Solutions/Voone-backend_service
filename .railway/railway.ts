@@ -58,6 +58,8 @@ export default defineRailway(() => {
       // account is out of Demo Mode. Declared so an apply cannot delete it, which would
       // silently return the admin panel to reporting "demo".
       GOOGLE_WALLET_PUBLISHING_STATUS: preserve(),
+      // The public URL Google posts "pass saved" events to; unset, no callback is mounted.
+      GOOGLE_WALLET_CALLBACK_URL: preserve(),
       // --- Apple Wallet signing ---
       // The pass type and team identifiers are read from the certificate itself, so only
       // the material is configured. All preserved: three of them are private keys or

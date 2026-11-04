@@ -330,6 +330,30 @@ export const referralRewardAt = (view: ProgramView, count: number): ReferralRewa
   return null;
 };
 
+/**
+ * The next reward a referrer can still earn, after `counted` referrals have counted: what the
+ * referral promo promises them. Null only for a programme with no referral ladder. One exists
+ * within the next `every` referrals past the last step, so the search is bounded.
+ */
+export const nextReferralReward = (
+  view: ProgramView,
+  counted: number
+): (ReferralReward & { at: number }) | null => {
+  const last = view.referral[view.referral.length - 1];
+
+  if (!last) return null;
+
+  const horizon = Math.max(counted, last.n) + RUNTIME_DECISIONS.referralRepeatEvery;
+
+  for (let at = counted + 1; at <= horizon; at += 1) {
+    const reward = referralRewardAt(view, at);
+
+    if (reward) return { ...reward, at };
+  }
+
+  return null;
+};
+
 export interface Identity {
   id?: string;
   phone?: string | null;

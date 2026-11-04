@@ -53,6 +53,9 @@ export const tierBenefitsSummary = async (
   return clip(rewardText?.trim() || FALLBACK_SUMMARY);
 };
 
+/** One congratulation per member per tier, however many times the job retries. */
+export const tierMessageKey = (memberId: string, tier: string): string => `tier:${memberId}:${tier}`;
+
 /** EVT-008: congratulates a member the moment they cross into a higher tier. */
 export class TierUpgradeNotifier {
   constructor(
@@ -64,8 +67,7 @@ export class TierUpgradeNotifier {
     return this.sender.dispatch({
       clinicId: input.clinicId,
       event: "TIER_UPGRADE",
-      // One congratulation per member per tier, however many times the job retries.
-      idempotencyKey: `tier:${input.memberId}:${input.newTier}`,
+      idempotencyKey: tierMessageKey(input.memberId, input.newTier),
       recipients: [
         {
           memberId: input.memberId,

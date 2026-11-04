@@ -3,6 +3,7 @@ import { Queue, Worker, type Job } from "bullmq";
 import { createRepeatingErrorLogger } from "../../common/logger/repeating-error-logger";
 import { closeExhaustedJob, isFinalFailure } from "../../modules/notifications/exhausted-job";
 import type {
+  GoogleSaveCheckJob,
   NotificationJobQueue,
   NotificationService,
   PointsCreditNotificationJob
@@ -14,7 +15,8 @@ export const NOTIFICATIONS_QUEUE = "wallet-notifications";
 type NotificationQueueJob =
   | { kind: "notification"; notificationId: string }
   | { kind: "delivery"; deliveryId: string }
-  | ({ kind: "points-credit" } & PointsCreditNotificationJob);
+  | ({ kind: "points-credit" } & PointsCreditNotificationJob)
+  | ({ kind: "google-save-check" } & GoogleSaveCheckJob);
 
 export class BullNotificationQueue implements NotificationJobQueue {
   private readonly queue: Queue<NotificationQueueJob>;
@@ -51,6 +53,10 @@ export class BullNotificationQueue implements NotificationJobQueue {
     await this.queue.add("points-credit", { kind: "points-credit", ...job });
   }
 
+  async enqueueGoogleSaveCheck(job: GoogleSaveCheckJob, delayMs: number): Promise<void> {
+    await this.queue.add("google-save-check", { kind: "google-save-check", ...job }, { delay: delayMs });
+  }
+
   async close(): Promise<void> {
     await this.queue.close();
   }
@@ -71,6 +77,11 @@ export const createNotificationWorker = (
 
       if (job.data.kind === "delivery") {
         await service.processDelivery(job.data.deliveryId);
+        return;
+      }
+
+      if (job.data.kind === "google-save-check") {
+        await service.processGoogleSaveCheck(job.data);
         return;
       }
 
