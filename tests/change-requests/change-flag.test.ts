@@ -223,6 +223,15 @@ describe("refusals reach Voone in English", () => {
     expect(result.status).toBe("none");
     expect(result.status === "none" && result.reason).not.toMatch(SPANISH);
     expect(result.status === "none" && result.reason).toMatch(/consecutive milestones/);
+    expect(result.status === "none" && result.blocked).toBe("repeat");
+  });
+
+  it("marks a medical item as blocked, and an unknown id as nothing to say", () => {
+    const medical = whatIf(row(), liveCatalogue(), reward(14, "M1"));
+    const unknown = whatIf(row(), liveCatalogue(), reward(14, "NOT-A-ROW"));
+
+    expect(medical.status === "none" && medical.blocked).toBe("unavailable");
+    expect(unknown.status === "none" && unknown.blocked).toBeUndefined();
   });
 });
 

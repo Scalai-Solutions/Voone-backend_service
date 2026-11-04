@@ -262,7 +262,13 @@ describe("POST /clinics/:slug/change-requests/preview (the owner)", () => {
     expect(foreignTreatment.body).toEqual({ status: "none" });
   });
 
-  it("a non-reward service, an unknown treatment, a name-only edit and a medical item are none", async () => {
+  it("a medical item is blocked, with no reason text for the owner", async () => {
+    const res = await preview(h.slugA, OWNER, rewardBody({ milestone: 14, itemId: "M1" }));
+
+    expect(res.body).toEqual({ status: "blocked", kind: "unavailable" });
+  });
+
+  it("a non-reward service, an unknown treatment and a name-only edit are none", async () => {
     const used = rewardIds();
     const plain = items.find((i) => !used.has(i.externalId) && !i.isProduct)!;
     const edit = async (treatmentId: string, proposed: Record<string, unknown>) =>
@@ -281,9 +287,6 @@ describe("POST /clinics/:slug/change-requests/preview (the owner)", () => {
     expect(await edit(await treatmentIdOf(h.a.id, "F3"), { name: "Otro nombre" })).toEqual({
       status: "none"
     });
-    expect(
-      (await preview(h.slugA, OWNER, rewardBody({ milestone: 14, itemId: "M1" }))).body
-    ).toEqual({ status: "none" });
   });
 
   it("(e) refuses VOONE_ADMIN, a missing role and an unknown role with 403", async () => {

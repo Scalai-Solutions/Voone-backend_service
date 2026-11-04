@@ -48,9 +48,16 @@ export type WhatIf =
       reason: string | null;
     }
   | { status: "unpriced" }
-  | { status: "none"; reason: string };
+  | { status: "none"; reason: string; blocked?: Blocked };
 
-const none = (reason: string): WhatIf => ({ status: "none", reason });
+/**
+ * Why the owner's pick cannot be simulated at all: it would put the same gift in two consecutive
+ * milestones, or the item cannot be a reward. The owner is told that much and nothing else.
+ */
+export type Blocked = "repeat" | "unavailable";
+
+const none = (reason: string, blocked?: Blocked): WhatIf =>
+  blocked ? { status: "none", reason, blocked } : { status: "none", reason };
 
 /**
  * A proposed programme, or why there is nothing to simulate. A price edit also carries the
@@ -58,7 +65,10 @@ const none = (reason: string): WhatIf => ({ status: "none", reason });
  */
 type Proposal = { ok: true; program: Program; baseline?: Program } | { ok: false; result: WhatIf };
 
-const refused = (reason: string): Proposal => ({ ok: false, result: none(reason) });
+const refused = (reason: string, blocked?: Blocked): Proposal => ({
+  ok: false,
+  result: none(reason, blocked)
+});
 
 const GENERIC_REFUSAL = "This swap is not allowed for this programme.";
 
@@ -79,6 +89,13 @@ const KNOWN_REFUSALS = new Map<string, string>([
 ]);
 
 const REPEAT = /^Ese cambio repetiría un regalo en dos hitos seguidos \(hitos (\d+) y (\d+)\)\.$/;
+
+/** What the owner may be told about a refused swap: the repeat, or an item that cannot be a reward. */
+const blockedBy = (reason: string): Blocked | undefined => {
+  if (REPEAT.test(reason)) return "repeat";
+
+  return Object.values(MANUAL_REFUSALS).includes(reason) ? "unavailable" : undefined;
+};
 
 /** Never forwards Spanish: a known refusal is mapped, anything else becomes a generic English line. */
 export const englishRefusal = (reason: string): string => {
@@ -115,7 +132,7 @@ const proposeReward = (
   const row = live.find((item) => item.id === itemId);
 
   if (!row) return refused("That item is not in the clinic's catalogue.");
-  if (!isGiftable(row)) return refused("That item cannot be given as a reward.");
+  if (!isGiftable(row)) return refused("That item cannot be given as a reward.", "unavailable");
 
   const copy = structuredClone(output);
 
@@ -125,7 +142,7 @@ const proposeReward = (
 
   return swapped.ok
     ? { ok: true, program: swapped.program }
-    : refused(englishRefusal(swapped.reason));
+    : refused(englishRefusal(swapped.reason), blockedBy(swapped.reason));
 };
 
 /** The option with every item `id` replaced by `item`; the totals are the sums over the items. */
