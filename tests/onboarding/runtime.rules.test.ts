@@ -18,7 +18,6 @@ import {
   purchaseProgress,
   recalibrationAdvice,
   recurringCrossed,
-  nextReferralReward,
   referralRewardAt,
   resolveTier,
   rewardExpiry,
@@ -406,31 +405,6 @@ describe("referralRewardAt", () => {
 
     expect(referralRewardAt(view, 14)).toBeNull();
     expect(referralRewardAt(view, 15)).toBeNull();
-  });
-});
-
-describe("nextReferralReward", () => {
-  it("is the next step still ahead of the member, with the referral it falls on", () => {
-    // [counted so far, the referral that earns the next reward]
-    for (const [counted, at] of [
-      [0, 1],
-      [1, 3],
-      [2, 3],
-      [6, 7],
-      [9, 10],
-      [10, 13],
-      [14, 16]
-    ]) {
-      expect(nextReferralReward(view, counted), `after ${counted}`).toMatchObject({ at });
-    }
-  });
-
-  it("names the reward of that step", () => {
-    expect(nextReferralReward(view, 1)?.title).toBe(referralRewardAt(view, 3)?.title);
-  });
-
-  it("is null for a programme with no referral ladder", () => {
-    expect(nextReferralReward({ ...view, referral: [] }, 0)).toBeNull();
   });
 });
 

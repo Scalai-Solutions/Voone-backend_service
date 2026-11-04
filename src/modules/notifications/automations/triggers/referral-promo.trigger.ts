@@ -1,9 +1,8 @@
 import { AutomationEvent, type PrismaClient } from "@prisma/client";
 
 import type { ZonedDate } from "../../../../common/utils/zoned-time";
-import { activeProgramView } from "../../../onboarding/runtime/program-tier.port";
-import { nextReferralReward } from "../../../onboarding/runtime/rules";
 import type { AutomationRecipient } from "../dispatch.service";
+import { loadActiveProgram, nextReferralReward } from "../member-rewards";
 import { DAY_MS, type ScheduledTrigger, type TriggerContext } from "./types";
 
 /** "Active" for the referral nudge: a visit or points movement within this many days. */
@@ -27,15 +26,11 @@ export class ReferralPromoTrigger implements ScheduledTrigger {
     return `referral:${clinicId}:${today.dateKey.slice(0, 7)}`;
   }
 
-  /**
-   * Each active member with the next reward THEY can earn by recommending, from the live
-   * programme's referral ladder and their own counted referrals: nobody types it in. A clinic
-   * without a programme has no referral rewards to promise, so it sends nothing.
-   */
   async findRecipients({ clinicId, now }: TriggerContext): Promise<AutomationRecipient[]> {
-    const programme = await activeProgramView(this.prisma, clinicId);
+    // Referral rewards are issued by the live programme; without one there is nothing to promise.
+    const program = await loadActiveProgram(this.prisma, clinicId);
 
-    if (!programme) return [];
+    if (!program) return [];
 
     const since = new Date(now.getTime() - REFERRAL_ACTIVE_DAYS * DAY_MS);
     const members = await this.prisma.member.findMany({
@@ -50,21 +45,22 @@ export class ReferralPromoTrigger implements ScheduledTrigger {
       },
       select: { id: true }
     });
-    // Counted the way the visit service ranks a referral: only once the referred person paid.
-    const counted = new Map(
-      (
-        await this.prisma.referral.groupBy({
-          by: ["referrerId"],
-          where: { clinicId, countedAt: { not: null } },
-          _count: { _all: true }
-        })
-      ).map((row) => [row.referrerId, row._count._all])
-    );
 
-    return members.flatMap(({ id }) => {
-      const reward = nextReferralReward(programme.view, counted.get(id) ?? 0);
-
-      return reward ? [{ memberId: id, values: { referral_reward: reward.title } }] : [];
+    const counted = await this.prisma.referral.groupBy({
+      by: ["referrerId"],
+      where: {
+        clinicId,
+        countedAt: { not: null },
+        referrerId: { in: members.map(({ id }) => id) }
+      },
+      _count: { _all: true }
     });
+    const countedBy = new Map(counted.map((row) => [row.referrerId, row._count._all]));
+
+    // Each member hears about the reward their own next referral earns, not a clinic-wide one.
+    return members.map(({ id }) => ({
+      memberId: id,
+      values: { referral_reward: nextReferralReward(program, countedBy.get(id) ?? 0) }
+    }));
   }
 }

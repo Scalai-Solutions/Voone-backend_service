@@ -36,7 +36,7 @@ import { TierUpgradeNotifier, tierMessageKey } from "./automations/tier-upgrade"
 import { objectHasUsers } from "../../wallet/providers/google/objectService";
 import { ReviewRequestNotifier } from "./automations/triggers/review-request.trigger";
 import { NotificationQuotaService } from "./quota.service";
-import { linkifyForGoogle } from "./template";
+import { linkifyForGoogle, personalise } from "./template";
 import { CLINIC_TIME_ZONE } from "../../common/utils/zoned-month";
 import { zonedDate, type ZonedDate } from "../../common/utils/zoned-time";
 
@@ -516,9 +516,10 @@ export class NotificationService {
     // Only the send is in this try: a failure here means nothing went out, so FAILED (and a
     // retry that sends again) is right. Everything after the send is outside it.
     try {
+      // One message for every Google member, so it cannot carry anyone's name.
       message = await this.wallet.addClassMessage(walletClass.externalClassId, {
-        header: notification.header,
-        body: this.bodyWithAction(notification.body, notification.actionUrl),
+        header: personalise(notification.header, null),
+        body: this.bodyWithAction(personalise(notification.body, null), notification.actionUrl),
         notify: notification.notify,
         actionUrl: notification.actionUrl ?? undefined
       });
@@ -668,14 +669,17 @@ export class NotificationService {
   }
 
   async processDelivery(deliveryId: string): Promise<void> {
-    const delivery = await this.prisma.notificationDelivery.findUnique({
+    const found = await this.prisma.notificationDelivery.findUnique({
       where: { id: deliveryId },
       include: { notification: true, member: { include: { walletObjects: true } } }
     });
 
-    if (!delivery) throw new NotificationNotFoundError("Notification delivery not found");
-    if (delivery.notification.status === NotificationStatus.CANCELLED) return;
-    if (delivery.status !== NotificationDeliveryStatus.QUEUED) return;
+    if (!found) throw new NotificationNotFoundError("Notification delivery not found");
+
+    if (found.notification.status === NotificationStatus.CANCELLED) return;
+    if (found.status !== NotificationDeliveryStatus.QUEUED) return;
+
+    const delivery = this.personalised(found);
 
     if (delivery.provider === WalletProviderType.APPLE) {
       await this.processAppleDelivery(delivery);
@@ -1579,6 +1583,31 @@ export class NotificationService {
         error: error instanceof Error ? error.name : "UNKNOWN"
       });
     }
+  }
+
+  /**
+   * A hand-written message (broadcast, segment, single) carries the template as typed; this fills
+   * {first_name} for this delivery's member. Automations already rendered their text per member
+   * into the delivery, and system messages (points, tier) have no placeholders, so both pass
+   * through untouched.
+   */
+  private personalised<
+    T extends {
+      header: string | null;
+      body: string | null;
+      notification: { type: NotificationType; header: string; body: string };
+      member: { name: string | null };
+    }
+  >(delivery: T): T {
+    const { type, header, body } = delivery.notification;
+
+    if (!MANUAL_NOTIFICATION_TYPES.has(type)) return delivery;
+
+    return {
+      ...delivery,
+      header: delivery.header ?? personalise(header, delivery.member.name),
+      body: delivery.body ?? personalise(body, delivery.member.name)
+    };
   }
 
   /**

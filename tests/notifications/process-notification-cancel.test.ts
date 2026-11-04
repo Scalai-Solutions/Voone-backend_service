@@ -23,6 +23,8 @@ interface World {
   idWriteFails?: boolean;
   /** The monthly counter write rejects. */
   countFails?: boolean;
+  /** The broadcast text as typed. */
+  text?: { header: string; body: string };
 }
 
 type Where = { status?: { notIn?: NotificationStatus[]; in?: NotificationStatus[] } };
@@ -32,6 +34,7 @@ const build = (world: World = {}) => {
     status: world.status ?? NotificationStatus.QUEUED,
     providerMessageId: null as string | null,
     sent: [] as string[],
+    classMessages: [] as Array<{ header: string; body: string }>,
     removed: [] as Array<{ target: unknown; messageId: string }>,
     increments: 0,
     fanOutLookups: 0,
@@ -45,8 +48,8 @@ const build = (world: World = {}) => {
           id: "notification-1",
           clinicId: "clinic-1",
           type: NotificationType.BROADCAST,
-          header: "Hi",
-          body: "There",
+          header: world.text?.header ?? "Hi",
+          body: world.text?.body ?? "There",
           actionUrl: null,
           notify: false,
           providerMessageId: state.providerMessageId,
@@ -108,7 +111,8 @@ const build = (world: World = {}) => {
     }
   };
   const wallet = {
-    addClassMessage: async () => {
+    addClassMessage: async (_classId: string, message: { header: string; body: string }) => {
+      state.classMessages.push(message);
       state.sendAttempts += 1;
       if (world.cancelDuringSend) state.status = NotificationStatus.CANCELLED;
       if (world.sendFails || (world.sendFailsOnce && state.sendAttempts === 1)) {
@@ -141,6 +145,22 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+describe("a broadcast to Google members", () => {
+  it("is one shared message, so a {first_name} in it closes up instead of showing", async () => {
+    const { service, state } = build({
+      text: { header: "Hola {first_name}", body: "¡Hola {first_name}, tienes un regalo!" }
+    });
+
+    await service.processNotification("notification-1");
+
+    expect(state.classMessages).toHaveLength(1);
+    expect(state.classMessages[0]).toMatchObject({
+      header: "Hola",
+      body: "¡Hola, tienes un regalo!"
+    });
+  });
 });
 
 describe("processNotification and a cancelled broadcast", () => {

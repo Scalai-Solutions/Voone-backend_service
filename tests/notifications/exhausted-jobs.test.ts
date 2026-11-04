@@ -370,6 +370,8 @@ describe("processDelivery and a cancelled notification", () => {
             id: "notification-1",
             clinicId: "clinic-1",
             type: NotificationType.SINGLE,
+            header: "Hi",
+            body: "There",
             status: NotificationStatus.PROCESSING
           },
           // No synced Google object: the delivery is SKIPPED and the refresh runs.

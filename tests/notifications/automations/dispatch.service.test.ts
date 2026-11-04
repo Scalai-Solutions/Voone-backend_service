@@ -117,7 +117,7 @@ describe("AutomationDispatchService", () => {
 
   it("asks for marketing consent on marketing events but not on service messages", async () => {
     const marketing = build({
-      settings: { marketingEnabled: true, referralRewardText: "10 € de descuento" },
+      settings: { marketingEnabled: true },
       automations: [
         { event: "REFERRAL_PROMO", enabled: true, header: "h", body: "b", notify: true }
       ],
