@@ -48,7 +48,8 @@ const memberRow = (id: string, walletObjects: WalletObjectRow[]) => ({
   erasedAt: null,
   clinic: { template: { id: "t", programName: "Club", tierRewards: [] } },
   walletObjects,
-  pointsLedger: []
+  pointsLedger: [],
+  rewards: []
 });
 
 interface Registration {
