@@ -30,6 +30,22 @@ const row = {
       reason: "Visita de pago",
       createdAt: new Date("2026-10-19")
     }
+  ],
+  rewards: [
+    {
+      id: "r1",
+      kind: "PREMIO",
+      title: "Limpieza facial",
+      detail: {},
+      redeemedAt: new Date("2026-10-20")
+    },
+    {
+      id: "r2",
+      kind: "VENTAJA",
+      title: "Puntos dobles",
+      detail: { perk: "doble" },
+      redeemedAt: new Date("2026-10-21")
+    }
   ]
 };
 
@@ -81,7 +97,18 @@ describe("member directory at a programme centre", () => {
     expect(member.points).toBe(600);
     expect(member.moneySpent).toBe(60);
     expect(member.lastVisitedAt).toBe("2026-10-19T10:00:00.000Z");
-    expect(member.history[0].points).toBe(600);
+    expect(member.history[1].points).toBe(600);
+  });
+
+  it("records a redeemed reward in the history, newest first, but not a spent double-points perk", async () => {
+    const member = await serviceFor(true).get("m-1");
+
+    expect(member.history.map((item) => item.id)).toEqual(["r1", "l1"]);
+    expect(member.history[0]).toMatchObject({
+      label: "Recompensa canjeada: Limpieza facial",
+      points: 0,
+      date: "2026-10-20"
+    });
   });
 
   it("leaves a centre without a programme exactly as it was", async () => {

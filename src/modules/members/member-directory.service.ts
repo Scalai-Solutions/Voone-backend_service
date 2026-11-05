@@ -11,6 +11,7 @@ import { toPoints } from "../onboarding/runtime/points-unit";
 import { listTreatments } from "../treatments/treatment-catalogue.service";
 import type { CardRef } from "../../wallet/engine/wallet-pass-provider.interface";
 import { tierLabelFor } from "./member-tier";
+import { isDoublePointsPerk } from "../onboarding/runtime/rules";
 import {
   appleUpdatesRegisteredFor,
   applePassTypeIdentifier
@@ -350,6 +351,13 @@ export class MemberDirectoryService {
         orderBy: { createdAt: "desc" as const },
         take: historyTake,
         select: { id: true, points: true, kind: true, reason: true, createdAt: true }
+      },
+      // Programme rewards are redeemed outside the ledger, so the history reads them here.
+      rewards: {
+        where: { redeemedAt: { not: null } },
+        orderBy: { redeemedAt: "desc" as const },
+        take: historyTake,
+        select: { id: true, kind: true, title: true, detail: true, redeemedAt: true }
       }
     };
   }
@@ -409,6 +417,13 @@ export class MemberDirectoryService {
         reason: string | null;
         createdAt: Date;
       }>;
+      rewards: Array<{
+        id: string;
+        kind: string;
+        title: string;
+        detail: unknown;
+        redeemedAt: Date | null;
+      }>;
     },
     appleUpdatesRegistered: boolean | null
   ): MemberSummary {
@@ -447,14 +462,28 @@ export class MemberDirectoryService {
         google: statusFor(google, configured.has(WalletProviderType.GOOGLE))
       },
       appleUpdatesRegistered,
-      history: member.pointsLedger.map((row) => ({
-        id: row.id,
-        // reason is staff-authored and optional; the kind is the honest fallback and is
-        // never a treatment name.
-        label: row.reason ?? row.kind,
-        points: row.points,
-        date: row.createdAt.toISOString().slice(0, 10)
-      }))
+      history: [
+        ...member.pointsLedger.map((row) => ({
+          id: row.id,
+          // reason is staff-authored and optional; the kind is the honest fallback and is
+          // never a treatment name.
+          label: row.reason ?? row.kind,
+          points: row.points,
+          at: row.createdAt
+        })),
+        // A double-points perk is spent by the next visit, not handed over, so it is not a
+        // redemption (the dashboard and the card make the same distinction).
+        ...member.rewards
+          .filter((reward) => !isDoublePointsPerk(reward.kind, reward.detail))
+          .map((reward) => ({
+            id: reward.id,
+            label: `Recompensa canjeada: ${reward.title}`,
+            points: 0,
+            at: reward.redeemedAt ?? new Date(0)
+          }))
+      ]
+        .sort((a, b) => b.at.getTime() - a.at.getTime())
+        .map(({ at, ...row }) => ({ ...row, date: at.toISOString().slice(0, 10) }))
     };
   }
 
