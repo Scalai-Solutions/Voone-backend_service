@@ -30,11 +30,20 @@ export interface PassImageSource {
   icon?(url: string, background: string): Promise<PassImageSet | null>;
 }
 
-/** Points, as Apple draws them: a storeCard logo is at most 160×50, its strip 375×98. */
+/**
+ * Points, as Apple draws them. Its Wallet guide gives a logo at most 160×50 and, for a strip on an
+ * iPhone 6 or later, 375×98 for an event ticket, 375×144 for a gift card or coupon and 375×123
+ * "in all other cases", which is the one a loyalty card with its points over the strip falls under.
+ * Apple fills the space and crops what does not fit, so the middle of the image is what is always
+ * seen.
+ */
 const LOGO = { width: 160, height: 50 };
-const STRIP = { width: 375, height: 98 };
+const STRIP = { width: 375, height: 123 };
 /** Points: Apple draws the pass icon at 29×29. */
 const ICON = 29;
+
+/** The point sizes every pass image is rendered at (× 1, 2 and 3 for the file names Apple reads). */
+export const PASS_IMAGE_SIZES = { logo: LOGO, strip: STRIP, icon: { width: ICON, height: ICON } };
 /** How much of the tile the logo may fill; the rest is margin so it is not cropped by the mask. */
 const ICON_LOGO_SHARE = 0.78;
 const SCALES = [1, 2, 3] as const;

@@ -47,8 +47,8 @@ export class ImageTooLargeError extends AppError {
 
 /** Too small, too wide or tall, or more pixels than is safe to decode. */
 export class ImageDimensionsError extends AppError {
-  constructor() {
-    super("El tamaño de la imagen no es válido.", {
+  constructor(message = "El tamaño de la imagen no es válido.") {
+    super(message, {
       statusCode: 422,
       code: "IMAGE_DIMENSIONS",
       expose: true

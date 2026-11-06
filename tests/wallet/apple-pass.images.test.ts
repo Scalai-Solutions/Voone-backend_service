@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { ApplePassBuilder } from "../../src/wallet/providers/apple/apple-pass.builder";
 import {
   PassImageSource,
+  PASS_IMAGE_SIZES,
   isPublicHttpsUrl,
   renderIcon,
   renderSizes
@@ -104,6 +105,38 @@ describe("renderSizes", () => {
       height: 196,
       format: "png"
     });
+  });
+});
+
+describe("the sizes the pass images are rendered at", () => {
+  // Apple's Wallet guide, in points: icon 29×29, logo at most 160×50, and on an iPhone 6 or later a
+  // strip of 375×123 for a pass that is not an event ticket, gift card or coupon. Files are
+  // supplied at 1×, 2× and 3×.
+  it("match Apple's guide", () => {
+    expect(PASS_IMAGE_SIZES).toEqual({
+      logo: { width: 160, height: 50 },
+      strip: { width: 375, height: 123 },
+      icon: { width: 29, height: 29 }
+    });
+  });
+
+  it("produce 1×, 2× and 3× files at exactly those sizes", async () => {
+    const source = await picture(2400, 800);
+    const strip = await renderSizes(source, PASS_IMAGE_SIZES.strip, "strip", "cover");
+    const icon = await renderIcon(source, "#1f2a44");
+
+    expect(await dimensions(strip.files["strip.png"])).toMatchObject({ width: 375, height: 123 });
+    expect(await dimensions(strip.files["strip@2x.png"])).toMatchObject({
+      width: 750,
+      height: 246
+    });
+    expect(await dimensions(strip.files["strip@3x.png"])).toMatchObject({
+      width: 1125,
+      height: 369
+    });
+    expect(await dimensions(icon.files["icon.png"])).toMatchObject({ width: 29, height: 29 });
+    expect(await dimensions(icon.files["icon@2x.png"])).toMatchObject({ width: 58, height: 58 });
+    expect(await dimensions(icon.files["icon@3x.png"])).toMatchObject({ width: 87, height: 87 });
   });
 });
 
