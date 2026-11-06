@@ -78,8 +78,10 @@ describe("buildStoreCardFields", () => {
       buildStoreCardFields(aureaGoldPass).backFields.map((f) => [f.key, f.value])
     );
 
-    expect(back.redemptionCode).toBe(aureaGoldPass.redemptionCode);
     expect(back.memberCode).toBe("K7M2Q");
+    // The long code the QR carries is not printed: nobody can read out 26 characters.
+    expect(back.redemptionCode).toBeUndefined();
+    expect(Object.values(back)).not.toContain(aureaGoldPass.redemptionCode);
     expect(back.serialNumber).toBeUndefined();
   });
 

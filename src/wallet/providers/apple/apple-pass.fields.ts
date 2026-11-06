@@ -213,12 +213,8 @@ export const buildStoreCardFields = (data: LoyaltyCard): StoreCardFields => {
     });
   }
 
-  // Readable fallbacks for reception when the barcode will not scan.
-  backFields.push({
-    key: "redemptionCode",
-    label: PASS_LABELS.redemptionCode,
-    value: data.redemptionCode
-  });
+  // No readable copy of the QR's long redemption code: 26 characters nobody can read out, and the
+  // short member number below is what reception types when the barcode will not scan.
 
   // The member's own number, which is the one reception asks for out loud.
   //

@@ -27,6 +27,7 @@ import {
   setClassLocations
 } from "./classService";
 import { GoogleWalletApiError, getGoogleWalletIssuerId, isGoogleWalletConfigured } from "./client";
+import { chooseLogoUrl } from "../../engine/logo-choice";
 import { buildSaveLink } from "./jwt";
 import { addObjectMessage, createObject, patchObject, removeObjectMessage } from "./objectService";
 import type {
@@ -259,9 +260,10 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       classId,
       programName: template.programName,
       hexBackgroundColor: template.backgroundColor,
-      // The plain Voone logo when the clinic has none (absent if that is not configured),
-      // and no hero at all: another client's images are never a fallback.
-      logoUrl: template.logoUrl ?? config.VOONE_DEFAULT_LOGO_URL,
+      // The same logo Apple shows (chosen by the card's colour), else the plain Voone logo when the
+      // clinic has none (absent if that is not configured), and no hero at all: another client's
+      // images are never a fallback.
+      logoUrl: chooseLogoUrl(template) ?? config.VOONE_DEFAULT_LOGO_URL,
       heroImageUrl: template.heroImageUrl,
       heroImageDescription: `Imagen de ${template.programName}`,
       homepageUrl: websiteUrl,

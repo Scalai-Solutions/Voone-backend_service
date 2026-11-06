@@ -7,6 +7,7 @@ import { LoyaltyCard } from "../../engine/loyalty-card";
 import { BuiltPass, PassBuilder, PassUpdateBinding } from "../../engine/pass-builder.interface";
 import { buildStoreCardFields } from "./apple-pass.fields";
 import { PASS_TRANSLATIONS } from "./apple-pass.strings";
+import { chooseLogoUrl } from "../../engine/logo-choice";
 import { PassImageSource } from "./apple-pass.images";
 import { deriveAppleTheme } from "./apple-pass.theme";
 import { PKPassInstance, loadPasskit } from "./passkit";
@@ -84,9 +85,7 @@ export class ApplePassBuilder implements PassBuilder {
           description: `${data.clinic.name} · ${data.template.programName}`,
           // With a logo the brand is already on the card, and the text beside it collides with the
           // level in the header. Without one, the clinic's name is the only identity there is.
-          ...(data.template.logoOnDarkUrl || data.template.logoUrl
-            ? {}
-            : { logoText: data.clinic.name }),
+          ...(chooseLogoUrl(data.template) ? {} : { logoText: data.clinic.name }),
           sharingProhibited: true,
           backgroundColor: theme.backgroundColor,
           foregroundColor: theme.foregroundColor,
@@ -149,7 +148,7 @@ export class ApplePassBuilder implements PassBuilder {
 
     if (!source) return;
 
-    const logoUrl = data.template.logoOnDarkUrl ?? data.template.logoUrl;
+    const logoUrl = chooseLogoUrl(data.template);
     const [logo, strip, icon] = await Promise.all([
       logoUrl ? source.logo(logoUrl) : null,
       data.template.heroImageUrl ? source.strip(data.template.heroImageUrl) : null,
