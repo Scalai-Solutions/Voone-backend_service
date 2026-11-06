@@ -438,25 +438,12 @@ describe("tiers", () => {
     expect((await pay(m.id, 100, "oro")).progress).toBe(110);
   });
 
-  it("holds a client in a lower tier until their tenure is met", async () => {
-    // Plenty of progress for Diamante, two months in: not a Diamante client.
+  it("places a client by points alone, however recently they joined", async () => {
+    // Plenty of progress for Diamante, two months in.
     const m = await makeMember({ createdAt: "2026-08-13T10:00:00Z" });
     await seed(m.id, 1700);
 
-    expect((await memberRow(m.id)).tier).toBe("Plata");
-  });
-
-  it("promotes the day tenure is reached, with the progress already banked", async () => {
-    const m = await makeMember({ createdAt: "2025-10-14T10:00:00Z" });
-    await seed(m.id, 600);
-
-    // One day short of twelve months.
-    expect((await memberRow(m.id)).tier).toBe("Plata");
-
-    setClock("2026-10-14T10:00:00Z");
-    await pay(m.id, 1, "tick");
-
-    expect((await memberRow(m.id)).tier).toBe("Oro");
+    expect((await memberRow(m.id)).tier).toBe("Diamante");
   });
 
   it("never takes a tier away on an ordinary movement", async () => {

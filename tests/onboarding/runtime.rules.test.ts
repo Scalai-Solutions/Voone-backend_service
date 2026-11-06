@@ -69,7 +69,7 @@ describe("programView", () => {
 
   it("carries the multipliers, tenures and discounts the guide fixes", () => {
     expect(view.tiers.map((t) => t.multiplier)).toEqual([1.0, 1.0, 1.1, 1.2, 1.3]);
-    expect(view.tiers.map((t) => t.minTenureMonths)).toEqual([0, 0, 12, 24, 36]);
+    expect(view.tiers.map((t) => t.minTenureMonths)).toEqual([0, 0, 0, 0, 0]);
     expect(view.tiers.map((t) => t.discount)).toEqual([0, 0.03, 0.05, 0.1, 0.15]);
   });
 
@@ -146,20 +146,14 @@ describe("resolveTier", () => {
     expect(resolve(190, 0).tier.key).toBe("plata");
   });
 
-  it("needs tenure as well as progress: enough progress alone is not enough", () => {
-    // The point of the gate. 1,700 progress euros is past Diamante's threshold, but six
-    // months in the programme is not a Diamante client.
-    const r = resolve(1700, 6);
+  it("goes by points alone: a new member with enough progress reaches every tier", () => {
+    expect(resolve(490, 0).tier.key).toBe("oro");
+    expect(resolve(950, 0).tier.key).toBe("platino");
 
-    expect(r.tier.key).toBe("plata");
-    expect(r.waitingForTenure?.key).toBe("oro");
-  });
+    const r = resolve(1700, 0);
 
-  it("enters the tier the day tenure is met, with the progress already banked", () => {
-    expect(resolve(1700, 11).tier.key).toBe("plata");
-    expect(resolve(1700, 12).tier.key).toBe("oro");
-    expect(resolve(1700, 24).tier.key).toBe("platino");
-    expect(resolve(1700, 36).tier.key).toBe("diamante");
+    expect(r.tier.key).toBe("diamante");
+    expect(r.waitingForTenure).toBeNull();
   });
 
   it("needs the threshold even when tenure is long", () => {
