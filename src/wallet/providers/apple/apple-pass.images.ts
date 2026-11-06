@@ -23,11 +23,20 @@ export interface PassImageSet {
 export interface PassImageSource {
   logo(url: string): Promise<PassImageSet | null>;
   strip(url: string): Promise<PassImageSet | null>;
+  /**
+   * The small square shown beside a lock-screen notification: the clinic's logo on a tile of the
+   * card's own colour, so the notification looks like the clinic's and not Voone's.
+   */
+  icon?(url: string, background: string): Promise<PassImageSet | null>;
 }
 
 /** Points, as Apple draws them: a storeCard logo is at most 160×50, its strip 375×98. */
 const LOGO = { width: 160, height: 50 };
 const STRIP = { width: 375, height: 98 };
+/** Points: Apple draws the pass icon at 29×29. */
+const ICON = 29;
+/** How much of the tile the logo may fill; the rest is margin so it is not cropped by the mask. */
+const ICON_LOGO_SHARE = 0.78;
 const SCALES = [1, 2, 3] as const;
 
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -106,6 +115,34 @@ export const renderSizes = async (
 };
 
 /**
+ * The pass icon at 1×, 2× and 3×: the logo, trimmed of empty border and kept in proportion, on a
+ * flat square of `background`. A wide wordmark ends up small, but whole and on the clinic's colour,
+ * which reads better than a crop through its letters.
+ */
+export const renderIcon = async (source: Buffer, background: string): Promise<PassImageSet> => {
+  const files: Record<string, Buffer> = {};
+  const trimmed = await sharp(source).rotate().trim().png().toBuffer();
+
+  for (const scale of SCALES) {
+    const size = ICON * scale;
+    const inner = Math.round(size * ICON_LOGO_SHARE);
+    const logo = await sharp(trimmed)
+      .resize(inner, inner, { fit: "inside", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+      .png()
+      .toBuffer();
+
+    files[`icon${suffix(scale)}.png`] = await sharp({
+      create: { width: size, height: size, channels: 4, background }
+    })
+      .composite([{ input: logo, gravity: "centre" }])
+      .png()
+      .toBuffer();
+  }
+
+  return { files };
+};
+
+/**
  * Fetches and resizes, remembering the result so a pass rebuilt on every points change does not
  * download the same logo each time. Keyed by URL: a clinic that changes its image changes the URL.
  */
@@ -122,12 +159,26 @@ export class RemotePassImageSource implements PassImageSource {
     return this.remember(`strip:${url}`, url, STRIP, "strip", "cover");
   }
 
+  icon(url: string, background: string): Promise<PassImageSet | null> {
+    return this.rememberWith(`icon:${background}:${url}`, url, (bytes) =>
+      renderIcon(bytes, background)
+    );
+  }
+
   private remember(
     key: string,
     url: string,
     base: { width: number; height: number },
     name: "logo" | "strip",
     fit: "contain" | "cover"
+  ): Promise<PassImageSet | null> {
+    return this.rememberWith(key, url, (bytes) => renderSizes(bytes, base, name, fit));
+  }
+
+  private rememberWith(
+    key: string,
+    url: string,
+    render: (bytes: Buffer) => Promise<PassImageSet>
   ): Promise<PassImageSet | null> {
     const hit = this.cache.get(key);
 
@@ -139,7 +190,7 @@ export class RemotePassImageSource implements PassImageSource {
       if (!bytes) return null;
 
       try {
-        return await renderSizes(bytes, base, name, fit);
+        return await render(bytes);
       } catch {
         return null;
       }

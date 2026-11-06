@@ -107,7 +107,7 @@ export class ApplePassBuilder implements PassBuilder {
     }
 
     this.applyFields(pass, data, PassType);
-    await this.applyImages(pass, data);
+    await this.applyImages(pass, data, theme.backgroundColor);
 
     pass.setBarcodes({
       message: data.redemptionCode,
@@ -140,19 +140,24 @@ export class ApplePassBuilder implements PassBuilder {
    * The clinic's logo and hero, in place of the bundled ones. Each is optional and each can fail
    * on its own: the card still works with the Voone logo and no strip.
    */
-  private async applyImages(pass: PKPassInstance, data: LoyaltyCard): Promise<void> {
+  private async applyImages(
+    pass: PKPassInstance,
+    data: LoyaltyCard,
+    background: string
+  ): Promise<void> {
     const source = this.options.images;
 
     if (!source) return;
 
-    const [logo, strip] = await Promise.all([
-      (data.template.logoOnDarkUrl ?? data.template.logoUrl)
-        ? source.logo((data.template.logoOnDarkUrl ?? data.template.logoUrl) as string)
-        : null,
-      data.template.heroImageUrl ? source.strip(data.template.heroImageUrl) : null
+    const logoUrl = data.template.logoOnDarkUrl ?? data.template.logoUrl;
+    const [logo, strip, icon] = await Promise.all([
+      logoUrl ? source.logo(logoUrl) : null,
+      data.template.heroImageUrl ? source.strip(data.template.heroImageUrl) : null,
+      // The same logo, as the notification icon. Without one the bundled Voone icon stays.
+      logoUrl && source.icon ? source.icon(logoUrl, background) : null
     ]);
 
-    for (const set of [logo, strip]) {
+    for (const set of [logo, strip, icon]) {
       if (!set) continue;
 
       for (const [name, bytes] of Object.entries(set.files)) pass.addBuffer(name, bytes);

@@ -5,6 +5,7 @@ import { ApplePassBuilder } from "../../src/wallet/providers/apple/apple-pass.bu
 import {
   PassImageSource,
   isPublicHttpsUrl,
+  renderIcon,
   renderSizes
 } from "../../src/wallet/providers/apple/apple-pass.images";
 import { resolvePassModelDirectory } from "../../src/wallet/providers/apple/apple-pass.model";
@@ -106,6 +107,41 @@ describe("renderSizes", () => {
   });
 });
 
+describe("renderIcon", () => {
+  it("makes a square icon at 1x, 2x and 3x", async () => {
+    const set = await renderIcon(await picture(400, 120), "#1f2a44");
+
+    expect(Object.keys(set.files).sort()).toEqual(["icon.png", "icon@2x.png", "icon@3x.png"]);
+    expect(await dimensions(set.files["icon.png"])).toEqual({
+      width: 29,
+      height: 29,
+      format: "png"
+    });
+    expect(await dimensions(set.files["icon@3x.png"])).toEqual({
+      width: 87,
+      height: 87,
+      format: "png"
+    });
+  });
+
+  it("puts the logo on the card colour, with a margin, instead of cropping it", async () => {
+    const set = await renderIcon(await picture(400, 120), "#1f2a44");
+    const { data, info } = await sharp(set.files["icon@3x.png"])
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const pixel = (x: number, y: number) => [
+      ...data.subarray((y * info.width + x) * info.channels).slice(0, 3)
+    ];
+
+    // The corner is the card's colour; the centre is the logo's red.
+    expect(pixel(1, 1)).toEqual([0x1f, 0x2a, 0x44]);
+    // JPEG compression shifts a channel by a step or two, so match the logo's red loosely.
+    pixel(43, 43).forEach((channel, i) =>
+      expect(Math.abs(channel - [0xc0, 0x39, 0x2b][i])).toBeLessThanOrEqual(3)
+    );
+  });
+});
+
 describe("ApplePassBuilder images", () => {
   const set = async (name: "logo" | "strip") =>
     renderSizes(
@@ -141,6 +177,43 @@ describe("ApplePassBuilder images", () => {
       ])
     );
     expect(Buffer.compare(entries["logo.png"] as Buffer, logo.files["logo.png"])).toBe(0);
+  });
+
+  it("replaces the bundled icon with the clinic's logo, so the notification is the clinic's", async () => {
+    const icon = await renderIcon(await picture(300, 300), "#102030");
+    let askedFor: { url: string; background: string } | null = null;
+    const source: PassImageSource = {
+      logo: async () => null,
+      strip: async () => null,
+      icon: async (url, background) => ((askedFor = { url, background }), icon)
+    };
+
+    const built = await builderWith(source).build({
+      ...aureaGoldPass,
+      template: { ...aureaGoldPass.template, logoUrl: "https://cdn.example.com/logo.png" }
+    });
+    const entries = readPkpass(built.buffer);
+
+    expect(Buffer.compare(entries["icon@2x.png"] as Buffer, icon.files["icon@2x.png"])).toBe(0);
+    expect(askedFor).toMatchObject({ url: "https://cdn.example.com/logo.png" });
+    expect(askedFor!.background).toMatch(/^rgb|^#/);
+  });
+
+  it("keeps the bundled icon when the clinic has no logo or the icon cannot be made", async () => {
+    const bundled = readPkpass((await builderWith().build(aureaGoldPass)).buffer);
+    const source: PassImageSource = {
+      logo: async () => null,
+      strip: async () => null,
+      icon: async () => null
+    };
+    const built = await builderWith(source).build({
+      ...aureaGoldPass,
+      template: { ...aureaGoldPass.template, logoUrl: "https://cdn.example.com/broken.png" }
+    });
+
+    expect(
+      Buffer.compare(readPkpass(built.buffer)["icon.png"] as Buffer, bundled["icon.png"] as Buffer)
+    ).toBe(0);
   });
 
   it("keeps the bundled logo and adds no strip when the image cannot be fetched", async () => {
