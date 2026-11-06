@@ -23,15 +23,7 @@ describe("Apple pass wording", () => {
     expect(everything).not.toMatch(/\bsocias?\b/i);
   });
 
-  it("translates every Spanish label, keyed by the label itself", () => {
-    const english = PASS_TRANSLATIONS.en;
-
-    for (const label of Object.values(PASS_LABELS)) {
-      expect(english, `no English translation for "${label}"`).toHaveProperty([label]);
-    }
-    expect(english.MIEMBRO).toBe("MEMBER");
-    expect(english["N.º DE MIEMBRO"]).toBe("MEMBER NO.");
-    expect(english["NÚMERO DE MIEMBRO"]).toBe("MEMBER NUMBER");
-    expect(english["MIEMBRO DESDE"]).toBe("MEMBER SINCE");
+  it("ships no translation: the pass is Spanish whatever language the phone uses", () => {
+    expect(PASS_TRANSLATIONS).toEqual({});
   });
 });

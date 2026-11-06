@@ -14,10 +14,7 @@ import {
   rewardsPass,
   uncodedMemberPass
 } from "../fixtures/loyalty-card.fixture";
-import {
-  PASS_LABELS,
-  PASS_TRANSLATIONS
-} from "../../src/wallet/providers/apple/apple-pass.strings";
+import { PASS_LABELS } from "../../src/wallet/providers/apple/apple-pass.strings";
 import type { LoyaltyCard } from "../../src/wallet/engine/loyalty-card";
 
 const allKeys = (fields: ReturnType<typeof buildStoreCardFields>): string[] =>
@@ -483,13 +480,10 @@ describe("buildStoreCardFields: redeemable rewards", () => {
     expect(buildStoreCardFields(rewardsPass)).toEqual(buildStoreCardFields(rewardsPass));
   });
 
-  it("has an English translation for the new labels and the change message", () => {
-    const english = PASS_TRANSLATIONS.en;
-
+  it("labels the rewards in Spanish", () => {
     expect(PASS_LABELS.rewards).toBe("REGALOS");
-    expect(english.REGALOS).toBe("GIFTS");
-    expect(english["RECOMPENSAS DISPONIBLES"]).toBe("AVAILABLE REWARDS");
-    expect(english["Tus regalos disponibles: %@"]).toBe("Your available gifts: %@");
+    expect(PASS_LABELS.availableRewards).toBe("RECOMPENSAS DISPONIBLES");
+    expect(PASS_LABELS.rewardsChangeMessage).toBe("Tus regalos disponibles: %@");
   });
 
   it("keeps a long title to 60 characters on its line", () => {
@@ -537,10 +531,6 @@ describe("tier benefits on the back of the pass", () => {
 
     expect(JSON.stringify(fields)).not.toContain("Acceso exclusivo");
     expect(fields.backFields.filter((f) => f.key === "benefits")).toHaveLength(1);
-  });
-
-  it("translates the new label to English", () => {
-    expect(PASS_TRANSLATIONS.en["BENEFICIOS DE TU NIVEL"]).toBe("YOUR TIER BENEFITS");
   });
 
   it("keeps the information field as it was", () => {

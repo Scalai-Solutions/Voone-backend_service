@@ -58,7 +58,6 @@ describe("ApplePassBuilder", () => {
   it("bundles the pass, its manifest, its signature and every image", () => {
     expect(Object.keys(entries).sort()).toEqual(
       [
-        "en.lproj/pass.strings",
         "icon.png",
         "icon@2x.png",
         "icon@3x.png",
@@ -183,19 +182,9 @@ describe("ApplePassBuilder", () => {
     expect(text).toContain("INFORMACIÓN");
   });
 
-  it("ships English translations alongside the Spanish keys", () => {
-    const strings = Buffer.from(entries["en.lproj/pass.strings"]).toString("utf8");
-
-    expect(strings).toContain('"MIEMBRO" = "MEMBER";');
-    expect(strings).toContain('"N.º DE MIEMBRO" = "MEMBER NO.";');
-    expect(strings).not.toMatch(/SOCIA/);
-  });
-
-  it("translates the last-message label and its change format", () => {
-    const strings = Buffer.from(entries["en.lproj/pass.strings"]).toString("utf8");
-
-    expect(strings).toContain('"ÚLTIMO MENSAJE" = "LAST MESSAGE";');
-    expect(strings).toContain('"%@" = "%@";');
+  it("ships no translation, so a phone in any language shows the Spanish text", () => {
+    expect(Object.keys(entries).filter((name) => name.includes(".lproj/"))).toEqual([]);
+    expect(Buffer.from(entries["pass.json"]).toString("utf8")).not.toMatch(/SOCIA/);
   });
 
   it("puts the last message on the back with a changeMessage of %@ only when there is one", async () => {
