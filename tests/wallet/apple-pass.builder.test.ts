@@ -116,6 +116,13 @@ describe("ApplePassBuilder", () => {
     expect(passJson.sharingProhibited).toBe(true);
   });
 
+  it("names the clinic as the organization, not the configured Voone name", () => {
+    const passJson = readPassJson(entries);
+
+    expect(passJson.organizationName).toBe(aureaGoldPass.clinic.name);
+    expect(passJson.organizationName).not.toBe("Voone Test");
+  });
+
   it("describes a storeCard carrying the mapped fields", () => {
     const storeCard = readPassJson(entries).storeCard as Record<
       string,

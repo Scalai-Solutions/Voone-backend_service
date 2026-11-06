@@ -77,7 +77,9 @@ export class ApplePassBuilder implements PassBuilder {
           serialNumber: data.serialNumber,
           passTypeIdentifier: this.options.passTypeIdentifier,
           teamIdentifier: this.options.teamIdentifier,
-          organizationName: this.options.organizationName,
+          // The name Wallet shows with the pass, so it is the clinic's, not Voone's. The configured
+          // name is only the fallback for a clinic with no name.
+          organizationName: data.clinic.name || this.options.organizationName,
           // Apple requires a description for VoiceOver; the library does not enforce it.
           description: `${data.clinic.name} · ${data.template.programName}`,
           // With a logo the brand is already on the card, and the text beside it collides with the
