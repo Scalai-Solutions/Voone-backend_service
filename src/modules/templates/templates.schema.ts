@@ -139,14 +139,14 @@ export const milestoneRewardsSchema = z.object({
  * that ranks members, rather than five names that rank nobody.
  *
  * The spacing widens as the tiers climb, which is the shape loyalty programmes usually
- * take — reaching Silver should feel attainable and Diamond should not.
+ * take — reaching Plata should feel attainable and Diamante should not.
  */
 const defaultTierRewards = [
-  { name: "Bronze", minLifetimePoints: 0, milestoneCount: 5, pointsToNextMilestone: 200 },
-  { name: "Silver", minLifetimePoints: 1_000, milestoneCount: 5, pointsToNextMilestone: 400 },
-  { name: "Gold", minLifetimePoints: 3_000, milestoneCount: 5, pointsToNextMilestone: 800 },
-  { name: "Platinum", minLifetimePoints: 7_000, milestoneCount: 5, pointsToNextMilestone: 1_600 },
-  { name: "Diamond", minLifetimePoints: 15_000, milestoneCount: 5, pointsToNextMilestone: 3_000 }
+  { name: "Bronce", minLifetimePoints: 0, milestoneCount: 5, pointsToNextMilestone: 200 },
+  { name: "Plata", minLifetimePoints: 1_000, milestoneCount: 5, pointsToNextMilestone: 400 },
+  { name: "Oro", minLifetimePoints: 3_000, milestoneCount: 5, pointsToNextMilestone: 800 },
+  { name: "Platino", minLifetimePoints: 7_000, milestoneCount: 5, pointsToNextMilestone: 1_600 },
+  { name: "Diamante", minLifetimePoints: 15_000, milestoneCount: 5, pointsToNextMilestone: 3_000 }
 ].map((tier) => ({ ...tier, rewardText: "" }));
 
 export const createTemplateSchema = z.object({
