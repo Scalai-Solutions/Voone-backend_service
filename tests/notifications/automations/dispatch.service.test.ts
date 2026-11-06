@@ -115,7 +115,7 @@ describe("AutomationDispatchService", () => {
     expect(created).toEqual([]);
   });
 
-  it("asks for marketing consent on marketing events but not on service messages", async () => {
+  it("never asks for marketing consent, not even on marketing events", async () => {
     const marketing = build({
       settings: { marketingEnabled: true },
       automations: [
@@ -129,7 +129,7 @@ describe("AutomationDispatchService", () => {
       idempotencyKey: "k",
       recipients: [{ memberId: "m1" }]
     });
-    expect(marketing.memberQueries[0].where.consentMarketing).toBe(true);
+    expect(marketing.memberQueries[0].where).not.toHaveProperty("consentMarketing");
 
     const service = build({ members: [lucia] });
     await service.service.dispatch({

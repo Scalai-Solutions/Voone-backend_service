@@ -292,6 +292,26 @@ describe("active-bono segment", () => {
 
     expect(members.map((member) => member.id)).toEqual(["member-1"]);
     expect(wheres[0]).toMatchObject({ bonos: { some: { status: "ACTIVE" } } });
+    // A segment is a manual send: only members who consented.
+    expect(wheres[0]).toMatchObject({ consentMarketing: true });
+  });
+
+  it("refuses a manual send to a single member who has not consented", async () => {
+    const actor = { role: "VOONE_ADMIN", permissions: [PERMISSIONS.notificationsSend] };
+    const service = new NotificationService(
+      {
+        member: {
+          findFirst: async () => ({ id: "m-1", clinicId: "clinic-1", consentMarketing: false })
+        }
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never
+    );
+
+    await expect(
+      service.single("m-1", { header: "H", body: "B", notify: true }, actor)
+    ).rejects.toThrow("no ha aceptado");
   });
 });
 

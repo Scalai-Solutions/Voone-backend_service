@@ -54,8 +54,8 @@ const skipped = (reason: DispatchSkip): DispatchResult => ({
  * Sends one automated message to a list of members: the single path every automation uses
  * (birthday, inactive bono, review request, referral promo, tier upgrade).
  *
- * It owns the rules that are the same for all of them: the clinic's on/off switch, marketing
- * consent, "a required clinic value is set", rendering the copy per member, finding or
+ * It owns the rules that are the same for all of them: the clinic's on/off switch, "a required
+ * clinic value is set", rendering the copy per member, finding or
  * creating the Notification under its idempotency key, and queueing one delivery per member
  * and wallet. Which members, and when, is the caller's business.
  */
@@ -96,8 +96,7 @@ export class AutomationDispatchService {
     };
     const members = await this.eligibleMembers(
       clinicId,
-      request.recipients.map((recipient) => recipient.memberId),
-      definition.marketing
+      request.recipients.map((recipient) => recipient.memberId)
     );
     const valuesByMember = new Map(request.recipients.map((r) => [r.memberId, r.values ?? {}]));
     const notification = await this.prisma.notification.upsert({
@@ -166,12 +165,11 @@ export class AutomationDispatchService {
     };
   }
 
-  /** Members who may receive this message and have at least one synced pass. */
-  private async eligibleMembers(
-    clinicId: string,
-    memberIds: readonly string[],
-    marketing: boolean
-  ) {
+  /**
+   * Members with at least one synced pass. Marketing consent is not asked for: automatic
+   * messages go to every member; only manual sends need consent.
+   */
+  private async eligibleMembers(clinicId: string, memberIds: readonly string[]) {
     const members: Array<{
       id: string;
       name: string;
@@ -185,7 +183,6 @@ export class AutomationDispatchService {
             clinicId,
             id: { in: memberIds.slice(i, i + 1_000) },
             erasedAt: null,
-            ...(marketing ? { consentMarketing: true } : {}),
             walletObjects: {
               some: { status: WalletSyncStatus.SYNCED, provider: { in: WALLET_PROVIDERS } }
             }

@@ -291,12 +291,19 @@ export class NotificationService {
   ) {
     const member = await this.prisma.member.findFirst({
       where: { id: memberId, erasedAt: null },
-      select: { id: true, clinicId: true }
+      select: { id: true, clinicId: true, consentMarketing: true }
     });
 
     if (!member) throw new NotificationNotFoundError("Member not found");
 
     this.assertSender(actor, member.clinicId);
+
+    // Manual sends need the member's consent; automatic messages do not.
+    if (!member.consentMarketing) {
+      throw new NotificationForbiddenError(
+        "Este cliente no ha aceptado recibir notificaciones promocionales."
+      );
+    }
 
     const existing = await this.findIdempotent(member.clinicId, idempotencyKey);
     if (existing) return existing;
@@ -1261,6 +1268,8 @@ export class NotificationService {
       where: {
         clinicId,
         erasedAt: null,
+        // A segment is a manual send, so only members who consented.
+        consentMarketing: true,
         ...(segment.tier ? { tier: segment.tier } : {}),
         ...(segment.sex ? { sex: segment.sex } : {}),
         ...(segment.joinedAfter ? { createdAt: { gte: segment.joinedAfter } } : {}),

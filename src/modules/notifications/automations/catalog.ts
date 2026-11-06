@@ -21,7 +21,7 @@ export interface AutomationDefinition {
   description: string;
   /** Variables the copy may use; any other {name} is rejected on save. */
   variables: readonly TemplateVariable[];
-  /** Marketing sends need consent and the clinic's marketing switch; service messages do not. */
+  /** Marketing sends need the clinic's marketing switch; service messages do not. */
   marketing: boolean;
   /** Clinic settings that must be filled in before the automation can be switched on. */
   requires?: ClinicVariableKey;

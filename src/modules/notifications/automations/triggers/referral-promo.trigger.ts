@@ -37,7 +37,6 @@ export class ReferralPromoTrigger implements ScheduledTrigger {
       where: {
         clinicId,
         erasedAt: null,
-        consentMarketing: true,
         OR: [
           { paidVisits: { some: { occurredAt: { gte: since } } } },
           { pointsLedger: { some: { createdAt: { gte: since } } } }
