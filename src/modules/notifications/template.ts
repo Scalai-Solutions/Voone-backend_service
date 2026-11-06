@@ -39,6 +39,10 @@ export const MANUAL_VARIABLES = ["first_name"] as const;
 export const personalise = (text: string, memberName: string | null | undefined): string =>
   renderTemplate(text, { first_name: firstName(memberName) }).replace(/\s+([,.;:!?])/g, "$1");
 
+/** Whether any of the texts greets by name, which Google's one shared broadcast message cannot do. */
+export const usesMemberName = (...texts: string[]): boolean =>
+  texts.some((text) => templateVariables(text).includes("first_name"));
+
 const BARE_URL = /https?:\/\/[^\s<>"']+/g;
 const TRAILING_PUNCTUATION = /[.,;:!?)\]]+$/;
 

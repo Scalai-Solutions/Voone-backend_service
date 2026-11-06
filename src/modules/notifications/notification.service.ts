@@ -36,7 +36,7 @@ import { TierUpgradeNotifier, tierMessageKey } from "./automations/tier-upgrade"
 import { objectHasUsers } from "../../wallet/providers/google/objectService";
 import { ReviewRequestNotifier } from "./automations/triggers/review-request.trigger";
 import { NotificationQuotaService } from "./quota.service";
-import { linkifyForGoogle, personalise } from "./template";
+import { linkifyForGoogle, personalise, usesMemberName } from "./template";
 import { CLINIC_TIME_ZONE } from "../../common/utils/zoned-month";
 import { zonedDate, type ZonedDate } from "../../common/utils/zoned-time";
 
@@ -169,6 +169,16 @@ export class NotificationService {
     if (existing) return existing;
 
     await this.assertMarketingEnabled(clinicId);
+
+    // Google sends one shared message to every card, which cannot carry anyone's name. A message
+    // that greets by name goes to each member on their own instead, on both wallets, like any
+    // segment: an empty segment is everyone who agreed to hear from the clinic. That is fewer
+    // people than a broadcast reaches (it ignores consent), which is the point of a marketing
+    // message addressed to someone by name.
+    if (usesMemberName(input.header, input.body)) {
+      return this.segment(clinicId, { ...input, segment: {} }, actor, idempotencyKey);
+    }
+
     await this.assertBroadcastCapacity(clinicId);
     // No Google class is not an error: a clinic whose Google publisher access is still pending
     // broadcasts to its Apple cards only (see processNotification).
