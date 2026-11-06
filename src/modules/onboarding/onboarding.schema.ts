@@ -107,6 +107,8 @@ export const csvImportSchema = z.object({
 });
 
 const lineSchema = z.object({
+  /** The catalogue item's name, when picked: shown in the member's history. */
+  name: z.string().trim().min(1).max(120).optional(),
   category: z
     .string()
     .refine((value) => CATEGORY_CODES.includes(value), { message: "Categoría desconocida" })

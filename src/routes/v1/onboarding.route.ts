@@ -546,6 +546,7 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
         ...(body.kind === "PAYMENT"
           ? {
               lines: body.lines.map((l) => ({
+                name: l.name,
                 amountEuro: l.amountEuro,
                 category: l.category as CategoryCode | undefined
               })),

@@ -115,6 +115,19 @@ export const createMemberDirectoryRouter = (deps: MemberDirectoryRouterDeps): Ro
     })
   );
 
+  /** One member with their full history, scoped by slug so another clinic's member is a 404. */
+  router.get(
+    "/clinics/:slug/members/:memberId",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const clinicId = await deps.clinicIdForSlug(req.params.slug);
+
+      if (!clinicId) throw new ClinicNotFoundError(req.params.slug);
+
+      res.json(await deps.directory.get(req.params.memberId, clinicId));
+    })
+  );
+
   router.patch(
     "/clinics/:slug/members/:memberId",
     requireStaff,

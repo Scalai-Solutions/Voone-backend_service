@@ -111,6 +111,11 @@ describe("member directory at a programme centre", () => {
     });
   });
 
+  it("does not find a member through another clinic", async () => {
+    await expect(serviceFor(true).get("m-1", "c-2")).rejects.toThrow();
+    expect((await serviceFor(true).get("m-1", "c-1")).id).toBe("m-1");
+  });
+
   it("leaves a centre without a programme exactly as it was", async () => {
     const [member] = await serviceFor(false).list({ clinicId: "c-1", limit: 10, offset: 0 });
 
