@@ -390,6 +390,70 @@ describe("which deliveries each kind of message creates", () => {
     ]);
   });
 
+  describe("a broadcast that greets by name", () => {
+    const serviceFor = (record: { type?: string; deliveries?: Array<{ memberId: string }> }) =>
+      new NotificationService(
+        {
+          clinicNotificationSettings: { upsert: async () => ({ marketingEnabled: true }) },
+          member: {
+            findMany: async () => [
+              { id: "m-1", createdAt: new Date(), pointsLedger: [] },
+              { id: "m-2", createdAt: new Date(), pointsLedger: [] }
+            ],
+            count: async () => 2
+          },
+          walletObject: { findMany: async () => [] },
+          notification: {
+            count: async () => 0,
+            findFirst: async () => null,
+            create: async ({
+              data
+            }: {
+              data: { type: string; deliveries?: { create: Array<{ memberId: string }> } };
+            }) => {
+              record.type = data.type;
+              record.deliveries = data.deliveries?.create;
+              return { id: "n-1" };
+            }
+          },
+          notificationAuditLog: { create: async () => undefined },
+          notificationDelivery: { findMany: async () => [{ id: "d-1" }] }
+        } as never,
+        {} as never,
+        {} as never,
+        {
+          enqueueDelivery: async () => undefined,
+          enqueueNotification: async () => undefined
+        } as never
+      );
+
+    it("goes out to each member on their own, so Google can carry the name too", async () => {
+      const record: { type?: string; deliveries?: Array<{ memberId: string }> } = {};
+
+      await serviceFor(record).broadcast(
+        "clinic-1",
+        { header: "H", body: "Hola {first_name}", notify: true },
+        actor
+      );
+
+      expect(record.type).toBe(NotificationType.SEGMENT);
+      expect(record.deliveries?.map((d) => d.memberId)).toEqual(["m-1", "m-2"]);
+    });
+
+    it("stays one shared broadcast when the text has no name", async () => {
+      const record: { type?: string; deliveries?: Array<{ memberId: string }> } = {};
+
+      await serviceFor(record).broadcast(
+        "clinic-1",
+        { header: "H", body: "Hola a todos", notify: true },
+        actor
+      );
+
+      expect(record.type).toBe(NotificationType.BROADCAST);
+      expect(record.deliveries).toBeUndefined();
+    });
+  });
+
   it("a single message adds an APPLE delivery when the member has a synced Apple object", async () => {
     const run = async (hasApple: boolean) => {
       let created: Array<{ provider: WalletProviderType }> = [];
