@@ -88,6 +88,17 @@ interface ComparableResult {
  * the same order, so they agree exactly, but pinning the precision keeps a future
  * refactor from failing on a float's last bit rather than on a real difference.
  */
+/**
+ * The second deliberate deviation from the reference: tiers are reached by points alone, so the
+ * port states that guarantee in its own words where the reference still speaks of a minimum
+ * tenure (Oro 12, Platino 24, Diamante 36 months). The sentence is the only thing that differs;
+ * the numbers compared are identical.
+ */
+const REFERENCE_TENURE_NOTE = "Subir de nivel exige antigüedad mínima";
+const PORT_TENURE_NOTE = "Se sube de nivel solo por puntos, sin antigüedad mínima";
+const asPort = (text: string): string =>
+  text.startsWith(REFERENCE_TENURE_NOTE) ? PORT_TENURE_NOTE : text;
+
 const shape = (r: ComparableResult) => ({
   segment: r.est.segment,
   ticket: r.est.ticket,
@@ -131,7 +142,7 @@ const shape = (r: ComparableResult) => ({
   perkCost: +r.perkCost.toFixed(8),
   adapt: r.adapt,
   review: r.review,
-  guarantees: r.guarantees
+  guarantees: r.guarantees.map(([text, held]) => [asPort(text), held] as const)
 });
 
 const answersFor = (
