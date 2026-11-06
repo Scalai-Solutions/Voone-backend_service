@@ -58,7 +58,6 @@ describe("ApplePassBuilder", () => {
   it("bundles the pass, its manifest, its signature and every image", () => {
     expect(Object.keys(entries).sort()).toEqual(
       [
-        "en.lproj/pass.strings",
         "icon.png",
         "icon@2x.png",
         "icon@3x.png",
@@ -116,6 +115,13 @@ describe("ApplePassBuilder", () => {
     expect(passJson.sharingProhibited).toBe(true);
   });
 
+  it("names the clinic as the organization, not the configured Voone name", () => {
+    const passJson = readPassJson(entries);
+
+    expect(passJson.organizationName).toBe(aureaGoldPass.clinic.name);
+    expect(passJson.organizationName).not.toBe("Voone Test");
+  });
+
   it("describes a storeCard carrying the mapped fields", () => {
     const storeCard = readPassJson(entries).storeCard as Record<
       string,
@@ -130,7 +136,8 @@ describe("ApplePassBuilder", () => {
     });
     expect(storeCard.headerFields[0]).toMatchObject({ key: "tier", label: "Nivel", value: "Gold" });
     expect(storeCard.secondaryFields.map((field) => field.key)).toEqual(["member", "memberNo"]);
-    expect(storeCard.backFields.map((field) => field.key)).toContain("redemptionCode");
+    expect(storeCard.backFields.map((field) => field.key)).toContain("memberCode");
+    expect(storeCard.backFields.map((field) => field.key)).not.toContain("redemptionCode");
     // No column backs credit or reward, so neither is invented; only the member number shows.
     expect(storeCard.auxiliaryFields ?? []).toEqual([]);
   });
@@ -171,23 +178,13 @@ describe("ApplePassBuilder", () => {
     const text = Buffer.from(entries["pass.json"]).toString("utf8");
 
     expect(text).toContain("AURÉA");
-    expect(text).toContain("CÓDIGO DE CANJE");
+    expect(text).not.toContain("CÓDIGO DE CANJE");
     expect(text).toContain("INFORMACIÓN");
   });
 
-  it("ships English translations alongside the Spanish keys", () => {
-    const strings = Buffer.from(entries["en.lproj/pass.strings"]).toString("utf8");
-
-    expect(strings).toContain('"MIEMBRO" = "MEMBER";');
-    expect(strings).toContain('"N.º DE MIEMBRO" = "MEMBER NO.";');
-    expect(strings).not.toMatch(/SOCIA/);
-  });
-
-  it("translates the last-message label and its change format", () => {
-    const strings = Buffer.from(entries["en.lproj/pass.strings"]).toString("utf8");
-
-    expect(strings).toContain('"ÚLTIMO MENSAJE" = "LAST MESSAGE";');
-    expect(strings).toContain('"%@" = "%@";');
+  it("ships no translation, so a phone in any language shows the Spanish text", () => {
+    expect(Object.keys(entries).filter((name) => name.includes(".lproj/"))).toEqual([]);
+    expect(Buffer.from(entries["pass.json"]).toString("utf8")).not.toMatch(/SOCIA/);
   });
 
   it("puts the last message on the back with a changeMessage of %@ only when there is one", async () => {

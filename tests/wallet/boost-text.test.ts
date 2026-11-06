@@ -2,10 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { boostText, referralText } from "../../src/wallet/engine/boost-text";
 import { buildStoreCardFields } from "../../src/wallet/providers/apple/apple-pass.fields";
-import {
-  PASS_LABELS,
-  PASS_TRANSLATIONS
-} from "../../src/wallet/providers/apple/apple-pass.strings";
+import { PASS_LABELS } from "../../src/wallet/providers/apple/apple-pass.strings";
 import { rewardsPass } from "../fixtures/loyalty-card.fixture";
 import type { LoyaltyCard } from "../../src/wallet/engine/loyalty-card";
 
@@ -58,9 +55,8 @@ describe("the boost on the back of the Apple pass", () => {
     expect(f).not.toHaveProperty("changeMessage");
   });
 
-  it("is translated to English", () => {
+  it("is labelled in Spanish", () => {
     expect(PASS_LABELS.boost).toBe("PUNTOS DOBLES");
-    expect(PASS_TRANSLATIONS.en["PUNTOS DOBLES"]).toBe("DOUBLE POINTS");
   });
 
   it("is absent for a card with no boost", () => {
@@ -107,9 +103,8 @@ describe("the referral on the back of the Apple pass", () => {
     expect(field(shared)).not.toHaveProperty("changeMessage");
   });
 
-  it("is translated to English", () => {
+  it("is labelled in Spanish", () => {
     expect(PASS_LABELS.referral).toBe("RECOMIENDA");
-    expect(PASS_TRANSLATIONS.en.RECOMIENDA).toBe("REFER A FRIEND");
   });
 
   it("is absent for a card with no referral, and keeps every key unique with all the fields", () => {

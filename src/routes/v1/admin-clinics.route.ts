@@ -27,6 +27,7 @@ import {
 import { programmeCentreIds, toPoints } from "../../modules/onboarding/runtime/points-unit";
 import { tierLabelFor } from "../../modules/members/member-tier";
 import { hasOwnLogo, usesBorrowedImages } from "../../modules/templates/own-logo";
+import { refreshClinicCards } from "../../modules/wallet-refresh/clinic-card-refresh";
 import {
   applePassTypeIdentifier,
   appleUpdatesRegisteredFor
@@ -821,6 +822,13 @@ adminClinicsRouter.patch(
         ...(billingPostalCode !== undefined ? { billingPostalCode } : {})
       }
     });
+
+    // The clinic's name is on every card (Google's issuer, Apple's organization and description),
+    // so a rename has to reach the cards members already hold, like a design change does. Not
+    // awaited: a clinic with thousands of members must not hold the save.
+    if (details.data.name !== undefined && details.data.name !== clinic.name) {
+      void refreshClinicCards(clinic.id).catch(() => undefined);
+    }
 
     const updated = await getAdminClinicSafe(clinic.id);
 

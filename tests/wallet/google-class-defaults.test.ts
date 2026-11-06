@@ -49,7 +49,12 @@ const repo = {
   recordProgram: async () => {}
 } as unknown as WalletSyncRepository;
 
-const programWith = (images: { logoUrl?: string; heroImageUrl?: string }): ProgramTemplate => ({
+const programWith = (images: {
+  logoUrl?: string;
+  logoOnDarkUrl?: string;
+  heroImageUrl?: string;
+  backgroundColor?: string;
+}): ProgramTemplate => ({
   templateId: "tpl-1",
   clinicName: "Centro Prueba",
   template: {
@@ -113,6 +118,25 @@ describe("the Google class for a template with no images of its own", () => {
     expect(body.heroImage).toMatchObject({
       sourceUri: { uri: "https://clinica.example/hero.png" }
     });
+  });
+});
+
+describe("which logo the Google class shows", () => {
+  const both = {
+    logoUrl: "https://clinica.example/plain.png",
+    logoOnDarkUrl: "https://clinica.example/on-dark.png"
+  };
+
+  it("uses the dark-background logo on a dark card, as the Apple pass does", async () => {
+    const body = await provision(programWith({ ...both, backgroundColor: "#1f2a44" }));
+
+    expect(body.programLogo).toEqual({ sourceUri: { uri: both.logoOnDarkUrl } });
+  });
+
+  it("uses the ordinary logo on a light card", async () => {
+    const body = await provision(programWith({ ...both, backgroundColor: "#f1dccd" }));
+
+    expect(body.programLogo).toEqual({ sourceUri: { uri: both.logoUrl } });
   });
 });
 

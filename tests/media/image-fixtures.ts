@@ -4,11 +4,15 @@ import sharp from "sharp";
 
 type Format = "png" | "jpeg" | "webp" | "gif" | "avif";
 
-/** A solid-colour image of the given size, encoded by sharp. */
+/**
+ * A solid-colour image of the given size, encoded by sharp. The default is the size a wallet logo
+ * or hero image should be (the strip at 3×), so a test that only needs "a good image" is not
+ * refused by the upload's size rules.
+ */
 export const makeImage = async (
   format: Format,
-  width = 64,
-  height = 64,
+  width = 1125,
+  height = 369,
   background = { r: 200, g: 30, b: 90 }
 ): Promise<Buffer> =>
   sharp({ create: { width, height, channels: 3, background } })

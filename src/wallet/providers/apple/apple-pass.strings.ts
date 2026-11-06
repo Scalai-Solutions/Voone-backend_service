@@ -19,7 +19,6 @@ export const PASS_LABELS = {
   tierBenefits: "BENEFICIOS DE TU NIVEL",
   info: "INFORMACIÓN",
   memberSince: "MIEMBRO DESDE",
-  redemptionCode: "CÓDIGO DE CANJE",
   memberCode: "NÚMERO DE MIEMBRO",
   serialNumber: "NÚMERO DE PASE",
   memberNo: "N.º DE MIEMBRO",
@@ -38,32 +37,9 @@ export const PASS_LABELS = {
   messageChangeMessage: "%@"
 } as const;
 
-export const PASS_TRANSLATIONS: Record<string, Record<string, string>> = {
-  en: {
-    MIEMBRO: "MEMBER",
-    SALDO: "BALANCE",
-    "PRÓXIMA RECOMPENSA": "NEXT REWARD",
-    FALTAN: "TO GO",
-    PROGRESO: "PROGRESS",
-    PROGRAMA: "PROGRAMME",
-    BENEFICIOS: "BENEFITS",
-    "BENEFICIOS DE TU NIVEL": "YOUR TIER BENEFITS",
-    INFORMACIÓN: "INFORMATION",
-    "MIEMBRO DESDE": "MEMBER SINCE",
-    "CÓDIGO DE CANJE": "REDEMPTION CODE",
-    "NÚMERO DE MIEMBRO": "MEMBER NUMBER",
-    "NÚMERO DE PASE": "PASS NUMBER",
-    "N.º DE MIEMBRO": "MEMBER NO.",
-    "RESERVAR CITA": "BOOK AN APPOINTMENT",
-    WEB: "WEBSITE",
-    "Tu saldo ahora es %@": "Your balance is now %@",
-    "Ahora eres nivel %@": "You are now %@ tier",
-    "ÚLTIMO MENSAJE": "LAST MESSAGE",
-    REGALOS: "GIFTS",
-    "RECOMPENSAS DISPONIBLES": "AVAILABLE REWARDS",
-    "PUNTOS DOBLES": "DOUBLE POINTS",
-    RECOMIENDA: "REFER A FRIEND",
-    "Tus regalos disponibles: %@": "Your available gifts: %@",
-    "%@": "%@"
-  }
-};
+/**
+ * Deliberately empty. The pass is Spanish for every member, whatever language their phone is set
+ * to: the labels above are their own localization keys, so a phone with no matching `.lproj`
+ * shows them as written. Adding a language here would make the pass change with the phone.
+ */
+export const PASS_TRANSLATIONS: Record<string, Record<string, string>> = {};

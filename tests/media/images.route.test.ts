@@ -120,7 +120,7 @@ afterEach(() => vi.restoreAllMocks());
 describe("POST /clinics/:slug/images", () => {
   it("stores a valid image under the clinic the slug names and answers 201 with its URL", async () => {
     const { app, puts } = build();
-    const png = await makeImage("png", 40, 20);
+    const png = await makeImage("png", 480, 160);
 
     const res = await send(app, "/clinics/aurea/images?kind=logo", {
       body: png,
@@ -133,9 +133,10 @@ describe("POST /clinics/:slug/images", () => {
         /^https:\/\/cdn\.test\/clinics\/clinic-aurea\/logo-[0-9a-f]{16}\.png$/
       ),
       bytes: png.length,
-      width: 40,
-      height: 20,
-      contentType: "image/png"
+      width: 480,
+      height: 160,
+      contentType: "image/png",
+      warnings: [expect.stringContaining("fondo sólido")]
     });
     expect(puts).toHaveLength(1);
   });
