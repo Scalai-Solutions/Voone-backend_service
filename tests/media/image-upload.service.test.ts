@@ -164,9 +164,11 @@ describe("uploadImage", () => {
     expect(result).toEqual({
       url: `https://cdn.test/${key}`,
       bytes: bytes.length,
-      width: 64,
-      height: 64,
-      contentType: "image/jpeg"
+      width: 1125,
+      height: 369,
+      contentType: "image/jpeg",
+      // A JPEG cannot be transparent, so a logo in one is warned about its solid background.
+      warnings: [expect.stringContaining("fondo sólido")]
     });
   });
 
@@ -184,8 +186,8 @@ describe("uploadImage", () => {
 
   it("gives the same key for the same bytes and another key for changed bytes", async () => {
     const { storage, puts } = fakeStorage();
-    const a = await makeImage("png", 64, 64, { r: 1, g: 2, b: 3 });
-    const b = await makeImage("png", 64, 64, { r: 9, g: 8, b: 7 });
+    const a = await makeImage("png", 480, 160, { r: 1, g: 2, b: 3 });
+    const b = await makeImage("png", 480, 160, { r: 9, g: 8, b: 7 });
 
     await uploadImage({ scope: { clinicId: "c" }, kind: "logo", bytes: a }, storage);
     await uploadImage({ scope: { clinicId: "c" }, kind: "logo", bytes: Buffer.from(a) }, storage);

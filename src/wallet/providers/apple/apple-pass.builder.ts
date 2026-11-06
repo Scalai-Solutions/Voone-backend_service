@@ -7,6 +7,7 @@ import { LoyaltyCard } from "../../engine/loyalty-card";
 import { BuiltPass, PassBuilder, PassUpdateBinding } from "../../engine/pass-builder.interface";
 import { buildStoreCardFields } from "./apple-pass.fields";
 import { PASS_TRANSLATIONS } from "./apple-pass.strings";
+import { chooseLogoUrl } from "../../engine/logo-choice";
 import { PassImageSource } from "./apple-pass.images";
 import { deriveAppleTheme } from "./apple-pass.theme";
 import { PKPassInstance, loadPasskit } from "./passkit";
@@ -77,14 +78,14 @@ export class ApplePassBuilder implements PassBuilder {
           serialNumber: data.serialNumber,
           passTypeIdentifier: this.options.passTypeIdentifier,
           teamIdentifier: this.options.teamIdentifier,
-          organizationName: this.options.organizationName,
+          // The name Wallet shows with the pass, so it is the clinic's, not Voone's. The configured
+          // name is only the fallback for a clinic with no name.
+          organizationName: data.clinic.name || this.options.organizationName,
           // Apple requires a description for VoiceOver; the library does not enforce it.
           description: `${data.clinic.name} · ${data.template.programName}`,
           // With a logo the brand is already on the card, and the text beside it collides with the
           // level in the header. Without one, the clinic's name is the only identity there is.
-          ...(data.template.logoOnDarkUrl || data.template.logoUrl
-            ? {}
-            : { logoText: data.clinic.name }),
+          ...(chooseLogoUrl(data.template) ? {} : { logoText: data.clinic.name }),
           sharingProhibited: true,
           backgroundColor: theme.backgroundColor,
           foregroundColor: theme.foregroundColor,
@@ -105,7 +106,7 @@ export class ApplePassBuilder implements PassBuilder {
     }
 
     this.applyFields(pass, data, PassType);
-    await this.applyImages(pass, data);
+    await this.applyImages(pass, data, theme.backgroundColor);
 
     pass.setBarcodes({
       message: data.redemptionCode,
@@ -138,19 +139,24 @@ export class ApplePassBuilder implements PassBuilder {
    * The clinic's logo and hero, in place of the bundled ones. Each is optional and each can fail
    * on its own: the card still works with the Voone logo and no strip.
    */
-  private async applyImages(pass: PKPassInstance, data: LoyaltyCard): Promise<void> {
+  private async applyImages(
+    pass: PKPassInstance,
+    data: LoyaltyCard,
+    background: string
+  ): Promise<void> {
     const source = this.options.images;
 
     if (!source) return;
 
-    const [logo, strip] = await Promise.all([
-      (data.template.logoOnDarkUrl ?? data.template.logoUrl)
-        ? source.logo((data.template.logoOnDarkUrl ?? data.template.logoUrl) as string)
-        : null,
-      data.template.heroImageUrl ? source.strip(data.template.heroImageUrl) : null
+    const logoUrl = chooseLogoUrl(data.template);
+    const [logo, strip, icon] = await Promise.all([
+      logoUrl ? source.logo(logoUrl) : null,
+      data.template.heroImageUrl ? source.strip(data.template.heroImageUrl) : null,
+      // The same logo, as the notification icon. Without one the bundled Voone icon stays.
+      logoUrl && source.icon ? source.icon(logoUrl, background) : null
     ]);
 
-    for (const set of [logo, strip]) {
+    for (const set of [logo, strip, icon]) {
       if (!set) continue;
 
       for (const [name, bytes] of Object.entries(set.files)) pass.addBuffer(name, bytes);

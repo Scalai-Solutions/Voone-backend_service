@@ -170,11 +170,11 @@ describe("provisionClinicSchema", () => {
     expect(parsed.benefitsText.length).toBeGreaterThan(8);
     expect(parsed.infoText.length).toBeGreaterThan(8);
     expect(parsed.tierRewards.map((tier) => tier.name)).toEqual([
-      "Bronze",
-      "Silver",
-      "Gold",
-      "Platinum",
-      "Diamond"
+      "Bronce",
+      "Plata",
+      "Oro",
+      "Platino",
+      "Diamante"
     ]);
     expect(parsed.milestoneRewards).toEqual({
       milestoneCount: 10,

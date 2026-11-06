@@ -9,6 +9,7 @@ export type TemplateForProgram = Pick<
   | "programName"
   | "hexBackgroundColor"
   | "logoUrl"
+  | "logoOnDarkUrl"
   | "heroImageUrl"
   | "websiteUrl"
   | "appointmentUrl"
@@ -42,6 +43,7 @@ export const programTemplateFor = (template: TemplateForProgram): ProgramTemplat
     programName: template.programName,
     backgroundColor: template.hexBackgroundColor,
     logoUrl: template.logoUrl ?? undefined,
+    logoOnDarkUrl: template.logoOnDarkUrl ?? undefined,
     heroImageUrl: template.heroImageUrl ?? undefined,
     websiteUrl: template.websiteUrl ?? undefined,
     appointmentUrl: template.appointmentUrl ?? undefined,

@@ -9,6 +9,7 @@ import {
   ImageUnsupportedError
 } from "../../common/errors/image.errors";
 import type { ImageStorage } from "./image-storage";
+import { assessImage } from "./image-requirements";
 
 export const IMAGE_KINDS = ["logo", "logoOnDark", "hero"] as const;
 export type ImageKind = (typeof IMAGE_KINDS)[number];
@@ -45,6 +46,8 @@ export interface UploadResult {
   width: number;
   height: number;
   contentType: string;
+  /** Things the clinic could improve for a better card; the image was still stored. */
+  warnings: string[];
 }
 
 export const parseImageKind = (value: unknown): ImageKind => {
@@ -142,6 +145,8 @@ export const uploadImage = async (
 
   const folder = folderFor(scope);
   const image = await validateImage(bytes);
+  // Before anything is stored: an image the wallets cannot show well is refused with a reason.
+  const warnings = await assessImage(kind, bytes, image);
   const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 16);
 
   const { url } = await storage.put(
@@ -155,6 +160,7 @@ export const uploadImage = async (
     bytes: bytes.length,
     width: image.width,
     height: image.height,
-    contentType: image.contentType
+    contentType: image.contentType,
+    warnings
   };
 };
