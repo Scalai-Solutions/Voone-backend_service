@@ -32,8 +32,8 @@ const buildApp = () => {
 
       return [summary];
     },
-    get: async (memberId: string) => {
-      calls.push({ get: memberId });
+    get: async (memberId: string, clinicId?: string) => {
+      calls.push(clinicId ? { get: memberId, clinicId } : { get: memberId });
 
       if (memberId !== "m-1") throw new MemberNotFoundError(memberId);
 
@@ -203,6 +203,25 @@ describe("GET /clinics/:slug/members", () => {
     await get(app, "/api/v1/clinics/aurea/members?q=nav&limit=10&offset=5");
 
     expect(calls[0]).toMatchObject({ query: "nav", limit: 10, offset: 5 });
+  });
+});
+
+describe("GET /clinics/:slug/members/:memberId", () => {
+  it("reads one member scoped to the clinic slug", async () => {
+    const { app, calls } = buildApp();
+
+    const res = await get(app, "/api/v1/clinics/aurea/members/m-1");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(summary);
+    expect(calls[0]).toEqual({ get: "m-1", clinicId: CLINIC });
+  });
+
+  it("404s an unknown slug before reading", async () => {
+    const { app, calls } = buildApp();
+
+    expect((await get(app, "/api/v1/clinics/nope/members/m-1")).status).toBe(404);
+    expect(calls).toHaveLength(0);
   });
 });
 

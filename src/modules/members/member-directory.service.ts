@@ -167,13 +167,14 @@ export class MemberDirectoryService {
     return this.withAppleUpdates(summaries, appleUpdates);
   }
 
-  async get(memberId: string): Promise<MemberSummary> {
+  /** With a clinicId, a member of another clinic is not found, as if it did not exist. */
+  async get(memberId: string, clinicId?: string): Promise<MemberSummary> {
     const member = await this.prisma.member.findUnique({
       where: { id: memberId },
       select: this.selection(DETAIL_HISTORY)
     });
 
-    if (!member || member.erasedAt) {
+    if (!member || member.erasedAt || (clinicId && member.clinicId !== clinicId)) {
       throw new MemberNotFoundError(memberId);
     }
 

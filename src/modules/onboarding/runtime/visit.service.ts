@@ -63,6 +63,7 @@ import { BONO_START_AT_MESSAGE, BONUS_POINTS_MESSAGE, BONUS_STEP } from "../../b
  */
 
 export interface VisitLine {
+  name?: string;
   category?: CategoryCode;
   amountEuro: number;
 }
@@ -158,6 +159,13 @@ interface ResolvedBono {
  */
 export type VisitRecordedHook = (visit: { memberId: string; clinicId: string }) => Promise<unknown>;
 
+/** The history label: what was paid for, by name, when reception picked it from the catalogue. */
+export const paymentReason = (lines: VisitLine[] | undefined): string => {
+  const names = [...new Set((lines ?? []).map((l) => l.name?.trim()).filter(Boolean))];
+
+  return names.length ? `Visita de pago: ${names.join(", ")}`.slice(0, 200) : "Visita de pago";
+};
+
 export class VisitService {
   constructor(
     private readonly prisma: PrismaClient,
@@ -212,6 +220,14 @@ export class VisitService {
     let tier: string | null = null;
 
     if (progress > 0) {
+      const reason =
+        visit.kind !== VisitKind.PAYMENT
+          ? await this.bonoSessionReason(visit.memberBonoId, input.package?.name)
+          : doubleReason === "referral"
+            ? // Matched exactly by doubleOfVisit, so it never carries the treatment names.
+              REFERRAL_DOUBLE_REASON
+            : paymentReason(input.lines);
+
       // One credit at a time per member. The ledger append is safe on its own, but settling
       // reads the balance and then writes the member's cached total: two credits settling at once
       // can each read a balance that misses the other and the later write leaves a stale total.
@@ -224,12 +240,7 @@ export class VisitService {
             clinicId: input.clinicId,
             points: progress,
             kind: PointsTransactionKind.EARN,
-            reason:
-              visit.kind !== VisitKind.PAYMENT
-                ? "Sesión de bono"
-                : doubleReason === "referral"
-                  ? REFERRAL_DOUBLE_REASON
-                  : "Visita de pago",
+            reason,
             sourceRef: visit.id,
             idempotencyKey: `visit:${visit.id}`,
             createdBy: input.createdBy
@@ -578,6 +589,22 @@ export class VisitService {
   }
 
   /** The next session of a bono already held, or a clear refusal when it is exhausted. */
+  private async bonoSessionReason(
+    memberBonoId: string | null,
+    packageName: string | undefined
+  ): Promise<string> {
+    const name = memberBonoId
+      ? (
+          await this.prisma.memberBono.findUnique({
+            where: { id: memberBonoId },
+            select: { name: true }
+          })
+        )?.name
+      : packageName?.trim();
+
+    return name ? `Sesión de bono: ${name}`.slice(0, 200) : "Sesión de bono";
+  }
+
   private sessionOf(bono: {
     id: string;
     name: string;
