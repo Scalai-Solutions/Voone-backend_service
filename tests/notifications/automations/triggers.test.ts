@@ -238,7 +238,7 @@ describe("ReferralPromoTrigger", () => {
     expect(trigger.idempotencyKey("c1", today(1))).toBe(trigger.idempotencyKey("c1", today(20)));
   });
 
-  it("selects consenting members active in the last 90 days", async () => {
+  it("selects members active in the last 90 days, consenting or not", async () => {
     const wheres: Array<Record<string, unknown>> = [];
     const { program, prisma: live } = livePrograms();
     const prisma = {
@@ -257,7 +257,7 @@ describe("ReferralPromoTrigger", () => {
     expect(recipients).toEqual([
       { memberId: "m1", values: { referral_reward: program.refLad[0].name } }
     ]);
-    expect(wheres[0].consentMarketing).toBe(true);
+    expect(wheres[0]).not.toHaveProperty("consentMarketing");
     const where = wheres[0] as {
       OR: Array<{ paidVisits: { some: { occurredAt: { gte: Date } } } }>;
     };

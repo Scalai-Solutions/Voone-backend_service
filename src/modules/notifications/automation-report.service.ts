@@ -390,7 +390,6 @@ export class AutomationReportService {
       select: {
         id: true,
         name: true,
-        consentMarketing: true,
         birthDate: true,
         walletObjects: { select: { status: true } }
       },
@@ -401,7 +400,6 @@ export class AutomationReportService {
       .filter((member) => member.birthDate && window.has(monthDay(member.birthDate)))
       .map((member) => {
         const skipReasons: string[] = [];
-        if (!member.consentMarketing) skipReasons.push("no_consent");
         if (
           !member.walletObjects.some(
             (walletObject) => walletObject.status === WalletSyncStatus.SYNCED

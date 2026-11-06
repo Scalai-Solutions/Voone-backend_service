@@ -395,7 +395,9 @@ describe("which deliveries each kind of message creates", () => {
       let created: Array<{ provider: WalletProviderType }> = [];
       const service = new NotificationService(
         {
-          member: { findFirst: async () => ({ id: "m-1", clinicId: "clinic-1" }) },
+          member: {
+            findFirst: async () => ({ id: "m-1", clinicId: "clinic-1", consentMarketing: true })
+          },
           clinicNotificationSettings: { upsert: async () => ({ marketingEnabled: true }) },
           walletObject: { findMany: async () => (hasApple ? [{ memberId: "m-1" }] : []) },
           notification: {
