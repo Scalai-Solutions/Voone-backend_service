@@ -824,18 +824,32 @@ membersRouter.post(
     // Who sent them, if they said. Best effort and silent: a mistyped code must not cost
     // someone their membership, and the response must not reveal whether a code exists —
     // otherwise this form becomes a way to enumerate a clinic's members.
-    if (result.memberId && parsed.data.referredByCode && referralService) {
-      try {
-        await referralService.register({
-          clinicId: clinic.id,
-          referredMemberId: result.memberId,
-          code: parsed.data.referredByCode
-        });
-      } catch (error) {
-        console.error("[referral] could not register a referral at sign-up", {
-          memberId: result.memberId,
-          error: error instanceof Error ? error.message : String(error)
-        });
+    if (parsed.data.referredByCode) {
+      // The response never says whether the code worked, so the log is the only place a lost
+      // referral can be explained. Reasons only: no code, no phone, no member id.
+      const notRecorded = (reason: string): void =>
+        console.info("[referral] not recorded at sign-up", { clinicId: clinic.id, reason });
+
+      if (!result.memberId) {
+        // A number that is already a member is not a new member, so there is nobody to refer.
+        notRecorded("existing_member");
+      } else if (!referralService) {
+        notRecorded("referrals_unavailable");
+      } else {
+        try {
+          const outcome = await referralService.register({
+            clinicId: clinic.id,
+            referredMemberId: result.memberId,
+            code: parsed.data.referredByCode
+          });
+
+          if (!outcome.registered) notRecorded(outcome.reason);
+        } catch (error) {
+          console.error("[referral] could not register a referral at sign-up", {
+            memberId: result.memberId,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
       }
     }
 

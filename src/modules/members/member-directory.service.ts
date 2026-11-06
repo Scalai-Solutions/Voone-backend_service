@@ -12,6 +12,7 @@ import { listTreatments } from "../treatments/treatment-catalogue.service";
 import type { CardRef } from "../../wallet/engine/wallet-pass-provider.interface";
 import { tierLabelFor } from "./member-tier";
 import { isDoublePointsPerk } from "../onboarding/runtime/rules";
+import { activeProgramView } from "../onboarding/runtime/program-tier.port";
 import {
   appleUpdatesRegisteredFor,
   applePassTypeIdentifier
@@ -63,6 +64,23 @@ export interface MemberSummary {
    */
   appleUpdatesRegistered: boolean | null;
   history: Array<{ id: string; label: string; points: number; date: string }>;
+  /**
+   * Their recommendations, on the detail view of a member of a clinic with a live programme.
+   * Absent everywhere else: a clinic with no programme has no referral rewards to count.
+   */
+  referral?: ReferralSummary;
+}
+
+/** How many people a member has recommended, and where that stands on the clinic's ladder. */
+export interface ReferralSummary {
+  /** People who signed up with the member's code. */
+  referred: number;
+  /** Of those, the ones whose first treatment payment has counted. Only these earn rewards. */
+  counted: number;
+  /** Every step of the clinic's ladder, with whether the member has reached it. */
+  steps: Array<{ n: number; title: string; reached: boolean }>;
+  /** The next step still to reach, and how many more counted referrals it needs. */
+  next: { n: number; title: string; remaining: number } | null;
 }
 
 export interface ListMembersOptions {
@@ -183,7 +201,37 @@ export class MemberDirectoryService {
       this.appleUpdates([member])
     ]);
 
-    return this.withAppleUpdates(summaries, appleUpdates)[0];
+    const [summary] = this.withAppleUpdates(summaries, appleUpdates);
+    const referral = await this.referralSummary(member.id, member.clinicId);
+
+    return referral ? { ...summary, referral } : summary;
+  }
+
+  private async referralSummary(
+    memberId: string,
+    clinicId: string
+  ): Promise<ReferralSummary | null> {
+    const active = await activeProgramView(this.prisma, clinicId);
+
+    if (!active) return null;
+
+    const [referred, counted] = await Promise.all([
+      this.prisma.referral.count({ where: { referrerId: memberId } }),
+      this.prisma.referral.count({ where: { referrerId: memberId, countedAt: { not: null } } })
+    ]);
+    const steps = active.view.referral.map((step) => ({
+      n: step.n,
+      title: step.title,
+      reached: counted >= step.n
+    }));
+    const next = steps.find((step) => !step.reached);
+
+    return {
+      referred,
+      counted,
+      steps,
+      next: next ? { n: next.n, title: next.title, remaining: next.n - counted } : null
+    };
   }
 
   /**
