@@ -75,7 +75,11 @@ const serviceFor = (
     catalogItem: { count: async () => catalogue.length, findMany: async () => catalogue },
     clinicTreatment: { findMany: async () => [] },
     pointsTransaction: { findMany: async () => credits },
-    onboardingProgram: { findFirst: async () => (programme ? { id: "p-1" } : null) },
+    onboardingProgram: {
+      // The referral summary reads the programme's output; this suite has none to give.
+      findFirst: async (args?: { select?: { output?: boolean } }) =>
+        programme && !args?.select?.output ? { id: "p-1" } : null
+    },
     paidVisit: {
       groupBy: async () => [
         {

@@ -49,6 +49,7 @@ import { createClinicWithLogo, removeClinic } from "../admin/admin-clinics.harne
 import { PrismaCatalogRepository } from "../../src/modules/onboarding/catalog.repository";
 import type { Answers, CatalogItem } from "../../src/modules/onboarding/engine.types";
 import { OnboardingService } from "../../src/modules/onboarding/onboarding.service";
+import { MemberDirectoryService } from "../../src/modules/members/member-directory.service";
 import { membersRouter } from "../../src/routes/v1/members.route";
 import catalogFixture from "./reference/sapphira.catalogo.json";
 
@@ -188,5 +189,16 @@ describe("sign-up with a recommendation code", () => {
       expect.objectContaining({ reason: "existing_member" })
     );
     log.mockRestore();
+  });
+
+  it("shows the referrer how many people they recommended and the next reward", async () => {
+    const referrer = await db.member.findFirstOrThrow({
+      where: { clinicId: clinic.id, phone: "+34600111001" }
+    });
+    const detail = await new MemberDirectoryService(db, () => new Set()).get(referrer.id);
+
+    expect(detail.referral).toMatchObject({ referred: 1, counted: 0 });
+    expect(detail.referral?.steps[0]).toMatchObject({ n: 1, reached: false });
+    expect(detail.referral?.next).toMatchObject({ n: 1, remaining: 1 });
   });
 });
