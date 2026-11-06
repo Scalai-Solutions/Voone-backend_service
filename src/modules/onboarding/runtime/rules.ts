@@ -68,10 +68,7 @@ export interface TierResolution {
 
 /**
  * The tier a member holds: the highest whose threshold AND minimum tenure are both met.
- *
- * Both gates, not either. Progress alone would let a member who spends heavily in a first
- * month reach Diamante; the guide requires 12, 24 and 36 months for Oro, Platino and
- * Diamante precisely so it cannot.
+ * Every minimum tenure is currently zero (MIN_TENURE), so in practice tiers go by points.
  *
  * Tiers are not lost. A member who held Oro stays at least at Oro however the maths would
  * otherwise read, because the guide says so — and because progress only rises, the only way

@@ -343,13 +343,16 @@ export const TIER_NAMES: Record<TierCode, string> = {
   diamante: "Diamante"
 };
 
-/** Months as a member before a tier can be entered, however fast the threshold is met. */
+/**
+ * Months as a member before a tier can be entered. All zero: tiers are reached by points
+ * alone. Kept as a table so a minimum can be reintroduced without touching the rules.
+ */
 export const MIN_TENURE: Record<TierCode, number> = {
   bronce: 0,
   plata: 0,
-  oro: 12,
-  platino: 24,
-  diamante: 36
+  oro: 0,
+  platino: 0,
+  diamante: 0
 };
 
 export interface TierBenefit {

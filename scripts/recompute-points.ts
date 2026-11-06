@@ -63,10 +63,10 @@ const main = async (): Promise<void> => {
 
     const balance = await ledger.balanceFor(member.id);
 
-    // A clinic on an onboarding programme is ranked by it — thresholds AND tenure — and NOT by
+    // A clinic on an onboarding programme is ranked by its thresholds, and NOT by
     // the legacy scale, which would put every such member in whatever tier the old template
     // happens to read as. Demotion is allowed here, deliberately: this script derives the tier
-    // from the ledger and the sign-up date, so a tier that does not follow from them is exactly
+    // from the ledger, so a tier that does not follow from them is exactly
     // the drift it exists to repair. "Tiers are not lost" is a rule about ordinary movements.
     const programme = await programTiers.resolve({
       memberId: member.id,

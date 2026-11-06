@@ -1535,10 +1535,16 @@ describe("replacing a live programme with a new version", () => {
     expect(await lifetime(climber.id)).toBe(150);
     expect(await lifetime(holder.id)).toBe(300);
 
-    // A dearer ladder: Plata now starts above what the holder has paid. She keeps it.
+    // The cheaper ladder may have lifted her further (tiers go by points alone, so nothing holds
+    // her at Plata). Whatever she holds now, a dearer ladder must not take it away.
+    const held = await tierOf(holder.id);
+
+    expect(held).not.toBe("Bronce");
+
+    // A dearer ladder: its tiers now start above what the holder has paid. She keeps hers.
     await replaceWith({ ticketValue: 120, visitsValue: 6 });
 
-    expect(await tierOf(holder.id)).toBe("Plata");
+    expect(await tierOf(holder.id)).toBe(held);
     expect(await lifetime(holder.id)).toBe(300);
   });
 

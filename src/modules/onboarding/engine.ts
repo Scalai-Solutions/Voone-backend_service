@@ -891,7 +891,7 @@ export const buildGuarantees = (
     [1, 2, 3, 4].every((tr) => lad.ms.some((m) => m.tramo === tr && m.perk?.kind === "doble"))
   ],
   ["Los bonos suman puntos en cada sesión consumida, no al comprarlos", true],
-  ["Subir de nivel exige antigüedad mínima (Oro 12, Platino 24 y Diamante 36 meses)", true],
+  ["Se sube de nivel solo por puntos, sin antigüedad mínima", true],
   [
     "Ningún regalo se repite en dos hitos seguidos",
     chosen.every((c, i) => !i || !ids(c.o).some((x) => ids(chosen[i - 1].o).includes(x)))
