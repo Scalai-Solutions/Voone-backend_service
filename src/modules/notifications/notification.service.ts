@@ -222,7 +222,7 @@ export class NotificationService {
 
     await this.assertMarketingEnabled(clinicId);
     const members = await this.resolveSegment(clinicId, input.segment);
-    const appleMemberIds = await this.syncedAppleMemberIds({ clinicId });
+    const appleMemberIds = await this.syncedMemberIds({ clinicId });
 
     const notification = await this.prisma.notification.create({
       data: {
@@ -320,7 +320,7 @@ export class NotificationService {
 
     await this.assertMarketingEnabled(member.clinicId);
 
-    const hasApple = (await this.syncedAppleMemberIds({ memberId: member.id })).has(member.id);
+    const hasApple = (await this.syncedMemberIds({ memberId: member.id })).has(member.id);
 
     const notification = await this.prisma.notification.create({
       data: {
@@ -451,28 +451,21 @@ export class NotificationService {
 
     if (!notification) throw new NotificationNotFoundError();
     if (notification.status === NotificationStatus.CANCELLED) return;
+    if (notification.type !== NotificationType.BROADCAST) return;
 
     if (
       notification.status === NotificationStatus.SENT ||
-      // Reachable now that Apple deliveries can fail after the class message went out.
       notification.status === NotificationStatus.PARTIAL_FAILED
     ) {
-      // A retry after the class message went out but before the Apple fan-out finished:
-      // the fan-out is idempotent, the Google message must not be sent twice.
-      if (notification.type === NotificationType.BROADCAST) {
-        await this.fanOutAppleBroadcast(notification);
-      }
-
+      // A retry after it finished: the fan-out is idempotent and creates nobody new.
+      await this.fanOutBroadcast(notification);
       return;
     }
 
-    if (notification.type !== NotificationType.BROADCAST) return;
-
     if (notification.providerMessageId) {
-      // The class message already went out (its id is stored first, right after the send), but
-      // the run died before the status moved to SENT: finalise it, never send it again. Not
-      // counted here: whether the first run counted it is not knowable, so under-count rather
-      // than double count.
+      // Sent before broadcasts went per member: its shared Google class message is out, but the
+      // run died before SENT. Finalise it and never send it again. Not counted here: whether the
+      // first run counted it is not knowable, so under-count rather than double count.
       await this.prisma.notification.updateMany({
         where: {
           id: notification.id,
@@ -489,12 +482,10 @@ export class NotificationService {
       console.warn("[notifications] broadcast already sent; finalised without resending", {
         notificationId: notification.id
       });
-      await this.fanOutAppleBroadcast(notification);
+      await this.fanOutBroadcast(notification);
 
       return;
     }
-
-    const walletClass = await this.findGoogleClass(notification.clinicId);
 
     // Atomic claim: a clinic may cancel (or a stalled job's other processor may finish) between
     // the read above and this write. FAILED stays claimable so a retry can run again.
@@ -514,155 +505,74 @@ export class NotificationService {
 
     if (claimed.count === 0) return;
 
-    if (!walletClass) {
-      // Apple-only clinic: there is no class-level Google message to send. The per-member Apple
-      // deliveries finish the notification (and count it) as they complete.
-      const { total, queued } = await this.fanOutAppleBroadcast(notification);
+    // Every card gets its own delivery, Google included: a shared class message could not be
+    // trimmed per card, and each card keeps only its newest messages of any kind. The deliveries
+    // finish the notification (and count it) as they complete.
+    const { total, queued } = await this.fanOutBroadcast(notification);
 
-      if (total === 0) {
-        // Nobody to send to: done, and nothing real was sent, so nothing is counted.
-        await this.prisma.notification.updateMany({
-          where: { id: notification.id, status: { notIn: [NotificationStatus.CANCELLED] } },
-          data: { status: NotificationStatus.SENT }
-        });
-      } else if (queued === 0) {
-        // A retry after every delivery already finished: nobody is left to finalise it.
-        await this.refreshNotificationStatus(notification.id, notification);
-      }
-
-      return;
-    }
-
-    let message: { messageId: string };
-
-    // Only the send is in this try: a failure here means nothing went out, so FAILED (and a
-    // retry that sends again) is right. Everything after the send is outside it.
-    try {
-      // One message for every Google member, so it cannot carry anyone's name.
-      message = await this.wallet.addClassMessage(walletClass.externalClassId, {
-        header: personalise(notification.header, null),
-        body: this.bodyWithAction(personalise(notification.body, null), notification.actionUrl),
-        notify: notification.notify,
-        actionUrl: notification.actionUrl ?? undefined
-      });
-    } catch (error) {
+    if (total === 0) {
+      // Nobody to send to: done, and nothing real was sent, so nothing is counted.
       await this.prisma.notification.updateMany({
-        where: { id: notification.id, status: { notIn: [NotificationStatus.CANCELLED] } },
-        data: { status: NotificationStatus.FAILED }
-      });
-      throw error;
-    }
-
-    // The class message is out. From here nothing may throw to the job: a retry would send it
-    // to every Google member again. The message id goes first, on its own, because it is what
-    // a retry uses to know the message already went out. Failures are logged by error name.
-    await this.afterClassSend(notification.id, "provider message id write failed", () =>
-      this.prisma.notification.updateMany({
-        where: { id: notification.id },
-        data: { providerMessageId: message.messageId }
-      })
-    );
-
-    let cancelled = false;
-
-    try {
-      const finished = await this.prisma.notification.updateMany({
         where: { id: notification.id, status: { notIn: [NotificationStatus.CANCELLED] } },
         data: { status: NotificationStatus.SENT }
       });
-
-      cancelled = finished.count === 0;
-    } catch (error) {
-      // Stays PROCESSING; a retry sees the message id, finalises it and does not resend.
-      this.logPostClassSendFailure("status write failed", notification.id, error);
+    } else if (queued === 0) {
+      // A retry after every delivery already finished: nobody is left to finalise it.
+      await this.refreshNotificationStatus(notification.id, notification);
     }
-
-    if (cancelled) {
-      // Cancelled while the class message was being written. The clinic's delete ran before
-      // the message id existed, so it could not remove the message: do it here. The status
-      // stays CANCELLED, nothing is counted and no Apple deliveries are created.
-      await this.bestEffortRemove(
-        { kind: "class", id: walletClass.externalClassId },
-        message.messageId
-      );
-      return;
-    }
-
-    // A failed count is an under-count rather than a duplicate: a retry cannot tell whether it
-    // was counted, so it never counts.
-    await this.afterClassSend(notification.id, "counter write failed", () =>
-      this.countManualNotification(notification.clinicId, notification.type)
-    );
-
-    console.info("[notifications] broadcast sent", {
-      notificationId: notification.id,
-      clinicId: notification.clinicId
-    });
-
-    // Outside the try on purpose: the Google message is already out, so a failure here must
-    // not mark the broadcast FAILED and must not repeat it on retry.
-    await this.fanOutAppleBroadcast(notification);
-  }
-
-  private async afterClassSend(
-    notificationId: string,
-    what: string,
-    write: () => Promise<unknown>
-  ): Promise<void> {
-    try {
-      await write();
-    } catch (error) {
-      this.logPostClassSendFailure(what, notificationId, error);
-    }
-  }
-
-  private logPostClassSendFailure(what: string, notificationId: string, error: unknown): void {
-    console.error(`[notifications] ${what} after the class message was sent`, {
-      notificationId,
-      error: error instanceof Error ? error.name : "UNKNOWN"
-    });
   }
 
   /**
-   * A broadcast is one class message for Google, but Apple has no class-wide message: each
-   * member with a synced Apple card gets a delivery of their own, queued as its own job so
-   * a large clinic is refreshed at the queue's pace rather than all at once.
+   * A broadcast is one delivery per member with a synced card, per wallet, each queued as its own
+   * job so a large clinic is updated at the queue's pace rather than all at once. A broadcast sent
+   * before this (one shared Google class message, `providerMessageId` set) fans out to Apple only:
+   * its Google members already have it.
    *
-   * Idempotent: only members without an Apple delivery for this notification get one, and
-   * only deliveries still QUEUED are enqueued.
+   * Idempotent: only members without a delivery for this notification and wallet get one, and only
+   * deliveries still QUEUED are enqueued. All rows exist before any job is enqueued, so an early
+   * finisher never sees "nothing queued" while the other wallet's rows are still being written.
    */
-  private async fanOutAppleBroadcast(notification: {
+  private async fanOutBroadcast(notification: {
     id: string;
     clinicId: string;
+    providerMessageId?: string | null;
   }): Promise<{ total: number; queued: number }> {
-    const memberIds = [...(await this.syncedAppleMemberIds({ clinicId: notification.clinicId }))];
-
-    if (memberIds.length === 0) return { total: 0, queued: 0 };
-
+    const providers = notification.providerMessageId
+      ? [WalletProviderType.APPLE]
+      : [WalletProviderType.APPLE, WalletProviderType.GOOGLE];
     const existing = await this.prisma.notificationDelivery.findMany({
-      where: { notificationId: notification.id, provider: WalletProviderType.APPLE },
+      where: { notificationId: notification.id },
       select: { memberId: true, provider: true }
     });
-    const known = new Set(existing.map((delivery) => delivery.memberId));
-    const missing = memberIds.filter((memberId) => !known.has(memberId));
+    let created = 0;
 
-    for (const chunk of this.chunks(missing, 500)) {
-      await this.prisma.notificationDelivery.createMany({
-        data: chunk.map((memberId) => ({
-          notificationId: notification.id,
-          memberId,
-          provider: WalletProviderType.APPLE,
-          status: NotificationDeliveryStatus.QUEUED
-        }))
-      });
+    for (const provider of providers) {
+      const known = new Set(
+        existing.filter((delivery) => delivery.provider === provider).map((d) => d.memberId)
+      );
+      const memberIds = await this.syncedMemberIds({ clinicId: notification.clinicId }, provider);
+      const missing = [...memberIds].filter((memberId) => !known.has(memberId));
+
+      for (const chunk of this.chunks(missing, 500)) {
+        await this.prisma.notificationDelivery.createMany({
+          data: chunk.map((memberId) => ({
+            notificationId: notification.id,
+            memberId,
+            provider,
+            status: NotificationDeliveryStatus.QUEUED
+          }))
+        });
+      }
+
+      created += missing.length;
     }
 
+    const total = existing.length + created;
+
+    if (total === 0) return { total: 0, queued: 0 };
+
     const queued = await this.prisma.notificationDelivery.findMany({
-      where: {
-        notificationId: notification.id,
-        provider: WalletProviderType.APPLE,
-        status: NotificationDeliveryStatus.QUEUED
-      },
+      where: { notificationId: notification.id, status: NotificationDeliveryStatus.QUEUED },
       select: { id: true }
     });
 
@@ -670,16 +580,17 @@ export class NotificationService {
       await Promise.all(chunk.map((delivery) => this.jobs.enqueueDelivery(delivery.id)));
     }
 
-    return { total: existing.length + missing.length, queued: queued.length };
+    return { total, queued: queued.length };
   }
 
-  /** Members (not erased) holding a synced Apple card, of one clinic or one member. */
-  private async syncedAppleMemberIds(
-    scope: { clinicId: string } | { memberId: string }
+  /** Members (not erased) holding a synced card of one wallet, of one clinic or one member. */
+  private async syncedMemberIds(
+    scope: { clinicId: string } | { memberId: string },
+    provider: WalletProviderType = WalletProviderType.APPLE
   ): Promise<Set<string>> {
     const objects = await this.prisma.walletObject.findMany({
       where: {
-        provider: WalletProviderType.APPLE,
+        provider,
         status: WalletSyncStatus.SYNCED,
         ...("memberId" in scope ? { memberId: scope.memberId } : {}),
         member: { ...("clinicId" in scope ? { clinicId: scope.clinicId } : {}), erasedAt: null }
@@ -1456,8 +1367,8 @@ export class NotificationService {
     const failed = deliveries.some(
       (delivery) => delivery.status === NotificationDeliveryStatus.FAILED
     );
-    // A broadcast with a Google class has its class message out by the time any (Apple)
-    // delivery exists, so it is never wholly FAILED. An Apple-only broadcast has no such
+    // An older broadcast (one shared Google class message) has that message out by the time any
+    // Apple delivery exists, so it is never wholly FAILED. A per-member broadcast has no such
     // message: there only its deliveries count.
     const completed =
       (notification.type === NotificationType.BROADCAST &&
@@ -1520,15 +1431,15 @@ export class NotificationService {
   private async countsFor(
     notification: NonNullable<NotificationRecord>
   ): Promise<NotificationCounts> {
-    const appleOnlyBroadcast =
+    const perMemberBroadcast =
       notification.type === NotificationType.BROADCAST &&
       !notification.providerMessageId &&
       (notification.status === NotificationStatus.SENT ||
         notification.status === NotificationStatus.PARTIAL_FAILED);
 
-    // A broadcast with a Google class counts as the whole membership; an Apple-only one is
-    // just its deliveries, like a segment.
-    if (notification.type === NotificationType.BROADCAST && !appleOnlyBroadcast) {
+    // An older broadcast (shared Google class message) counts as the whole membership; a
+    // per-member one is just its deliveries, like a segment.
+    if (notification.type === NotificationType.BROADCAST && !perMemberBroadcast) {
       const total = await this.memberCount(notification.clinicId);
 
       if (notification.status === NotificationStatus.PARTIAL_FAILED) {
@@ -1635,21 +1546,17 @@ export class NotificationService {
   }
 
   /**
-   * The body as a Google Wallet message: the member's rendered text, with the review link made a
-   * real `<a href>` hyperlink (as the Wallet docs specify) for review requests, then the action
-   * URL. Apple's path builds its own text and is not affected.
+   * The body as a Google Wallet message: the member's rendered text and the action URL, with every
+   * bare URL made a real `<a href>` hyperlink (as the Wallet docs specify), so links typed into a
+   * manual message are tappable too. Apple's path builds its own text and is not affected.
    */
   private googleBody(delivery: {
     body: string | null;
     notification: { body: string; type: NotificationType; actionUrl: string | null };
   }): string {
     const text = delivery.body ?? delivery.notification.body;
-    const linked =
-      delivery.notification.type === NotificationType.REVIEW_REQUEST
-        ? linkifyForGoogle(text)
-        : text;
 
-    return this.bodyWithAction(linked, delivery.notification.actionUrl);
+    return linkifyForGoogle(this.bodyWithAction(text, delivery.notification.actionUrl));
   }
 
   private bodyWithAction(body: string, actionUrl?: string | null): string {

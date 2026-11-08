@@ -1,45 +1,44 @@
-import { NotificationStatus, NotificationType } from "@prisma/client";
+import {
+  NotificationDeliveryStatus,
+  NotificationStatus,
+  NotificationType,
+  WalletProviderType
+} from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { NotificationService } from "../../src/modules/notifications/notification.service";
 
 interface World {
   status?: NotificationStatus;
-  googleClass?: boolean;
+  /** Set on a broadcast sent the old way, as one shared Google class message. */
+  providerMessageId?: string;
+  /** Members holding a synced card, per wallet. */
+  google?: string[];
+  apple?: string[];
   /** The clinic cancels right after processNotification has read the notification. */
   cancelAfterRead?: boolean;
   /** A stalled job's original processor finishes the broadcast right after the read. */
   finishedAfterRead?: boolean;
-  /** The clinic cancels while the Google class message is being written. */
-  cancelDuringSend?: boolean;
-  /** The clinic cancels while the Apple recipients are being looked up (Apple-only clinic). */
+  /** The clinic cancels while the recipients are being looked up. */
   cancelDuringFanOut?: boolean;
-  sendFails?: boolean;
-  /** The first send fails, later ones work (a transient error, then the retry). */
-  sendFailsOnce?: boolean;
-  /** The first write of SENT rejects (database hiccup right after the message went out). */
-  statusWriteFailsOnce?: boolean;
-  /** Every write of the provider message id on its own rejects. */
-  idWriteFails?: boolean;
-  /** The monthly counter write rejects. */
-  countFails?: boolean;
-  /** The broadcast text as typed. */
-  text?: { header: string; body: string };
 }
 
 type Where = { status?: { notIn?: NotificationStatus[]; in?: NotificationStatus[] } };
+type Delivery = {
+  id: string;
+  memberId: string;
+  provider: WalletProviderType;
+  status: NotificationDeliveryStatus;
+};
 
 const build = (world: World = {}) => {
   const state = {
     status: world.status ?? NotificationStatus.QUEUED,
-    providerMessageId: null as string | null,
-    sent: [] as string[],
-    classMessages: [] as Array<{ header: string; body: string }>,
-    removed: [] as Array<{ target: unknown; messageId: string }>,
+    deliveries: [] as Delivery[],
+    enqueued: [] as string[],
+    classMessages: 0,
     increments: 0,
-    fanOutLookups: 0,
-    sendAttempts: 0,
-    statusWriteFailed: false
+    fanOutLookups: 0
   };
   const prisma = {
     notification: {
@@ -48,11 +47,11 @@ const build = (world: World = {}) => {
           id: "notification-1",
           clinicId: "clinic-1",
           type: NotificationType.BROADCAST,
-          header: world.text?.header ?? "Hi",
-          body: world.text?.body ?? "There",
+          header: "Hi",
+          body: "There",
           actionUrl: null,
           notify: false,
-          providerMessageId: state.providerMessageId,
+          providerMessageId: world.providerMessageId ?? null,
           status: state.status
         };
 
@@ -62,75 +61,51 @@ const build = (world: World = {}) => {
         return snapshot;
       },
       // Atomic: the check and the write are one synchronous step, like one SQL statement.
-      updateMany: async ({
-        where,
-        data
-      }: {
-        where: Where;
-        data: { status?: NotificationStatus; providerMessageId?: string };
-      }) => {
-        if (world.idWriteFails && data.providerMessageId && !data.status) {
-          throw new Error("postgres://user:secret@host:5432 down");
-        }
-        if (
-          world.statusWriteFailsOnce &&
-          data.status === NotificationStatus.SENT &&
-          !state.statusWriteFailed
-        ) {
-          state.statusWriteFailed = true;
-          throw new Error("postgres://user:secret@host:5432 down");
-        }
+      updateMany: async ({ where, data }: { where: Where; data: { status?: NotificationStatus } }) => {
         if (where.status?.notIn?.includes(state.status)) return { count: 0 };
         if (where.status?.in && !where.status.in.includes(state.status)) return { count: 0 };
         if (data.status) state.status = data.status;
-        if (data.providerMessageId) state.providerMessageId = data.providerMessageId;
         return { count: 1 };
-      },
-      // Unconditional on purpose: the fix must not depend on it for status writes.
-      update: async ({ data }: { data: { status?: NotificationStatus } }) => {
-        if (data.status) state.status = data.status;
       }
-    },
-    walletClass: {
-      findFirst: async () => (world.googleClass === false ? null : { externalClassId: "class-1" })
     },
     walletObject: {
-      findMany: async () => {
+      findMany: async ({ where }: { where: { provider: WalletProviderType } }) => {
         state.fanOutLookups += 1;
         if (world.cancelDuringFanOut) state.status = NotificationStatus.CANCELLED;
-        return [];
+        const members = where.provider === WalletProviderType.GOOGLE ? world.google : world.apple;
+        return (members ?? []).map((memberId) => ({ memberId }));
       }
     },
-    notificationDelivery: { findMany: async () => [] },
+    notificationDelivery: {
+      findMany: async ({ where }: { where: { status?: NotificationDeliveryStatus } }) =>
+        state.deliveries.filter((d) => !where.status || d.status === where.status),
+      createMany: async ({ data }: { data: Array<Omit<Delivery, "id">> }) => {
+        for (const row of data) {
+          state.deliveries.push({ ...row, id: `${row.provider}-${row.memberId}` });
+        }
+      }
+    },
     clinic: {
       update: async () => {
-        if (world.countFails) throw new Error("postgres://user:secret@host:5432 down");
-
         state.increments += 1;
       }
     }
   };
   const wallet = {
-    addClassMessage: async (_classId: string, message: { header: string; body: string }) => {
-      state.classMessages.push(message);
-      state.sendAttempts += 1;
-      if (world.cancelDuringSend) state.status = NotificationStatus.CANCELLED;
-      if (world.sendFails || (world.sendFailsOnce && state.sendAttempts === 1)) {
-        throw new Error("google down");
-      }
-
-      state.sent.push("message-1");
-      return { messageId: "message-1" };
-    },
-    removeMessage: async (target: unknown, messageId: string) => {
-      state.removed.push({ target, messageId });
+    addClassMessage: async () => {
+      state.classMessages += 1;
+      return { messageId: "class-message" };
     }
   };
   const service = new NotificationService(
     prisma as never,
     wallet as never,
     {} as never,
-    { enqueueDelivery: async () => undefined } as never,
+    {
+      enqueueDelivery: async (id: string) => {
+        state.enqueued.push(id);
+      }
+    } as never,
     null
   );
 
@@ -147,180 +122,95 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("a broadcast to Google members", () => {
-  it("is one shared message, so a {first_name} in it closes up instead of showing", async () => {
-    const { service, state } = build({
-      text: { header: "Hola {first_name}", body: "¡Hola {first_name}, tienes un regalo!" }
-    });
+describe("a broadcast", () => {
+  it("goes to each card on its own, Google included, and never as a shared class message", async () => {
+    const { service, state } = build({ google: ["m1", "m2"], apple: ["m1"] });
 
     await service.processNotification("notification-1");
 
-    expect(state.classMessages).toHaveLength(1);
-    expect(state.classMessages[0]).toMatchObject({
-      header: "Hola",
-      body: "¡Hola, tienes un regalo!"
-    });
+    expect(state.classMessages).toBe(0);
+    expect(state.deliveries.map((d) => d.id).sort()).toEqual([
+      "APPLE-m1",
+      "GOOGLE-m1",
+      "GOOGLE-m2"
+    ]);
+    expect(state.enqueued.sort()).toEqual(["APPLE-m1", "GOOGLE-m1", "GOOGLE-m2"]);
+    // The deliveries finish it and count it, not this run.
+    expect(state.status).toBe(NotificationStatus.PROCESSING);
+    expect(state.increments).toBe(0);
   });
-});
 
-describe("processNotification and a cancelled broadcast", () => {
-  it("sends a normal broadcast, marks it SENT with its message id, and counts it once", async () => {
+  it("creates no second delivery for anyone on a retry", async () => {
+    const { service, state } = build({ google: ["m1"], apple: ["m1"] });
+
+    await service.processNotification("notification-1");
+    await service.processNotification("notification-1");
+
+    expect(state.deliveries).toHaveLength(2);
+  });
+
+  it("still fans out on a retry after a FAILED attempt", async () => {
+    const { service, state } = build({ status: NotificationStatus.FAILED, google: ["m1"] });
+
+    await service.processNotification("notification-1");
+
+    expect(state.deliveries.map((d) => d.id)).toEqual(["GOOGLE-m1"]);
+    expect(state.status).toBe(NotificationStatus.PROCESSING);
+  });
+
+  it("sends nothing when it is cancelled between the status read and the PROCESSING write", async () => {
+    const { service, state } = build({ cancelAfterRead: true, google: ["m1"] });
+
+    await service.processNotification("notification-1");
+
+    expect(state.deliveries).toEqual([]);
+    expect(state.status).toBe(NotificationStatus.CANCELLED);
+    expect(state.fanOutLookups).toBe(0);
+  });
+
+  it("does not fan out when another worker finished it between the read and the PROCESSING write", async () => {
+    const { service, state } = build({ finishedAfterRead: true, google: ["m1"] });
+
+    await service.processNotification("notification-1");
+
+    expect(state.deliveries).toEqual([]);
+    expect(state.status).toBe(NotificationStatus.SENT);
+    expect(state.increments).toBe(0);
+  });
+
+  it("marks a broadcast with nobody to send to SENT, uncounted", async () => {
     const { service, state } = build();
 
     await service.processNotification("notification-1");
 
-    expect(state.sent).toEqual(["message-1"]);
-    expect(state.status).toBe(NotificationStatus.SENT);
-    expect(state.providerMessageId).toBe("message-1");
-    expect(state.increments).toBe(1);
-    expect(state.removed).toEqual([]);
-  });
-
-  it("still sends on a retry after a FAILED attempt", async () => {
-    const { service, state } = build({ status: NotificationStatus.FAILED });
-
-    await service.processNotification("notification-1");
-
-    expect(state.sent).toEqual(["message-1"]);
-    expect(state.status).toBe(NotificationStatus.SENT);
-  });
-
-  it("marks the broadcast FAILED and rethrows when the send fails", async () => {
-    const { service, state } = build({ sendFails: true });
-
-    await expect(service.processNotification("notification-1")).rejects.toThrow("google down");
-    expect(state.status).toBe(NotificationStatus.FAILED);
-    expect(state.increments).toBe(0);
-  });
-
-  it("sends nothing when it is cancelled between the status read and the PROCESSING write", async () => {
-    const { service, state } = build({ cancelAfterRead: true });
-
-    await service.processNotification("notification-1");
-
-    expect(state.sent).toEqual([]);
-    expect(state.status).toBe(NotificationStatus.CANCELLED);
-    expect(state.increments).toBe(0);
-    expect(state.fanOutLookups).toBe(0);
-  });
-
-  it("does not send when another worker finished it between the read and the PROCESSING write", async () => {
-    const { service, state } = build({ finishedAfterRead: true });
-
-    await service.processNotification("notification-1");
-
-    expect(state.sent).toEqual([]);
     expect(state.status).toBe(NotificationStatus.SENT);
     expect(state.increments).toBe(0);
   });
 
-  it("does not reopen a broadcast cancelled while the class message is being written, removes the message, and does not count it", async () => {
-    const { service, state } = build({ cancelDuringSend: true });
-
-    await service.processNotification("notification-1");
-
-    expect(state.status).toBe(NotificationStatus.CANCELLED);
-    expect(state.providerMessageId).toBe("message-1");
-    expect(state.removed).toEqual([
-      { target: { kind: "class", id: "class-1" }, messageId: "message-1" }
-    ]);
-    expect(state.increments).toBe(0);
-    expect(state.fanOutLookups).toBe(0);
-  });
-
-  it("does not turn a cancelled Apple-only broadcast with nobody to send to into SENT", async () => {
-    const { service, state } = build({ googleClass: false, cancelDuringFanOut: true });
+  it("does not turn a broadcast cancelled during the fan-out, with nobody to send to, into SENT", async () => {
+    const { service, state } = build({ cancelDuringFanOut: true });
 
     await service.processNotification("notification-1");
 
     expect(state.status).toBe(NotificationStatus.CANCELLED);
     expect(state.increments).toBe(0);
   });
+});
 
-  it("marks an Apple-only broadcast with nobody to send to SENT, uncounted", async () => {
-    const { service, state } = build({ googleClass: false });
-
-    await service.processNotification("notification-1");
-
-    expect(state.status).toBe(NotificationStatus.SENT);
-    expect(state.increments).toBe(0);
-  });
-
-  it("does not overwrite CANCELLED with FAILED when the send fails after a cancel", async () => {
-    const { service, state } = build({ sendFails: true, cancelDuringSend: true });
-
-    await expect(service.processNotification("notification-1")).rejects.toThrow("google down");
-    expect(state.status).toBe(NotificationStatus.CANCELLED);
-  });
-
-  it("does not send again on the retry after the SENT write failed once the message was out", async () => {
-    const { service, state } = build({ statusWriteFailsOnce: true });
-
-    await expect(service.processNotification("notification-1")).resolves.toBeUndefined();
-
-    expect(state.sendAttempts).toBe(1);
-    expect(state.providerMessageId).toBe("message-1");
-    expect(state.status).toBe(NotificationStatus.PROCESSING);
-
-    // The queue would only retry if the first run threw; a retry must still not resend.
-    await service.processNotification("notification-1");
-
-    expect(state.sendAttempts).toBe(1);
-    expect(state.status).toBe(NotificationStatus.SENT);
-    // Counted by the first run; the retry cannot know and must not count again.
-    expect(state.increments).toBe(1);
-    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("secret");
-  });
-
-  it("does not mark the broadcast FAILED, rethrow or resend when the counter write fails after the send", async () => {
-    const { service, state } = build({ countFails: true });
-
-    await expect(service.processNotification("notification-1")).resolves.toBeUndefined();
-
-    expect(state.status).toBe(NotificationStatus.SENT);
-    expect(state.providerMessageId).toBe("message-1");
+describe("a broadcast sent before broadcasts went per card", () => {
+  it("is finalised without sending it to Google again, and still reaches Apple", async () => {
+    const { service, state } = build({
+      status: NotificationStatus.PROCESSING,
+      providerMessageId: "class-message-0",
+      google: ["m1"],
+      apple: ["m1"]
+    });
 
     await service.processNotification("notification-1");
 
-    expect(state.sendAttempts).toBe(1);
-    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("secret");
-  });
-
-  it("finalises a broadcast that has a provider message id but never reached SENT, without sending or counting", async () => {
-    const { service, state } = build({ status: NotificationStatus.FAILED });
-
-    state.providerMessageId = "message-0";
-
-    await service.processNotification("notification-1");
-
-    expect(state.sendAttempts).toBe(0);
+    expect(state.classMessages).toBe(0);
+    expect(state.deliveries.map((d) => d.id)).toEqual(["APPLE-m1"]);
     expect(state.status).toBe(NotificationStatus.SENT);
-    expect(state.increments).toBe(0);
-  });
-
-  it("retries normally after a pre-send failure: FAILED, then one message and SENT", async () => {
-    const { service, state } = build({ sendFailsOnce: true });
-
-    await expect(service.processNotification("notification-1")).rejects.toThrow("google down");
-    expect(state.status).toBe(NotificationStatus.FAILED);
-    expect(state.providerMessageId).toBeNull();
-
-    await service.processNotification("notification-1");
-
-    expect(state.sendAttempts).toBe(2);
-    expect(state.status).toBe(NotificationStatus.SENT);
-    expect(state.increments).toBe(1);
-  });
-
-  it("still removes the class message when the id write fails after a cancel during the send", async () => {
-    const { service, state } = build({ cancelDuringSend: true, idWriteFails: true });
-
-    await expect(service.processNotification("notification-1")).resolves.toBeUndefined();
-
-    expect(state.status).toBe(NotificationStatus.CANCELLED);
-    expect(state.removed).toEqual([
-      { target: { kind: "class", id: "class-1" }, messageId: "message-1" }
-    ]);
     expect(state.increments).toBe(0);
   });
 });

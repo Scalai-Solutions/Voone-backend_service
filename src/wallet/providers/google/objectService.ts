@@ -334,8 +334,11 @@ export const addObjectMessage = async (
   return messageId;
 };
 
-/** How many messages a pass keeps per list (class broadcasts, object messages). */
-export const MAX_PASS_MESSAGES = 4;
+/**
+ * How many messages a card keeps: the newest two of any kind. Broadcasts go to each card's own
+ * list (not the shared class list), so this one list is everything the member sees.
+ */
+export const MAX_PASS_MESSAGES = 2;
 
 export interface GoogleAddMessageResponse {
   resource?: { messages?: GoogleMessage[] };
