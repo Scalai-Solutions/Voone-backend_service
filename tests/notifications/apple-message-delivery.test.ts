@@ -440,7 +440,7 @@ describe("which deliveries each kind of message creates", () => {
       expect(record.deliveries?.map((d) => d.memberId)).toEqual(["m-1", "m-2"]);
     });
 
-    it("stays one shared broadcast when the text has no name", async () => {
+    it("stays a broadcast, reaching every card, when the text has no name", async () => {
       const record: { type?: string; deliveries?: Array<{ memberId: string }> } = {};
 
       await serviceFor(record).broadcast(
@@ -487,9 +487,9 @@ describe("which deliveries each kind of message creates", () => {
     expect(await run(false)).toEqual([WalletProviderType.GOOGLE]);
   });
 
-  it("a broadcast fans out one APPLE delivery job per member with a synced Apple object, after the Google class message", async () => {
+  it("a broadcast fans out one delivery per member and wallet, Google included, with no class message", async () => {
     const order: string[] = [];
-    const createdMembers: string[] = [];
+    const created: string[] = [];
     const enqueued: string[] = [];
     const notification = {
       id: "n-1",
@@ -499,7 +499,8 @@ describe("which deliveries each kind of message creates", () => {
       header: "H",
       body: "B",
       actionUrl: null,
-      notify: true
+      notify: true,
+      providerMessageId: null
     };
     const service = new NotificationService(
       {
@@ -508,25 +509,31 @@ describe("which deliveries each kind of message creates", () => {
           update: async () => undefined,
           updateMany: async () => ({ count: 1 })
         },
-        walletClass: { findFirst: async () => ({ externalClassId: "class-1" }) },
         clinic: { update: async () => undefined },
         walletObject: {
-          findMany: async () => [{ memberId: "m-1" }, { memberId: "m-2" }, { memberId: "m-3" }]
+          findMany: async ({ where }: { where: { provider: WalletProviderType } }) =>
+            where.provider === WalletProviderType.APPLE
+              ? [{ memberId: "m-1" }, { memberId: "m-2" }]
+              : [{ memberId: "m-1" }, { memberId: "m-3" }]
         },
         notificationDelivery: {
           findMany: async (args: { where: { status?: NotificationDeliveryStatus } }) =>
             args.where.status === NotificationDeliveryStatus.QUEUED
               ? [{ id: "d-1" }, { id: "d-2" }, { id: "d-3" }]
               : [{ memberId: "m-2", provider: WalletProviderType.APPLE }],
-          createMany: async ({ data }: { data: Array<{ memberId: string }> }) => {
+          createMany: async ({
+            data
+          }: {
+            data: Array<{ memberId: string; provider: WalletProviderType }>;
+          }) => {
             order.push("createMany");
-            createdMembers.push(...data.map((row) => row.memberId));
+            created.push(...data.map((row) => `${row.provider}:${row.memberId}`));
           }
         }
       } as never,
       {
         addClassMessage: async () => {
-          order.push("google");
+          order.push("class message");
           return { messageId: "msg-1" };
         }
       } as never,
@@ -541,9 +548,11 @@ describe("which deliveries each kind of message creates", () => {
 
     await service.processNotification("n-1");
 
-    expect(order[0]).toBe("google");
-    // m-2 already has a delivery (a retry): only the missing ones are created.
-    expect(createdMembers).toEqual(["m-1", "m-3"]);
+    expect(order).not.toContain("class message");
+    // m-2 already has an Apple delivery (a retry): only the missing ones are created.
+    expect(created).toEqual(["APPLE:m-1", "GOOGLE:m-1", "GOOGLE:m-3"]);
+    // Every row exists before the first job runs.
+    expect(order.lastIndexOf("createMany")).toBeLessThan(order.indexOf("enqueue"));
     expect(enqueued).toEqual(["d-1", "d-2", "d-3"]);
   });
 });
@@ -565,11 +574,12 @@ describe("retrying a broadcast whose class message already went out", () => {
               header: "H",
               body: "B",
               actionUrl: null,
-              notify: true
+              notify: true,
+              // Sent the old way: its Google members already have the shared class message.
+              providerMessageId: "msg"
             }),
             update: async () => undefined
           },
-          walletClass: { findFirst: async () => ({ externalClassId: "class-1" }) },
           clinic: {
             update: async () => {
               throw new Error("must not be counted again");
@@ -879,7 +889,13 @@ describe("a broadcast from a clinic with no Google class", () => {
             throw new Error("nothing was sent, nothing to count here");
           }
         },
-        walletObject: { findMany: async () => members.map((memberId) => ({ memberId })) },
+        // An Apple-only clinic: nobody holds a Google card.
+        walletObject: {
+          findMany: async ({ where }: { where: { provider: WalletProviderType } }) =>
+            where.provider === WalletProviderType.APPLE
+              ? members.map((memberId) => ({ memberId }))
+              : []
+        },
         notificationDelivery: {
           findMany: async (args: { where: { status?: NotificationDeliveryStatus } }) =>
             args.where.status === NotificationDeliveryStatus.QUEUED

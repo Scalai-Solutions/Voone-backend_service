@@ -256,6 +256,22 @@ export const removeClassMessage = async (classId: string, messageId: string): Pr
   });
 };
 
+/** Empties a class's shared message list. Returns how many messages it held (0: nothing written). */
+export const clearClassMessages = async (classId: string, apply: boolean): Promise<number> => {
+  assertIssuerScopedId(classId, "classId");
+
+  const client = getAuthenticatedClient();
+  const path = `/loyaltyClass/${encodeURIComponent(classId)}`;
+  const existing = await client.request<{ messages?: GoogleMessage[] }>(path);
+  const count = existing.messages?.length ?? 0;
+
+  if (apply && count > 0) {
+    await client.request<unknown>(path, { method: "PATCH", body: { messages: [] } });
+  }
+
+  return count;
+};
+
 export const setClassLocations = async (
   classId: string,
   locations: LoyaltyMerchantLocationInput[]

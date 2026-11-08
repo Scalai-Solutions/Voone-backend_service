@@ -161,7 +161,7 @@ describe("NotificationService", () => {
     expect(walletCalls).toEqual([
       {
         header: "Hello",
-        body: "Come in\nhttps://example.com/book",
+        body: 'Come in\n<a href="https://example.com/book">https://example.com/book</a>',
         notify: false,
         actionUrl: "https://example.com/book"
       }

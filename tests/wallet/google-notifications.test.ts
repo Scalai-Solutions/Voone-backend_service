@@ -68,39 +68,39 @@ describe("Google Wallet notifications", () => {
     });
   });
 
-  describe("keeps only the latest 4 messages on a pass", () => {
+  describe("keeps only the latest 2 messages on a pass", () => {
     const messages = (count: number) =>
       Array.from({ length: count }, (_, i) => ({ id: `m${i + 1}`, header: "H", body: "B" }));
 
-    it("drops the oldest object message once a fifth arrives", async () => {
+    it("drops the oldest object message once a third arrives", async () => {
       const { addObjectMessage } = await import("../../src/wallet/providers/google/objectService");
-      request.mockResolvedValueOnce({ resource: { messages: messages(5) } });
+      request.mockResolvedValueOnce({ resource: { messages: messages(3) } });
       request.mockResolvedValueOnce({});
 
       await addObjectMessage("issuer.member_1", { header: "H", body: "B", notify: false });
 
       expect(request).toHaveBeenLastCalledWith("/loyaltyObject/issuer.member_1", {
         method: "PATCH",
-        body: { messages: messages(5).slice(1) }
+        body: { messages: messages(3).slice(1) }
       });
     });
 
-    it("drops the oldest class message once a fifth arrives", async () => {
+    it("drops the oldest class message once a third arrives", async () => {
       const { addClassMessage } = await import("../../src/wallet/providers/google/classService");
-      request.mockResolvedValueOnce({ resource: { messages: messages(5) } });
+      request.mockResolvedValueOnce({ resource: { messages: messages(3) } });
       request.mockResolvedValueOnce({});
 
       await addClassMessage("issuer.class_1", { header: "H", body: "B", notify: false });
 
       expect(request).toHaveBeenLastCalledWith("/loyaltyClass/issuer.class_1", {
         method: "PATCH",
-        body: { messages: messages(5).slice(1) }
+        body: { messages: messages(3).slice(1) }
       });
     });
 
-    it("does not patch while 4 or fewer are on the pass", async () => {
+    it("does not patch while 2 or fewer are on the pass", async () => {
       const { addObjectMessage } = await import("../../src/wallet/providers/google/objectService");
-      request.mockResolvedValueOnce({ resource: { messages: messages(4) } });
+      request.mockResolvedValueOnce({ resource: { messages: messages(2) } });
 
       await addObjectMessage("issuer.member_1", { header: "H", body: "B", notify: false });
 
