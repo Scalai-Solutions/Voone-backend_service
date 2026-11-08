@@ -61,7 +61,13 @@ const build = (world: World = {}) => {
         return snapshot;
       },
       // Atomic: the check and the write are one synchronous step, like one SQL statement.
-      updateMany: async ({ where, data }: { where: Where; data: { status?: NotificationStatus } }) => {
+      updateMany: async ({
+        where,
+        data
+      }: {
+        where: Where;
+        data: { status?: NotificationStatus };
+      }) => {
         if (where.status?.notIn?.includes(state.status)) return { count: 0 };
         if (where.status?.in && !where.status.in.includes(state.status)) return { count: 0 };
         if (data.status) state.status = data.status;
