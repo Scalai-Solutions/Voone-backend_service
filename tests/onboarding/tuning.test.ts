@@ -48,6 +48,7 @@ describe("the tuned defaults", () => {
     expect(P.minGrowth).toBe(1.15);
     expect(P.premiosFirstTramo).toBe(2);
     expect(P.premiosPerTramo).toBe(3);
+    expect(P.allowBronceRepeat).toBe(true);
   });
 });
 
@@ -143,5 +144,37 @@ describe("across the answer space", () => {
     const ths = p.lad.ms.map((m) => m.th);
 
     expect(ths).toEqual([...ths].sort((a, b) => a - b));
+  });
+});
+
+describe("the best Bronce reward leads, even where a gift then repeats", () => {
+  const OBJECTIVES = ["equilibrado", "mas_visitas", "mas_gasto", "mas_clientes_nuevos"] as const;
+  const INVESTMENTS = ["conservador", "equilibrado", "generoso"] as const;
+  const OCCUPANCIES = ["o1", "o2", "o3", "o4"] as const;
+  const combos = OBJECTIVES.flatMap((objective) =>
+    INVESTMENTS.flatMap((investment) =>
+      OCCUPANCIES.map((occupancy) => ({ objective, investment, occupancy }))
+    )
+  );
+
+  it("holds in all 48 combinations, and any repeat it allows is said in an adapt note", () => {
+    for (const c of combos) {
+      const p = programFor({ ...BASE, ...c });
+      const bronce = p.chosen.filter((r) => r.m.tramo === 1);
+      const repeat = p.guarantees.find(([text]) => text.startsWith("Ningún regalo se repite"));
+      const first = p.guarantees.find(([text]) => text.startsWith("En Bronce el mejor premio"));
+
+      expect(first?.[1], `${c.objective}/${c.investment}/${c.occupancy}`).toBe(true);
+      expect(bronce.every((r) => r.o.value <= bronce[0].o.value)).toBe(true);
+
+      if (repeat && !repeat[1]) {
+        expect(
+          p.adapt.some((note) =>
+            note.startsWith("En Bronce el mejor premio va el primero, aunque")
+          ),
+          `${c.objective}/${c.investment}/${c.occupancy}`
+        ).toBe(true);
+      }
+    }
   });
 });

@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { orderBronce } from "../../src/modules/onboarding/engine";
+import { P } from "../../src/modules/onboarding/engine.config";
 import type {
   Candidate,
   ChosenReward,
@@ -107,17 +108,36 @@ describe("orderBronce", () => {
     }
   });
 
-  it("keeps the beam's order when best-first cannot be had without a repeat", () => {
+  describe("when best-first cannot be had without a repeat", () => {
     // Both arrangements with c first collide: x ties a to c, y ties b to the next segment
-    // and z ties a to it as well. The second guarantee wins and the order stands.
-    const chosen = ladder(
-      [option(10, "a", "x", "z"), option(20, "b", "y"), option(30, "c", "x", "y")],
-      option(40, "d", "y", "z")
-    );
-    const before = idsOf(chosen);
+    // and z ties a to it as well.
+    const colliding = () =>
+      ladder(
+        [option(10, "a", "x", "z"), option(20, "b", "y"), option(30, "c", "x", "y")],
+        option(40, "d", "y", "z")
+      );
+    const original = P.allowBronceRepeat;
 
-    expect(orderBronce(chosen)).toBe("kept-to-avoid-repeat");
-    expect(idsOf(chosen)).toEqual(before);
+    afterEach(() => {
+      (P as { allowBronceRepeat: boolean }).allowBronceRepeat = original;
+    });
+
+    it("puts the best reward first and lets the gift repeat, as the centre chose", () => {
+      const chosen = colliding();
+
+      expect(orderBronce(chosen)).toBe("best-first-with-repeat");
+      expect(chosen[0].o.items[0].id).toBe("c");
+    });
+
+    it("keeps the beam's order, as the original programme did, when repeats are not allowed", () => {
+      (P as { allowBronceRepeat: boolean }).allowBronceRepeat = false;
+
+      const chosen = colliding();
+      const before = idsOf(chosen);
+
+      expect(orderBronce(chosen)).toBe("kept-to-avoid-repeat");
+      expect(idsOf(chosen)).toEqual(before);
+    });
   });
 
   it("moves a reward together with its alternatives", () => {

@@ -38,9 +38,12 @@ const OCCUPANCIES: OccupancyLevel[] = ["o1", "o2", "o3", "o4"];
 const items = catalog as CatalogItem[];
 const COST = /^Premios y ventajas cuestan el/;
 const COST_NOTE = "supera en más de un 50%";
-/** The one guarantee that may be false for a reason other than cost, and the note that says why. */
-const BRONCE_FIRST = /^En Bronce el mejor premio es el primero/;
-const KEPT_NOTE = "En Bronce el mejor premio no va el primero";
+/**
+ * The one guarantee that may be false for a reason other than cost, and the note that says why:
+ * the centre chose the best Bronce reward leading over a gift never appearing twice running.
+ */
+const NO_REPEAT = /^Ningún regalo se repite en dos hitos seguidos/;
+const REPEAT_NOTE = "En Bronce el mejor premio va el primero, aunque así se repite un regalo";
 
 /**
  * Cost-ceiling overruns on the Sapphira fixture. Five before the first stretch was cut to two
@@ -75,16 +78,16 @@ describe("the 48-combination sweep", () => {
     const p = programFor(c);
     const failed = p.guarantees.filter(([, held]) => !held).map(([text]) => text);
 
-    // Only the cost guarantee, and Bronce-first where the adapt note says it was kept out of
-    // the first place to avoid a repeat, can be false on this catalogue. Nothing else is ever
+    // Only the cost guarantee, and "no repeated gift" where the adapt note says the best Bronce
+    // reward was put first at its price, can be false on this catalogue. Nothing else is ever
     // false.
     for (const text of failed) {
-      expect(text, key(c)).toMatch(BRONCE_FIRST.test(text) ? BRONCE_FIRST : COST);
+      expect(text, key(c)).toMatch(NO_REPEAT.test(text) ? NO_REPEAT : COST);
 
-      if (BRONCE_FIRST.test(text)) {
+      if (NO_REPEAT.test(text)) {
         expect(
-          p.adapt.some((note) => note.startsWith(KEPT_NOTE)),
-          `${key(c)}: Bronce-first is false with no adapt note`
+          p.adapt.some((note) => note.startsWith(REPEAT_NOTE)),
+          `${key(c)}: the repeat is not explained by an adapt note`
         ).toBe(true);
       }
     }
@@ -110,18 +113,17 @@ describe("the 48-combination sweep", () => {
     }
   });
 
-  it("never repeats a gift, and leads Bronce with the best reward unless that would repeat one", () => {
-    // The repair puts the best reward first without ever repeating a gift back to back. With
-    // two rewards in Bronce there is one order to try, so in a few combinations the best cannot
-    // lead without a repeat: the repeat guarantee wins and the adapt note says so.
+  it("always leads Bronce with the best reward, and says so when that repeats a gift", () => {
+    // The centre's call: the best reward leads even where that puts a gift next to the same gift
+    // in the next stretch. Every other guarantee holds in all 48.
     for (const c of combos) {
       const p = programFor(c);
-      const keptOut = p.adapt.some((note) => note.startsWith(KEPT_NOTE));
+      const repeats = p.adapt.some((note) => note.startsWith(REPEAT_NOTE));
 
       for (const [text, held] of p.guarantees) {
         if (COST.test(text)) continue;
 
-        if (BRONCE_FIRST.test(text)) expect(held || keptOut, `${key(c)}: ${text}`).toBe(true);
+        if (NO_REPEAT.test(text)) expect(held || repeats, `${key(c)}: ${text}`).toBe(true);
         else expect(held, `${key(c)}: ${text}`).toBe(true);
       }
     }

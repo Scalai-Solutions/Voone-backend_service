@@ -450,6 +450,13 @@ export const P = {
    * ones, spaced about a visit apart. The later stretches keep `premiosPerTramo`.
    */
   premiosFirstTramo: 2,
+  /**
+   * With two rewards in Bronce there is one order to try. When the best reward leading would put
+   * a gift next to the same gift in the next stretch, true keeps the best reward first and lets
+   * the repeat stand (the adapt note says so); false keeps the order that avoids the repeat, as
+   * the original programme did.
+   */
+  allowBronceRepeat: true,
   /** A client should never go more than this many visits without something happening. */
   maxVisitsBetween: 1.5,
   discountMaxProducts: 3,

@@ -772,7 +772,9 @@ export type BronceOrdering =
   /** Best first, the rest descending, because the document's order would repeat a gift. */
   | "best-first-descending"
   /** Best first was impossible without repeating a gift, so the beam's order was kept. */
-  | "kept-to-avoid-repeat";
+  | "kept-to-avoid-repeat"
+  /** Best first, and a gift repeats next to it, because the centre prefers the best reward to lead. */
+  | "best-first-with-repeat";
 
 const sharesItem = (a: RewardOption, b: RewardOption): boolean =>
   ids(a).some((id) => ids(b).includes(id));
@@ -831,6 +833,17 @@ export const orderBronce = (chosen: ChosenReward[]): BronceOrdering => {
     });
 
     return name;
+  }
+
+  if (P.allowBronceRepeat) {
+    // The first attempt, repeat and all: the best reward leads and the centre has said that
+    // matters more than a gift appearing twice running.
+    segment.forEach((c, i) => {
+      c.o = attempts[0][1][i].o;
+      c.alts = attempts[0][1][i].alts;
+    });
+
+    return "best-first-with-repeat";
   }
 
   return "kept-to-avoid-repeat";
@@ -1000,6 +1013,12 @@ export const run = (items: CatalogItem[], ans: Answers): EngineResult => {
     // guarantee below will read false and the centre should know why.
     adapt.push(
       "En Bronce el mejor premio no va el primero, porque así se repetiría un regalo en dos hitos seguidos."
+    );
+  }
+
+  if (bronce === "best-first-with-repeat") {
+    adapt.push(
+      "En Bronce el mejor premio va el primero, aunque así se repite un regalo en dos hitos seguidos."
     );
   }
 

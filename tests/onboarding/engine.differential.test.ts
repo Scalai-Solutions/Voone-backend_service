@@ -11,7 +11,13 @@ vi.mock("../../src/modules/onboarding/engine.config", async (importOriginal) => 
 
   return {
     ...actual,
-    P: { ...actual.P, premiosFirstTramo: 3, minGrowth: 1.5, visitsSilver: 3 }
+    P: {
+      ...actual.P,
+      premiosFirstTramo: 3,
+      minGrowth: 1.5,
+      visitsSilver: 3,
+      allowBronceRepeat: false
+    }
   };
 });
 
