@@ -1,6 +1,13 @@
 import type { PrismaClient } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
+// Settings of the original programme: this suite is not about the tuned ladder (tuning.test.ts is).
+vi.mock("../../src/modules/onboarding/engine.config", async (importOriginal) => {
+  const { referenceTuningMock } = await import("../onboarding/reference-tuning");
+
+  return referenceTuningMock(importOriginal as never);
+});
+
 import { MemberNotFoundError } from "../../src/common/errors/membership.errors";
 import { WalletConfigurationError } from "../../src/common/errors/wallet.errors";
 import { run } from "../../src/modules/onboarding/engine";

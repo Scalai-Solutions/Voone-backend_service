@@ -1,4 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// Settings of the original programme: this suite is not about the tuned ladder (tuning.test.ts is).
+vi.mock("../../src/modules/onboarding/engine.config", async (importOriginal) => {
+  const { referenceTuningMock } = await import("./reference-tuning");
+
+  return referenceTuningMock(importOriginal as never);
+});
 
 import { COST_REVIEW_NOTE, run } from "../../src/modules/onboarding/engine";
 import type {

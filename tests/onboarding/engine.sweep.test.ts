@@ -38,15 +38,19 @@ const OCCUPANCIES: OccupancyLevel[] = ["o1", "o2", "o3", "o4"];
 const items = catalog as CatalogItem[];
 const COST = /^Premios y ventajas cuestan el/;
 const COST_NOTE = "supera en más de un 50%";
+/**
+ * The one guarantee that may be false for a reason other than cost, and the note that says why:
+ * the centre chose the best Bronce reward leading over a gift never appearing twice running.
+ */
+const NO_REPEAT = /^Ningún regalo se repite en dos hitos seguidos/;
+const REPEAT_NOTE = "En Bronce el mejor premio va el primero, aunque así se repite un regalo";
 
-/** Cost-ceiling overruns on the Sapphira fixture, as of config 2026-10-07.1. */
-const OVER_BUDGET = new Set([
-  "equilibrado/conservador/o3",
-  "mas_clientes_nuevos/conservador/o3",
-  "equilibrado/generoso/o4",
-  "mas_visitas/generoso/o4",
-  "mas_clientes_nuevos/generoso/o4"
-]);
+/**
+ * Cost-ceiling overruns on the Sapphira fixture. Five before the first stretch was cut to two
+ * rewards over a longer Plata; now one, because the same budget is spread over fewer, later
+ * milestones.
+ */
+const OVER_BUDGET = new Set(["mas_gasto/conservador/o3"]);
 
 const combos = OBJECTIVES.flatMap((objective) =>
   INVESTMENTS.flatMap((investment) =>
@@ -74,12 +78,22 @@ describe("the 48-combination sweep", () => {
     const p = programFor(c);
     const failed = p.guarantees.filter(([, held]) => !held).map(([text]) => text);
 
-    // Only the cost guarantee can be false on this catalogue; the repeat and Bronce ones
-    // were repaired, and nothing else is ever false.
-    for (const text of failed) expect(text, key(c)).toMatch(COST);
+    // Only the cost guarantee, and "no repeated gift" where the adapt note says the best Bronce
+    // reward was put first at its price, can be false on this catalogue. Nothing else is ever
+    // false.
+    for (const text of failed) {
+      expect(text, key(c)).toMatch(NO_REPEAT.test(text) ? NO_REPEAT : COST);
+
+      if (NO_REPEAT.test(text)) {
+        expect(
+          p.adapt.some((note) => note.startsWith(REPEAT_NOTE)),
+          `${key(c)}: the repeat is not explained by an adapt note`
+        ).toBe(true);
+      }
+    }
 
     // ...and it is never false in silence.
-    if (failed.length) {
+    if (failed.some((text) => COST.test(text))) {
       expect(
         p.review.some((note) => note.includes(COST_NOTE)),
         `${key(c)} has a false guarantee with no review note`
@@ -99,18 +113,23 @@ describe("the 48-combination sweep", () => {
     }
   });
 
-  it("holds the repeat and Bronce guarantees in all 48", () => {
-    // What the Bronce repair is for. Before it, five combinations broke the first.
+  it("always leads Bronce with the best reward, and says so when that repeats a gift", () => {
+    // The centre's call: the best reward leads even where that puts a gift next to the same gift
+    // in the next stretch. Every other guarantee holds in all 48.
     for (const c of combos) {
       const p = programFor(c);
+      const repeats = p.adapt.some((note) => note.startsWith(REPEAT_NOTE));
 
       for (const [text, held] of p.guarantees) {
-        if (!COST.test(text)) expect(held, `${key(c)}: ${text}`).toBe(true);
+        if (COST.test(text)) continue;
+
+        if (NO_REPEAT.test(text)) expect(held || repeats, `${key(c)}: ${text}`).toBe(true);
+        else expect(held, `${key(c)}: ${text}`).toBe(true);
       }
     }
   });
 
-  it("goes over budget in exactly the five known combinations", () => {
+  it("goes over budget in exactly the known combination", () => {
     const over = new Set(
       combos.filter((c) => programFor(c).review.some((note) => note.includes(COST_NOTE))).map(key)
     );

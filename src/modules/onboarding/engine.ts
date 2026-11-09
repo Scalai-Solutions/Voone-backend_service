@@ -167,6 +167,20 @@ export const estimate = (items: ClassifiedItem[], ans: Answers): Estimates | { e
 /* ------------------------------------------------------------------- step 3: ladder */
 
 /**
+ * How a stretch's budget splits across its rewards, as weights that add up to the number of
+ * rewards so the stretch always spends exactly its budget. The objective's weights are written
+ * for three rewards; two keep the first and last, so the spread between the smallest and the
+ * largest is the same.
+ */
+const rewardWeights = (pos: number[], count: number): number[] => {
+  if (count === pos.length) return pos;
+
+  if (count === 2) return [pos[0], pos[pos.length - 1]];
+
+  throw new Error(`No reward weights for ${count} rewards`);
+};
+
+/**
  * Lay out the four tier-to-tier segments and the milestones inside them.
  *
  * Segment lengths grow geometrically so each tier costs meaningfully more than the last;
@@ -241,10 +255,11 @@ export const buildLadder = (est: Estimates, ans: Answers, useFloor: boolean): La
   }
 
   const ms: Milestone[] = [];
-  const NP = P.premiosPerTramo;
   const counts: number[] = [];
 
   for (const t of tramos) {
+    const NP = t.i === 1 ? P.premiosFirstTramo : P.premiosPerTramo;
+    const weights = rewardWeights(obj.pos, NP);
     // Real visits, not progress euros: a Diamante euro is worth 1.3 progress euros, so a
     // high tier reaches its threshold in fewer actual visits.
     const realVisits = (t.gap * est.visits) / TIER_BENEFITS[TIERS[t.i - 1]].mult;
@@ -267,7 +282,7 @@ export const buildLadder = (est: Estimates, ans: Answers, useFloor: boolean): La
       const th = roundTo(A * (t.start + (t.gap * j) / (tot + 1)), P.round);
 
       if (rewardPos.has(j)) {
-        const cb = (t.budget / NP) * obj.pos[jp];
+        const cb = (t.budget / NP) * weights[jp];
         jp += 1;
         ms.push({
           n: ms.length + 1,
@@ -757,7 +772,11 @@ export type BronceOrdering =
   /** Best first, the rest descending, because the document's order would repeat a gift. */
   | "best-first-descending"
   /** Best first was impossible without repeating a gift, so the beam's order was kept. */
-  | "kept-to-avoid-repeat";
+  | "kept-to-avoid-repeat"
+  /** Best first, and a gift repeats next to it, because the centre prefers the best reward to lead. */
+  | "best-first-with-repeat"
+  /** Best first, and the second Bronce reward was swapped for an alternative that repeats nothing. */
+  | "best-first-swapped";
 
 const sharesItem = (a: RewardOption, b: RewardOption): boolean =>
   ids(a).some((id) => ids(b).includes(id));
@@ -784,7 +803,10 @@ const hasConsecutiveRepeat = (sequence: RewardOption[]): boolean =>
  * mistake, whereas an unusual Bronce order is invisible. Rewards travel with their
  * alternatives, which were computed against their neighbours' values.
  */
-export const orderBronce = (chosen: ChosenReward[]): BronceOrdering => {
+export const orderBronce = (
+  chosen: ChosenReward[],
+  lead: typeof P.bronceLead = P.bronceLead
+): BronceOrdering => {
   const segment = chosen.filter((c) => c.m.tramo === 1);
   const following = chosen.find((c) => c.m.tramo > 1);
 
@@ -816,6 +838,58 @@ export const orderBronce = (chosen: ChosenReward[]): BronceOrdering => {
     });
 
     return name;
+  }
+
+  if (lead === "swap-or-repeat") {
+    // Keep the best first and take the repeat out by swapping a later Bronce reward for one of
+    // its own alternatives: one that clashes with no neighbour and is still no better than the
+    // reward that leads. Of those, the one that costs the centre no more (or the least more), and
+    // then the most valuable, so the swap never pushes a programme over its cost ceiling.
+    const order = attempts[0][1];
+    const leading = order[0].o.value;
+    const tail = following ? [following.o] : [];
+    const fits: Array<{ slot: number; alt: RewardOption; dearer: number }> = [];
+
+    order.forEach((slot, i) => {
+      if (i === 0) return;
+
+      for (const alt of slot.alts) {
+        if (alt.value > leading) continue;
+
+        const options = order.map((s, j) => (j === i ? alt : s.o));
+
+        if (hasConsecutiveRepeat([...options, ...tail])) continue;
+
+        fits.push({ slot: i, alt, dearer: Math.max(0, alt.cost - slot.o.cost) });
+      }
+    });
+
+    fits.sort((x, y) => x.dearer - y.dearer || y.alt.value - x.alt.value);
+
+    if (fits[0]) {
+      const { slot, alt } = fits[0];
+
+      segment.forEach((c, i) => {
+        c.o = i === slot ? alt : order[i].o;
+        c.alts =
+          i === slot
+            ? [order[i].o, ...order[i].alts.filter((other) => other !== alt)]
+            : order[i].alts;
+      });
+
+      return "best-first-swapped";
+    }
+  }
+
+  if (lead !== "keep-order") {
+    // The first attempt, repeat and all: the best reward leads and the centre has said that
+    // matters more than a gift appearing twice running.
+    segment.forEach((c, i) => {
+      c.o = attempts[0][1][i].o;
+      c.alts = attempts[0][1][i].alts;
+    });
+
+    return "best-first-with-repeat";
   }
 
   return "kept-to-avoid-repeat";
@@ -942,7 +1016,9 @@ export const run = (items: CatalogItem[], ans: Answers): EngineResult => {
     };
   }
 
-  const bronce = orderBronce(chosen);
+  // What Bronce looked like before it was reordered, so a swap that costs too much can be undone.
+  const beforeBronce = chosen.map((c) => ({ o: c.o, alts: c.alts }));
+  let bronce = orderBronce(chosen);
 
   const rec = chooseRecurring(est.A, chosen[chosen.length - 1].o.value, lad.inv, cands);
   const gifts = chooseTierGifts(cands, est.ticket);
@@ -963,9 +1039,21 @@ export const run = (items: CatalogItem[], ans: Answers): EngineResult => {
     realTh[m.n] = real;
   }
 
-  const totalCost = chosen.reduce((s, c) => s + c.o.cost, 0) + perkCost;
+  let totalCost = chosen.reduce((s, c) => s + c.o.cost, 0) + perkCost;
   const diamondReal = realTh[lad.last.n];
-  const costPct = totalCost / diamondReal;
+  let costPct = totalCost / diamondReal;
+
+  // A swap that keeps the best Bronce reward first but pushes the programme over its cost ceiling
+  // is worse than the repeat it avoided, which costs nothing: undo it and let the repeat stand.
+  if (bronce === "best-first-swapped" && costPct > lad.inv * 1.5) {
+    chosen.forEach((c, i) => {
+      c.o = beforeBronce[i].o;
+      c.alts = beforeBronce[i].alts;
+    });
+    bronce = orderBronce(chosen, "repeat");
+    totalCost = chosen.reduce((s, c) => s + c.o.cost, 0) + perkCost;
+    costPct = totalCost / diamondReal;
+  }
   const yearsD = diamondReal / est.A;
 
   const newYear = P.repeatShare * est.A + (1 - P.repeatShare) * P.occVisits * est.ticket;
@@ -985,6 +1073,18 @@ export const run = (items: CatalogItem[], ans: Answers): EngineResult => {
     // guarantee below will read false and the centre should know why.
     adapt.push(
       "En Bronce el mejor premio no va el primero, porque así se repetiría un regalo en dos hitos seguidos."
+    );
+  }
+
+  if (bronce === "best-first-swapped") {
+    adapt.push(
+      "En Bronce el mejor premio va el primero; para no repetir un regalo en dos hitos seguidos, el segundo premio de Bronce es una alternativa equivalente."
+    );
+  }
+
+  if (bronce === "best-first-with-repeat") {
+    adapt.push(
+      "En Bronce el mejor premio va el primero, aunque así se repite un regalo en dos hitos seguidos."
     );
   }
 
