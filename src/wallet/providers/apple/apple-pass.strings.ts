@@ -22,8 +22,6 @@ export const PASS_LABELS = {
   memberCode: "NÚMERO DE MIEMBRO",
   serialNumber: "NÚMERO DE PASE",
   memberNo: "N.º DE MIEMBRO",
-  book: "RESERVAR CITA",
-  website: "WEB",
   pointsChangeMessage: "Tu saldo ahora es %@",
   tierChangeMessage: "Ahora eres nivel %@",
   lastMessage: "ÚLTIMO MENSAJE",

@@ -181,8 +181,30 @@ describe("buildStoreCardFields", () => {
     );
 
     expect(back.book.attributedValue).toContain("href='https://clinic.example/reservar'");
+    // One line, the wording the clinic set (or the default): no capitalised label above it.
+    expect(back.book.attributedValue).toContain(">Reservar cita</a>");
+    expect(back.book).not.toHaveProperty("label");
+    expect(back.website).not.toHaveProperty("label");
     expect(back.website.attributedValue).toContain("href='https://clinic.example'");
     expect(allKeys(buildStoreCardFields(aureaGoldPass))).not.toContain("book");
+  });
+
+  it("shows the button wording the clinic set, once, and each extra button as typed", () => {
+    const card = {
+      ...aureaGoldPass,
+      template: {
+        ...aureaGoldPass.template,
+        appointmentUrl: "https://clinic.example/reservar",
+        appLinkText: "Pide tu cita",
+        extraButtons: [{ label: "Ver tratamientos", url: "https://clinic.example/tratamientos" }]
+      }
+    };
+    const back = Object.fromEntries(buildStoreCardFields(card).backFields.map((f) => [f.key, f]));
+
+    expect(back.book.attributedValue).toContain(">Pide tu cita</a>");
+    expect(back.button1.attributedValue).toContain(">Ver tratamientos</a>");
+    expect(back.button1).not.toHaveProperty("label");
+    expect(JSON.stringify(back)).not.toContain("RESERVAR CITA");
   });
 
   it("renders a brand new member as a short card rather than a wrong one", () => {

@@ -13,9 +13,12 @@ export interface StoreCardFields {
   backFields: PassField[];
 }
 
-const linkField = (key: string, label: string, text: string, url: string): PassField => ({
+/**
+ * A tappable link on the back. No label of its own: the clinic's own wording is the link, and a
+ * second line above it saying the same thing in capitals read as two buttons.
+ */
+const linkField = (key: string, text: string, url: string): PassField => ({
   key,
-  label,
   value: url,
   attributedValue: `<a href='${encodeURI(url)}'>${text}</a>`
 });
@@ -186,18 +189,16 @@ export const buildStoreCardFields = (data: LoyaltyCard): StoreCardFields => {
   // attributed value of a back field as a link.
   if (data.template.appointmentUrl) {
     backFields.push(
-      linkField("book", PASS_LABELS.book, "Reservar cita", data.template.appointmentUrl)
+      linkField("book", data.template.appLinkText ?? "Reservar cita", data.template.appointmentUrl)
     );
   }
 
   (data.template.extraButtons ?? []).forEach((button, index) => {
-    backFields.push(linkField(`button${index + 1}`, button.label, button.label, button.url));
+    backFields.push(linkField(`button${index + 1}`, button.label, button.url));
   });
 
   if (data.template.websiteUrl) {
-    backFields.push(
-      linkField("website", PASS_LABELS.website, "Visitar la web", data.template.websiteUrl)
-    );
+    backFields.push(linkField("website", "Visitar la web", data.template.websiteUrl));
   }
 
   // The clinic's latest message. Apple has no free-form push, so the message rides in a field
