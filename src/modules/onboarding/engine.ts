@@ -167,6 +167,20 @@ export const estimate = (items: ClassifiedItem[], ans: Answers): Estimates | { e
 /* ------------------------------------------------------------------- step 3: ladder */
 
 /**
+ * How a stretch's budget splits across its rewards, as weights that add up to the number of
+ * rewards so the stretch always spends exactly its budget. The objective's weights are written
+ * for three rewards; two keep the first and last, so the spread between the smallest and the
+ * largest is the same.
+ */
+const rewardWeights = (pos: number[], count: number): number[] => {
+  if (count === pos.length) return pos;
+
+  if (count === 2) return [pos[0], pos[pos.length - 1]];
+
+  throw new Error(`No reward weights for ${count} rewards`);
+};
+
+/**
  * Lay out the four tier-to-tier segments and the milestones inside them.
  *
  * Segment lengths grow geometrically so each tier costs meaningfully more than the last;
@@ -241,10 +255,11 @@ export const buildLadder = (est: Estimates, ans: Answers, useFloor: boolean): La
   }
 
   const ms: Milestone[] = [];
-  const NP = P.premiosPerTramo;
   const counts: number[] = [];
 
   for (const t of tramos) {
+    const NP = t.i === 1 ? P.premiosFirstTramo : P.premiosPerTramo;
+    const weights = rewardWeights(obj.pos, NP);
     // Real visits, not progress euros: a Diamante euro is worth 1.3 progress euros, so a
     // high tier reaches its threshold in fewer actual visits.
     const realVisits = (t.gap * est.visits) / TIER_BENEFITS[TIERS[t.i - 1]].mult;
@@ -267,7 +282,7 @@ export const buildLadder = (est: Estimates, ans: Answers, useFloor: boolean): La
       const th = roundTo(A * (t.start + (t.gap * j) / (tot + 1)), P.round);
 
       if (rewardPos.has(j)) {
-        const cb = (t.budget / NP) * obj.pos[jp];
+        const cb = (t.budget / NP) * weights[jp];
         jp += 1;
         ms.push({
           n: ms.length + 1,

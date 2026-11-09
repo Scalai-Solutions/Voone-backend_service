@@ -1,5 +1,19 @@
 import { createRequire } from "node:module";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// The reference engine is the partners' original. The port has since been tuned on purpose (a
+// Plata five visits in, two rewards before it, a gentler growth after it), so this suite runs the
+// port with the reference's own settings to keep proving that the algorithm, as opposed to its
+// tuning, is the same. The tuned settings are covered by tuning.test.ts.
+vi.mock("../../src/modules/onboarding/engine.config", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/modules/onboarding/engine.config")>();
+
+  return {
+    ...actual,
+    P: { ...actual.P, premiosFirstTramo: 3, minGrowth: 1.5, visitsSilver: 3 }
+  };
+});
 
 import { run } from "../../src/modules/onboarding/engine";
 import type {

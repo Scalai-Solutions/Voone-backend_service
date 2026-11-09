@@ -2,6 +2,13 @@ import { PointsTransactionKind, PrismaClient, type Clinic } from "@prisma/client
 import express, { type Express } from "express";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+// Settings of the original programme: this suite is not about the tuned ladder (tuning.test.ts is).
+vi.mock("../../src/modules/onboarding/engine.config", async (importOriginal) => {
+  const { referenceTuningMock } = await import("./reference-tuning");
+
+  return referenceTuningMock(importOriginal as never);
+});
+
 import { errorHandler } from "../../src/common/middleware/error-handler";
 import { PrismaCatalogRepository } from "../../src/modules/onboarding/catalog.repository";
 import type { CatalogItem, Program } from "../../src/modules/onboarding/engine.types";

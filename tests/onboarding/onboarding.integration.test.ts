@@ -239,7 +239,7 @@ describe("generating and publishing a programme", () => {
     const draft = await service.createDraft(clinic.id, ANSWERS);
 
     expect(draft.engineVersion).toBe("1.2.0");
-    expect(draft.configVersion).toBe("2026-10-07.1");
+    expect(draft.configVersion).toBe("2026-11-09.1");
   });
 
   it("passes the engine's own refusal through to the centre", async () => {

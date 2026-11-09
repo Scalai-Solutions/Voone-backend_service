@@ -15,12 +15,14 @@ import type {
  * programme stores CONFIG_VERSION, so a programme can always be regenerated exactly as it
  * was first produced — changing a value here must never silently alter a published one.
  *
- * Values are the reference engine's CFG, v1.2.0, unchanged. Do not "tidy" them: the
- * partners validated these against a spreadsheet, and the differential test compares this
- * port against the reference across the whole answer space.
+ * Values are the reference engine's CFG, v1.2.0, except the three marked in P (`visitsSilver`,
+ * `minGrowth`, `premiosFirstTramo`), tuned on 2026-11-09 so a member is not rewarded out of the
+ * first stretch within three visits. Do not "tidy" the rest: the partners validated these
+ * against a spreadsheet, and the differential test compares this port, run with the original
+ * three settings (reference-tuning.ts), against the reference across the whole answer space.
  */
 export const ENGINE_VERSION = "1.2.0";
-export const CONFIG_VERSION = "2026-10-07.1";
+export const CONFIG_VERSION = "2026-11-09.1";
 
 export interface CategoryConfig {
   name: string;
@@ -441,6 +443,13 @@ export const TIER_BENEFITS: Record<TierCode, TierBenefit> = {
  */
 export const P = {
   premiosPerTramo: 3,
+  /**
+   * Rewards in the first stretch, up to Plata. Two rather than three: with Plata about five
+   * visits away, three rewards and their perks landed one after another and the member was
+   * rewarded out of the first stretch before it had begun. The same budget buys two better
+   * ones, spaced about a visit apart. The later stretches keep `premiosPerTramo`.
+   */
+  premiosFirstTramo: 2,
   /** A client should never go more than this many visits without something happening. */
   maxVisitsBetween: 1.5,
   discountMaxProducts: 3,
@@ -467,8 +476,14 @@ export const P = {
   years: 5,
   maxYears: 6,
   minVisitsSilver: 2,
-  minGrowth: 1.5,
-  visitsSilver: 3,
+  /**
+   * How much dearer each level must be than the one before. Plata sits about five visits in,
+   * so the stretches after it grow gently (about ×1.17 for a typical centre) and Diamante
+   * still lands near five years; at ×1.5 a Plata that far out would push Diamante past the
+   * six-year ceiling.
+   */
+  minGrowth: 1.15,
+  visitsSilver: 5,
   /** After Diamante, one reward repeats every 0.75 × annual spend. */
   loopA: 0.75,
   beam: 400,
