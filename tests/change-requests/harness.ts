@@ -42,7 +42,7 @@ export const ticketBody = (over: Record<string, unknown> = {}) => ({
  * in parallel on one database; the hooks it registers create the two clinics and wipe their
  * tickets around every test.
  */
-export const useRouteHarness = (prefix: string) => {
+export const useRouteHarness = (prefix: string, options: { autoApprove?: boolean } = {}) => {
   const slugA = `${prefix}-a`;
   const slugB = `${prefix}-b`;
   const slugs = [slugA, slugB];
@@ -51,7 +51,8 @@ export const useRouteHarness = (prefix: string) => {
   const onboarding = new OnboardingService(db, catalogRepository);
   const service = new ChangeRequestService(new PrismaChangeRequestRepository(db), {
     changes: new PrismaCatalogueChanges(db),
-    programs: new PrismaProgramDrafts(db, onboarding)
+    programs: new PrismaProgramDrafts(db, onboarding),
+    ...(options.autoApprove ? { autoApprove: true } : {})
   });
   const app = express();
 

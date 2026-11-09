@@ -40,11 +40,18 @@ export interface ImpactOptions {
   db?: PrismaClient;
   /** True once the change is (about to be) made: the wording changes from "will" to "changed". */
   applied?: boolean;
+  /** The admin reads English; the centre, told about its own change, reads Spanish. */
+  language?: "en" | "es";
 }
 
 export interface ApplyChangeOptions {
   /** For a SERVICE_ADD whose ticket has no category: where to file it. */
   categoryId?: string;
+  /**
+   * Let the catalogue's own refusals (Spanish, with their own status) through as they are, instead
+   * of wrapping them in the admin's English conflict. For the centre making its own change.
+   */
+  plainErrors?: boolean;
 }
 
 export interface CatalogueChanges {
@@ -67,6 +74,17 @@ export interface CatalogueChanges {
 }
 
 export const APPLICABLE_TYPES: ReadonlySet<string> = new Set([
+  "SERVICE_ADD",
+  "SERVICE_EDIT",
+  "SERVICE_REMOVE",
+  "BONO"
+]);
+
+/**
+ * The tickets a centre's own change files and applies in the same moment, with nobody at Voone in
+ * between: treatments and bono plans. Rewards, levels and anything else still wait for Voone.
+ */
+export const AUTO_APPROVED_TYPES: ReadonlySet<string> = new Set([
   "SERVICE_ADD",
   "SERVICE_EDIT",
   "SERVICE_REMOVE",
@@ -160,6 +178,8 @@ export class PrismaCatalogueChanges implements CatalogueChanges {
           throw refused(`Requests of type ${ticket.type} cannot be applied automatically.`);
       }
     } catch (error) {
+      if (options.plainErrors) throw error;
+
       return asRefusal(error);
     }
   }
@@ -180,10 +200,13 @@ export class PrismaCatalogueChanges implements CatalogueChanges {
 
       if (!program) return null;
 
+      const spanish = options.language === "es";
       const warnings = [
-        applied
-          ? `The catalogue changed since the active programme (v${program.version}) was built: consider recalibrating.`
-          : `Applying this will change the catalogue compared with the active programme (v${program.version}): consider recalibrating.`
+        spanish
+          ? `El catálogo ha cambiado desde que se creó el programa activo (v${program.version}): conviene recalibrarlo.`
+          : applied
+            ? `The catalogue changed since the active programme (v${program.version}) was built: consider recalibrating.`
+            : `Applying this will change the catalogue compared with the active programme (v${program.version}): consider recalibrating.`
       ];
       const treatmentId = str(fieldsOf(ticket.targetRef).treatmentId);
 
@@ -193,7 +216,7 @@ export class PrismaCatalogueChanges implements CatalogueChanges {
           select: { externalId: true }
         });
 
-        if (row) warnings.push(...rewardsUsing(program.output, row.externalId));
+        if (row) warnings.push(...rewardsUsing(program.output, row.externalId, options.language));
       }
 
       return warnings;
@@ -338,7 +361,11 @@ export class PrismaCatalogueChanges implements CatalogueChanges {
 }
 
 /** Live rewards whose items include the treatment (by the catalogue row's externalId). */
-export const rewardsUsing = (output: Prisma.JsonValue, externalId: string): string[] => {
+export const rewardsUsing = (
+  output: Prisma.JsonValue,
+  externalId: string,
+  language: "en" | "es" = "en"
+): string[] => {
   const program = fieldsOf(output);
   const uses = (option: unknown): boolean => {
     const items = fieldsOf(option).items;
@@ -360,7 +387,9 @@ export const rewardsUsing = (output: Prisma.JsonValue, externalId: string): stri
 
     if (uses(o)) {
       lines.push(
-        `Milestone ${String(fieldsOf(m).n)} reward "${title(o, label)}" uses this treatment.`
+        language === "es"
+          ? `El premio del hito ${String(fieldsOf(m).n)}, «${title(o, label)}», usa este tratamiento.`
+          : `Milestone ${String(fieldsOf(m).n)} reward "${title(o, label)}" uses this treatment.`
       );
     }
   }
@@ -369,7 +398,9 @@ export const rewardsUsing = (output: Prisma.JsonValue, externalId: string): stri
 
   if (uses(recurring.o)) {
     lines.push(
-      `The recurring reward "${title(recurring.o, recurring.label)}" uses this treatment.`
+      language === "es"
+        ? `El premio recurrente, «${title(recurring.o, recurring.label)}», usa este tratamiento.`
+        : `The recurring reward "${title(recurring.o, recurring.label)}" uses this treatment.`
     );
   }
 
