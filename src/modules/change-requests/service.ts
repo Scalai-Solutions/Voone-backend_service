@@ -12,7 +12,12 @@ import {
   ChangeRequestValidationError,
   ProgrammeNotFoundError
 } from "../../common/errors/change-request.errors";
-import { APPLICABLE_TYPES, type AppliedChange, type CatalogueChanges } from "./catalogue-changes";
+import {
+  APPLICABLE_TYPES,
+  AUTO_APPROVED_TYPES,
+  type AppliedChange,
+  type CatalogueChanges
+} from "./catalogue-changes";
 import type { ProgramDrafts } from "./program-drafts";
 import {
   noopChangeRequestNotifier,
@@ -75,6 +80,8 @@ export interface ChangeRequestRecord {
   resolutionNote: string | null;
   appliedAt: Date | null;
   appliedByEmail: string | null;
+  /** Approved and applied by the system when the centre made the change; see the schema. */
+  autoApproved?: boolean;
   programId: string | null;
   emailSentAt: Date | null;
   lastEmailError: string | null;
@@ -164,6 +171,18 @@ export interface ChangeRequestRepository {
     limit: number,
     dedupeWithinMs: number
   ): Promise<{ record: ChangeRequestRecord; duplicate: boolean } | null>;
+  /**
+   * Files a ticket that is approved and applied in the same moment: `work` makes the change on a
+   * transaction-bound client and says what to note on the ticket, which is then stored already
+   * RESOLVED, applied and marked auto-approved. If `work` throws, nothing is stored and the
+   * change is rolled back. Not counted against the open limit (it is never open), and not
+   * deduplicated: each change is a real one.
+   */
+  createApplied<T>(
+    data: NewChangeRequest,
+    work: (db: PrismaClient) => Promise<{ result: T; note: string }>
+  ): Promise<{ record: ChangeRequestRecord; result: T }>;
+
   countUnresolved(clinicId: string): Promise<number>;
   /** With `clinicId`, only a ticket of that clinic: another clinic's id is simply absent. */
   find(id: string, clinicId?: string): Promise<ChangeRequestDetail | null>;
@@ -224,6 +243,13 @@ export interface OwnerRequestView {
   resolutionNote: string | null;
   /** When a closed ticket stops being reopenable; null if it is not closed or already past. */
   reopenableUntil: string | null;
+  /** The change was applied the moment it was made, with no one at Voone in between. */
+  autoApproved: boolean;
+  /**
+   * What the centre should know about its own change (Spanish), on the answer to making one: for
+   * instance that a live reward uses the treatment. Never stored on the list.
+   */
+  warnings?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -263,6 +289,8 @@ export interface AdminRequestView {
   /** When an admin applied the change; never cleared, even by a reopen. Admin-only. */
   appliedAt: string | null;
   appliedByEmail: string | null;
+  /** Approved and applied by the system when the centre made the change. */
+  autoApproved: boolean;
   programId: string | null;
   emailSentAt: string | null;
   lastEmailError: string | null;
@@ -309,7 +337,7 @@ export interface Page<T> {
 const iso = (date: Date | null): string | null => (date ? date.toISOString() : null);
 
 const reopenableUntil = (record: ChangeRequestRecord, now: Date): string | null => {
-  if (!isClosed(record.status) || !record.resolvedAt) return null;
+  if (record.autoApproved || !isClosed(record.status) || !record.resolvedAt) return null;
 
   const until = record.resolvedAt.getTime() + REOPEN_WINDOW_MS;
 
@@ -329,6 +357,7 @@ const ownerView = (record: ChangeRequestRecord, now: Date): OwnerRequestView => 
   resolvedAt: iso(record.resolvedAt),
   resolutionNote: record.resolutionNote,
   reopenableUntil: reopenableUntil(record, now),
+  autoApproved: Boolean(record.autoApproved),
   createdAt: record.createdAt.toISOString(),
   updatedAt: record.updatedAt.toISOString()
 });
@@ -361,6 +390,7 @@ const adminView = (record: ChangeRequestRecord): AdminRequestView => ({
   resolutionNote: record.resolutionNote,
   appliedAt: iso(record.appliedAt),
   appliedByEmail: record.appliedByEmail,
+  autoApproved: Boolean(record.autoApproved),
   programId: record.programId,
   emailSentAt: iso(record.emailSentAt),
   lastEmailError: record.lastEmailError,
@@ -405,6 +435,12 @@ export interface ChangeRequestServiceOptions {
   changes?: CatalogueChanges;
   /** Starts programme drafts from REWARD and LEVEL tickets. */
   programs?: ProgramDrafts;
+  /**
+   * File and apply a centre's treatment and bono changes in the same moment (see
+   * AUTO_APPROVED_TYPES), recording each as a resolved, auto-approved ticket. Off by default so a
+   * service built without the catalogue behaves as before; the app turns it on.
+   */
+  autoApprove?: boolean;
   /**
    * Where notifications run. By default they are fire-and-forget after the commit: the request
    * never waits for mail. Tests pass `(task) => task` to await them before asserting.
@@ -453,12 +489,16 @@ const alreadyApplied = () =>
     "This request was already applied; applying it again would repeat the change. Resolve or reject it by hand instead."
   );
 const NOTE_REQUIRED_MESSAGE = "A resolution note is required.";
+const AUTO_APPROVED_NOTE = "Aprobada y aplicada automáticamente.";
+const AUTO_APPROVED_CLOSED_MESSAGE =
+  "Este cambio se aplicó automáticamente y no se puede reabrir. Si algo no está bien, haz un nuevo cambio o crea una solicitud.";
 
 export class ChangeRequestService {
   private readonly notifier: ChangeRequestNotifier;
   private readonly now: () => Date;
   private readonly changes?: CatalogueChanges;
   private readonly programs?: ProgramDrafts;
+  private readonly autoApprove: boolean;
   private readonly background: (task: Promise<void>) => void | Promise<void>;
 
   constructor(
@@ -469,6 +509,7 @@ export class ChangeRequestService {
     this.now = options.now ?? (() => new Date());
     this.changes = options.changes;
     this.programs = options.programs;
+    this.autoApprove = options.autoApprove ?? false;
     this.background = options.background ?? (() => {});
   }
 
@@ -480,6 +521,11 @@ export class ChangeRequestService {
     input: ChangeRequestInput
   ): Promise<OwnerRequestView> {
     const now = this.now();
+
+    if (this.autoApprove && this.changes && AUTO_APPROVED_TYPES.has(input.type)) {
+      return this.createApproved(clinicId, actor, input, now, this.changes);
+    }
+
     const created = await this.repo.createWithinLimit(
       {
         clinicId,
@@ -506,6 +552,60 @@ export class ChangeRequestService {
     }
 
     return ownerView(created.record, now);
+  }
+
+  /**
+   * A treatment or bono change by the centre itself: applied and recorded as one resolved ticket,
+   * in one transaction. A refusal from the catalogue (a bad price, a treatment already gone)
+   * reaches the centre as it is, in its own words, and nothing is stored. No mail: the ticket is
+   * the record, and Voone sees it in its list marked as automatic.
+   */
+  private async createApproved(
+    clinicId: string,
+    actor: ClinicActor,
+    input: ChangeRequestInput,
+    now: Date,
+    changes: CatalogueChanges
+  ): Promise<OwnerRequestView> {
+    // The shape `apply` and `impact` read, before there is a stored ticket.
+    const draft = {
+      clinicId,
+      type: input.type,
+      targetRef: input.targetRef,
+      proposed: input.proposed,
+      status: "RESOLVED" as const
+    } as unknown as ChangeRequestDetail;
+
+    // Read-only and before the transaction, as in an admin apply: the treatment about to be
+    // removed still exists now, so the rewards that use it are found.
+    const warnings = await changes
+      .impact(draft, { applied: true, language: "es" })
+      .then((found) => found ?? [])
+      .catch(() => []);
+
+    const { record } = await this.repo.createApplied(
+      {
+        clinicId,
+        type: input.type,
+        targetRef: input.targetRef,
+        title: input.title,
+        reason: input.reason,
+        proposed: input.proposed,
+        createdByEmail: actor.email,
+        createdByRole: actor.role,
+        createdAt: now
+      },
+      async (db) => {
+        await changes.apply(db, draft, { plainErrors: true });
+
+        return {
+          result: undefined,
+          note: [AUTO_APPROVED_NOTE, ...warnings].join(" ")
+        };
+      }
+    );
+
+    return { ...ownerView(record, now), warnings };
   }
 
   async listForClinic(clinicId: string, query: ClinicListQuery): Promise<Page<OwnerListItem>> {
@@ -657,6 +757,13 @@ export class ChangeRequestService {
   ): Promise<AdminRequestDetail> {
     const ticket = await this.requireAny(id);
     const previous = ticket.status;
+
+    if (ticket.autoApproved) {
+      throw new ChangeRequestConflictError(
+        "CHANGE_REQUEST_AUTO_APPROVED",
+        "This request was approved and applied automatically, so its status cannot change."
+      );
+    }
 
     if (!ALLOWED_TRANSITIONS[previous].includes(update.status)) {
       throw new ChangeRequestConflictError(
@@ -971,6 +1078,14 @@ export class ChangeRequestService {
   }
 
   private requireInsideWindow(ticket: ChangeRequestRecord, now: Date): void {
+    // Nothing is waiting on Voone in an automatic ticket, so there is nothing to reopen.
+    if (ticket.autoApproved) {
+      throw new ChangeRequestConflictError(
+        "CHANGE_REQUEST_AUTO_APPROVED",
+        AUTO_APPROVED_CLOSED_MESSAGE
+      );
+    }
+
     // A closed ticket always has resolvedAt; without it there is nothing to measure from, so
     // refuse rather than guess.
     if (!ticket.resolvedAt || now.getTime() - ticket.resolvedAt.getTime() > REOPEN_WINDOW_MS) {

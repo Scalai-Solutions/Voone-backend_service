@@ -558,8 +558,8 @@ model ClinicNotificationSettings {
   bonoReminderNotify       Boolean @default(true)
   bonoReminderLastRunMonth String?
 
-  createdAt          DateTime             @default(now())
-  updatedAt          DateTime             @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 /// A clinic's copy and switch for one automated message. Absent rows read as the catalog
@@ -1146,6 +1146,11 @@ model ChangeRequest {
   /// even by a reopen: a second apply would duplicate the change. Admin-only.
   appliedAt      DateTime?
   appliedByEmail String?
+
+  /// True when the ticket was approved and applied by the system at the moment the centre made the
+  /// change (treatments and bono plans), with nobody at Voone in between. Such a ticket is a record,
+  /// stored already resolved and applied; it is never reopened.
+  autoApproved Boolean @default(false)
 
   /// The draft programme created from this ticket, when there is one. Several tickets may
   /// point at one draft; a ticket links at most one.

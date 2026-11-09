@@ -1,8 +1,8 @@
 # change-requests
 
-A centre's tickets to Voone for what the owner cannot edit directly (rewards, levels, the
-service catalogue, bonos). The owner files a request and talks in a thread; Voone answers and
-resolves it by hand. The service takes a `ChangeRequestNotifier` (no-op by default, see `notifier.ts`); production wires
+A centre's tickets to Voone. Rewards, levels and anything else (`OTHER`) the owner cannot edit
+directly: the owner files a request and talks in a thread; Voone answers and resolves it by hand.
+Treatments and bono plans the centre changes itself: see "Automatic approval" below. The service takes a `ChangeRequestNotifier` (no-op by default, see `notifier.ts`); production wires
 `EmailChangeRequestNotifier` (see Email below).
 
 ## Trust
@@ -107,6 +107,27 @@ Owner recipients are all OWNER users of the clinic; with none, the clinic's `bil
 with neither, nothing is sent and `lastEmailError` is `NO_RECIPIENT`. `VOONE_SUPPORT_EMAIL`
 (optional, e.g. `business@voone.ai`): unset skips the Voone-side mails and records
 `VOONE_SUPPORT_EMAIL not set`.
+
+## Automatic approval (treatments and bonos)
+
+`POST /clinics/:slug/change-requests` with a `SERVICE_ADD`, `SERVICE_EDIT`, `SERVICE_REMOVE` or
+`BONO` ticket does not wait for Voone: the change is made and the ticket stored in one
+transaction, already `RESOLVED`, applied and marked `autoApproved` (resolved and applied by the
+person who made the change; note "Aprobada y aplicada automáticamente."). It needs
+`autoApprove: true` on the service, which the app sets; a service built without it keeps the
+ticket `OPEN` as before.
+
+- A refusal from the catalogue (a bad price, a category missing at a centre that uses them, a
+  treatment already gone) reaches the centre in the catalogue's own Spanish words (422 or 404) and
+  nothing is stored.
+- The answer is the ticket plus `warnings` (Spanish): that the catalogue now differs from the
+  active programme, and which of its rewards use a treatment that was removed. They are also
+  appended to the note, so the record keeps them.
+- Not counted against the limit of 20 open tickets, not deduplicated (each change is its own),
+  and no mail goes out: the ticket is the record, shown to Voone as automatic.
+- Such a ticket is never reopened: a reply or reopen from the centre is `409
+CHANGE_REQUEST_AUTO_APPROVED`, and an admin cannot change its status or apply it again.
+- `REWARD`, `LEVEL` and `OTHER` are unchanged.
 
 ## Apply (admin)
 

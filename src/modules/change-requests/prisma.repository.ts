@@ -101,6 +101,46 @@ export class PrismaChangeRequestRepository implements ChangeRequestRepository {
     });
   }
 
+  async createApplied<T>(
+    data: NewChangeRequest,
+    work: (db: PrismaClient) => Promise<{ result: T; note: string }>
+  ): Promise<{ record: ChangeRequestRecord; result: T }> {
+    return this.db.$transaction(
+      async (tx) => {
+        // The same lock a create takes, so a centre's changes (and tickets) queue in turn.
+        await lockClinic(tx, data.clinicId);
+
+        // The treatment and bono services only use model delegates, which a transaction client has.
+        const { result, note } = await work(tx as unknown as PrismaClient);
+
+        const record = await tx.changeRequest.create({
+          data: {
+            clinicId: data.clinicId,
+            type: data.type,
+            targetRef: json(data.targetRef),
+            title: data.title,
+            reason: data.reason,
+            proposed: json(data.proposed),
+            createdByEmail: data.createdByEmail,
+            createdByRole: data.createdByRole,
+            createdAt: data.createdAt,
+            status: "RESOLVED",
+            resolvedAt: data.createdAt,
+            resolvedByEmail: data.createdByEmail,
+            resolutionNote: note,
+            appliedAt: data.createdAt,
+            appliedByEmail: data.createdByEmail,
+            autoApproved: true
+          },
+          include: { clinic: CLINIC }
+        });
+
+        return { record, result };
+      },
+      { timeout: 30_000, maxWait: 15_000 }
+    );
+  }
+
   countUnresolved(clinicId: string): Promise<number> {
     return this.db.changeRequest.count({ where: { clinicId, status: { in: UNRESOLVED } } });
   }

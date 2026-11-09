@@ -281,6 +281,8 @@ v1Router.use(
     service: new ChangeRequestService(new PrismaChangeRequestRepository(prisma), {
       changes: new PrismaCatalogueChanges(prisma),
       programs: new PrismaProgramDrafts(prisma, onboardingService),
+      // A centre's own treatment and bono changes are filed and applied in the same moment.
+      autoApprove: true,
       notifier: new EmailChangeRequestNotifier({
         mailer: new SendGridMailer({
           apiKey: config.SENDGRID_API_KEY,
