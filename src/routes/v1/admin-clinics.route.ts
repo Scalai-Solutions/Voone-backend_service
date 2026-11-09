@@ -92,22 +92,22 @@ export const newPasswordSchema = z
 const passwordSetupSchema = z
   .object({
     password: newPasswordSchema,
-    confirmPassword: z.string().min(1, "Confirm your password")
+    confirmPassword: z.string().min(1, "Confirma tu contraseña")
   })
   .refine((value) => value.password === value.confirmPassword, {
     path: ["confirmPassword"],
-    message: "Passwords do not match"
+    message: "Las contraseñas no coinciden"
   });
 
 const passwordChangeSchema = z
   .object({
-    currentPassword: z.string().min(1, "Current password is required"),
+    currentPassword: z.string().min(1, "Indica tu contraseña actual"),
     newPassword: newPasswordSchema,
-    confirmPassword: z.string().min(1, "Confirm your password")
+    confirmPassword: z.string().min(1, "Confirma tu contraseña")
   })
   .refine((value) => value.newPassword === value.confirmPassword, {
     path: ["confirmPassword"],
-    message: "Passwords do not match"
+    message: "Las contraseñas no coinciden"
   });
 
 /**
@@ -542,7 +542,7 @@ adminClinicsRouter.post(
     const user = await prisma.user.findUnique({ where: { id: userId } });
 
     if (!user || !verifyPassword(parsed.data.currentPassword, user.passwordHash)) {
-      res.status(401).json({ message: "Current password is incorrect" });
+      res.status(401).json({ message: "La contraseña actual no es correcta" });
       return;
     }
 
@@ -658,7 +658,7 @@ adminClinicsRouter.get(
     if (!setupToken) {
       res.status(404).json({
         code: "PASSWORD_SETUP_LINK_INVALID",
-        message: "Password setup link is invalid or expired"
+        message: "Este enlace no es válido o ha caducado. Pide uno nuevo al equipo de Voone."
       });
       return;
     }
@@ -692,7 +692,7 @@ adminClinicsRouter.post(
     if (!setupToken) {
       res.status(404).json({
         code: "PASSWORD_SETUP_LINK_INVALID",
-        message: "Password setup link is invalid or expired"
+        message: "Este enlace no es válido o ha caducado. Pide uno nuevo al equipo de Voone."
       });
       return;
     }
