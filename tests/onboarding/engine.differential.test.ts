@@ -16,7 +16,7 @@ vi.mock("../../src/modules/onboarding/engine.config", async (importOriginal) => 
       premiosFirstTramo: 3,
       minGrowth: 1.5,
       visitsSilver: 3,
-      allowBronceRepeat: false
+      bronceLead: "keep-order" as const
     }
   };
 });

@@ -48,7 +48,7 @@ describe("the tuned defaults", () => {
     expect(P.minGrowth).toBe(1.15);
     expect(P.premiosFirstTramo).toBe(2);
     expect(P.premiosPerTramo).toBe(3);
-    expect(P.allowBronceRepeat).toBe(true);
+    expect(P.bronceLead).toBe("swap-or-repeat");
   });
 });
 
@@ -176,5 +176,31 @@ describe("the best Bronce reward leads, even where a gift then repeats", () => {
         ).toBe(true);
       }
     }
+  });
+
+  it("swaps in an equivalent alternative where it can, so only two combinations still repeat", () => {
+    const swapped: string[] = [];
+    const repeating: string[] = [];
+
+    for (const c of combos) {
+      const p = programFor({ ...BASE, ...c });
+      const key = `${c.objective}/${c.investment}/${c.occupancy}`;
+
+      if (p.adapt.some((note) => note.includes("es una alternativa equivalente")))
+        swapped.push(key);
+      if (p.adapt.some((note) => note.includes("aunque así se repite"))) repeating.push(key);
+    }
+
+    expect(swapped.sort()).toEqual([
+      "mas_gasto/conservador/o4",
+      "mas_visitas/conservador/o4",
+      "mas_visitas/equilibrado/o4"
+    ]);
+    // The only alternatives there cost enough more to push the programme over its cost ceiling,
+    // which raises a blocking review note, so the repeat stands instead.
+    expect(repeating.sort()).toEqual([
+      "equilibrado/conservador/o3",
+      "mas_clientes_nuevos/conservador/o3"
+    ]);
   });
 });

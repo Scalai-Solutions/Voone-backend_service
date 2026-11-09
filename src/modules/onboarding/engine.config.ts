@@ -451,12 +451,16 @@ export const P = {
    */
   premiosFirstTramo: 2,
   /**
-   * With two rewards in Bronce there is one order to try. When the best reward leading would put
-   * a gift next to the same gift in the next stretch, true keeps the best reward first and lets
-   * the repeat stand (the adapt note says so); false keeps the order that avoids the repeat, as
-   * the original programme did.
+   * What to do when the best Bronce reward leading would put a gift next to the same gift in the
+   * next stretch (with two rewards in Bronce there is only one order to try):
+   *  - "keep-order": keep the order that avoids the repeat, so the best reward may not lead (the
+   *    original programme);
+   *  - "swap-or-repeat": best reward first, and the repeat is removed by swapping the second
+   *    Bronce reward for one of its own alternatives; only if none fits does the repeat stand;
+   *  - "repeat": best reward first, and the repeat stands.
+   * Either way of keeping the best first is said in an adapt note.
    */
-  allowBronceRepeat: true,
+  bronceLead: "swap-or-repeat" as "keep-order" | "swap-or-repeat" | "repeat",
   /** A client should never go more than this many visits without something happening. */
   maxVisitsBetween: 1.5,
   discountMaxProducts: 3,

@@ -116,21 +116,69 @@ describe("orderBronce", () => {
         [option(10, "a", "x", "z"), option(20, "b", "y"), option(30, "c", "x", "y")],
         option(40, "d", "y", "z")
       );
-    const original = P.allowBronceRepeat;
+    const original = P.bronceLead;
+    const setLead = (mode: typeof P.bronceLead) => {
+      (P as { bronceLead: typeof P.bronceLead }).bronceLead = mode;
+    };
 
-    afterEach(() => {
-      (P as { allowBronceRepeat: boolean }).allowBronceRepeat = original;
+    afterEach(() => setLead(original));
+
+    // Two rewards in Bronce, as in production: a and c share x, so c leading puts them side by side,
+    // and there is no other order to try. a has alternatives; c leads.
+    const clash = () => ladder([option(10, "a", "x"), option(30, "c", "x")], option(40, "d"));
+
+    it("swaps a Bronce reward for one of its alternatives that repeats nothing", () => {
+      const chosen = clash();
+      const fresh = option(25, "e");
+
+      chosen[0].alts = [fresh];
+
+      expect(orderBronce(chosen)).toBe("best-first-swapped");
+      expect(idsOf(chosen)).toEqual(["c+x", "e", "d"]);
+      // The reward that was swapped out is offered back as an alternative.
+      expect(chosen[1].alts.map((o) => o.items[0].id)).toEqual(["a"]);
     });
 
-    it("puts the best reward first and lets the gift repeat, as the centre chose", () => {
+    it("prefers the alternative that costs no more, then the most valuable", () => {
+      const chosen = clash();
+      const dear = option(28, "e"); // costs 14, more than a's 5
+      const cheap = option(14, "f"); // costs 7, still more
+      const cheaper = option(6, "g"); // costs 3, less
+
+      chosen[0].alts = [dear, cheap, cheaper];
+
+      expect(orderBronce(chosen)).toBe("best-first-swapped");
+      expect(chosen[1].o).toBe(cheaper);
+    });
+
+    it("never swaps in an alternative better than the reward that leads", () => {
+      const chosen = clash();
+
+      chosen[0].alts = [option(35, "e")];
+
+      expect(orderBronce(chosen)).toBe("best-first-with-repeat");
+      expect(chosen[0].o.items[0].id).toBe("c");
+    });
+
+    it("lets the gift repeat when no alternative avoids it, as the centre chose", () => {
       const chosen = colliding();
 
       expect(orderBronce(chosen)).toBe("best-first-with-repeat");
       expect(chosen[0].o.items[0].id).toBe("c");
     });
 
-    it("keeps the beam's order, as the original programme did, when repeats are not allowed", () => {
-      (P as { allowBronceRepeat: boolean }).allowBronceRepeat = false;
+    it("lets the gift repeat straight away when the setting is repeat", () => {
+      setLead("repeat");
+
+      const chosen = colliding();
+
+      chosen[1].alts = [option(25, "e")];
+
+      expect(orderBronce(chosen)).toBe("best-first-with-repeat");
+    });
+
+    it("keeps the beam's order, as the original programme did, on keep-order", () => {
+      setLead("keep-order");
 
       const chosen = colliding();
       const before = idsOf(chosen);
