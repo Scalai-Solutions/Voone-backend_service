@@ -30,7 +30,7 @@ import type {
   NotificationSettingsPatch,
   SegmentNotificationInput
 } from "./notifications.schema";
-import { AutomationSettingsService } from "./automations/automation-settings.service";
+import { AutomationSettingsService, NEW_CLINIC_SETTINGS } from "./automations/automation-settings.service";
 import { AutomationDispatchService } from "./automations/dispatch.service";
 import { TierUpgradeNotifier, tierMessageKey } from "./automations/tier-upgrade";
 import { objectHasUsers } from "../../wallet/providers/google/objectService";
@@ -1274,7 +1274,7 @@ export class NotificationService {
   private async settingsFor(clinicId: string) {
     return this.prisma.clinicNotificationSettings.upsert({
       where: { clinicId },
-      create: { clinicId },
+      create: { clinicId, ...NEW_CLINIC_SETTINGS },
       update: {}
     });
   }

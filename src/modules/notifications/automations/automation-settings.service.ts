@@ -2,6 +2,7 @@ import {
   AutomationEvent,
   type ClinicAutomation,
   type ClinicNotificationSettings,
+  ClinicNotifyOnCredit,
   type PrismaClient
 } from "@prisma/client";
 
@@ -9,6 +10,12 @@ import { NotificationValidationError } from "../notification.errors";
 import type { NotificationSettingsPatch } from "../notifications.schema";
 import { unknownVariables } from "../template";
 import { AUTOMATION_CATALOG, automationDefinition } from "./catalog";
+
+/**
+ * What a new clinic starts with. In code, not the column default, so changing it needs no
+ * migration; the schema's @default only covers rows created outside these services.
+ */
+export const NEW_CLINIC_SETTINGS = { notifyOnCredit: ClinicNotifyOnCredit.ALWAYS };
 
 export interface AutomationSetting {
   enabled: boolean;
@@ -137,7 +144,7 @@ export class AutomationSettingsService {
     await this.prisma.$transaction([
       this.prisma.clinicNotificationSettings.upsert({
         where: { clinicId },
-        create: { clinicId, ...stripUndefined(clinicFields) },
+        create: { clinicId, ...NEW_CLINIC_SETTINGS, ...stripUndefined(clinicFields) },
         update: stripUndefined(clinicFields)
       }),
       ...Object.keys(automations ?? {}).map((event) => {
@@ -157,7 +164,7 @@ export class AutomationSettingsService {
   private settingsRow(clinicId: string) {
     return this.prisma.clinicNotificationSettings.upsert({
       where: { clinicId },
-      create: { clinicId },
+      create: { clinicId, ...NEW_CLINIC_SETTINGS },
       update: {}
     });
   }
