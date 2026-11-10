@@ -56,6 +56,11 @@ export interface CatalogItem {
   costPct?: number | null;
   /** The price is a guess, so the row is excluded from ticket estimation. */
   estimated?: boolean;
+  /**
+   * The centre's "Prize (Y/N)" answer: true for Y, false for N, absent when it never said. Once any
+   * row of a catalogue has an answer, only the rows marked Y can be a prize.
+   */
+  prize?: boolean;
   /** Where an existing classification came from. Set by classify. */
   src?: string;
 }
@@ -66,6 +71,11 @@ export interface ClassifiedItem extends CatalogItem {
   src: string;
   /** Nothing matched, so the centre must choose. Blocks approval. */
   review?: boolean;
+  /**
+   * Set by `classify` when the catalogue carries prize answers and this row is not marked Y. Such a
+   * row is never a prize: not a milestone reward, a tier gift, a perk's item, nor a hand pick.
+   */
+  prizeOff?: boolean;
 }
 
 /**

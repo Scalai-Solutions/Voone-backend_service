@@ -14,7 +14,7 @@ import {
   visibleLineCount,
   type BenefitOverrideEntry
 } from "./benefit-lines";
-import { toEngineCatalog, type CatalogRepository } from "./catalog.repository";
+import { prizeSignature, toEngineCatalog, type CatalogRepository } from "./catalog.repository";
 import { blockingReview, run } from "./engine";
 import {
   ANSWER_LIMITS,
@@ -24,7 +24,7 @@ import {
   TICKET_BUCKETS
 } from "./engine.config";
 import { classify, estimate } from "./engine";
-import type { Answers, EngineError, Program, TierCode } from "./engine.types";
+import type { Answers, CatalogItem, EngineError, Program, TierCode } from "./engine.types";
 import { isEngineError } from "./engine.types";
 import { placeMembersOnProgram } from "./runtime/placement";
 import { recalibrationAdvice, type RecalibrationAdvice } from "./runtime/rules";
@@ -204,6 +204,42 @@ export class OnboardingService {
     if (isEngineError(result)) throw new OnboardingError((result as EngineError).error);
 
     return result as Program;
+  }
+
+  /**
+   * Whether the clinic marks prizes in its catalogue, and whether its live programme was built
+   * with other answers than the catalogue holds now. A live programme is never changed by a
+   * catalogue edit; this only says "it is worth regenerating" so the admin can do it on purpose.
+   */
+  async prizeStatus(clinicId: string): Promise<{ usesPrize: boolean; liveOutdated: boolean }> {
+    const current = toEngineCatalog(await this.catalog.listForClinic(clinicId));
+    const live = await this.active(clinicId);
+
+    return {
+      usesPrize: current.some((item) => item.prize !== undefined),
+      liveOutdated:
+        live !== null &&
+        prizeSignature(current) !==
+          prizeSignature((live.catalogSnapshot ?? []) as unknown as CatalogItem[])
+    };
+  }
+
+  /**
+   * A new draft from the live programme's own answers and today's catalogue, so a change to the
+   * Prize (Y/N) answers reaches the programme without the admin re-typing six answers. Only a
+   * draft: nothing members see changes until the admin publishes it.
+   */
+  async redraftFromLive(clinicId: string): Promise<OnboardingProgram> {
+    const live = await this.active(clinicId);
+
+    if (!live) {
+      throw new OnboardingError(
+        "El centro todavía no tiene un programa activo del que partir. Genera un borrador con las respuestas.",
+        409
+      );
+    }
+
+    return this.createDraft(clinicId, live.answers as unknown as Answers);
   }
 
   /** The clinic's current draft, or null when it has none. */

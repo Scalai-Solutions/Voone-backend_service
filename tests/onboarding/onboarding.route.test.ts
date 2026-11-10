@@ -252,7 +252,8 @@ describe("the catalogue", () => {
         "name",
         "needsReview",
         "position",
-        "priceEuro"
+        "priceEuro",
+        "prize"
       ].sort()
     );
   });

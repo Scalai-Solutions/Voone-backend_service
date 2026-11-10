@@ -164,6 +164,8 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
         categoryId: row.categoryId,
         costPctOverride: row.costPctOverride,
         estimated: row.estimated,
+        // The centre's Y/N answer; null when it never gave one.
+        prize: row.prizeEligible,
         position: row.position,
         category: c?.cat ?? null,
         classifiedBy: c?.src ?? null,
@@ -277,6 +279,20 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
       const clinicId = await clinicOr404(req.params.clinicId);
       const answers = parse(answersSchema, req.body);
       const draft = await deps.onboarding.createDraft(clinicId, answers);
+
+      res.status(201).json(forAdmin(draft));
+    })
+  );
+
+  /**
+   * A new draft from the live programme's answers and today's catalogue: how a change to the
+   * Prize (Y/N) answers reaches a clinic that is already live. Only a draft; publishing is separate.
+   */
+  router.post(
+    "/admin/clinics/:clinicId/onboarding/programs/redraft",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const draft = await deps.onboarding.redraftFromLive(await clinicOr404(req.params.clinicId));
 
       res.status(201).json(forAdmin(draft));
     })
@@ -477,6 +493,15 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
       const edits = parse(textsSchema, req.body);
 
       res.json(forAdmin(await deps.onboarding.setTexts(clinicId, req.params.programId, edits)));
+    })
+  );
+
+  /** Whether the clinic marks prizes, and whether its live programme predates the current answers. */
+  router.get(
+    "/admin/clinics/:clinicId/onboarding/prize-status",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      res.json(await deps.onboarding.prizeStatus(await clinicOr404(req.params.clinicId)));
     })
   );
 
