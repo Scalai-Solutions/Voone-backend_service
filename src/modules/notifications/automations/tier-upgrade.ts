@@ -53,6 +53,15 @@ export const tierBenefitsSummary = async (
   return clip(rewardText?.trim() || FALLBACK_SUMMARY);
 };
 
+/**
+ * A member's first tier (the one they sign up in, Bronce) is a welcome, not a promotion: there is
+ * nothing to congratulate them on yet.
+ */
+export const TIER_WELCOME_COPY = {
+  header: "¡Te damos la bienvenida a {clinic_name}! ✨",
+  body: "¡Hola {first_name}! Ya formas parte de nuestro programa de fidelidad. Empiezas en el nivel {new_tier} con ventajas como: {benefits_summary}. ¡Gracias por confiar en nosotros!"
+};
+
 /** One congratulation per member per tier, however many times the job retries. */
 export const tierMessageKey = (memberId: string, tier: string): string =>
   `tier:${memberId}:${tier}`;
@@ -64,7 +73,7 @@ export class TierUpgradeNotifier {
     private readonly sender: AutomationDispatchService
   ) {}
 
-  async notify(input: { memberId: string; clinicId: string; newTier: string }) {
+  async notify(input: { memberId: string; clinicId: string; newTier: string; welcome?: boolean }) {
     return this.sender.dispatch({
       clinicId: input.clinicId,
       event: "TIER_UPGRADE",
@@ -78,7 +87,8 @@ export class TierUpgradeNotifier {
           }
         }
       ],
-      meta: { tier: input.newTier }
+      meta: { tier: input.newTier, ...(input.welcome ? { welcome: true } : {}) },
+      copy: input.welcome ? TIER_WELCOME_COPY : undefined
     });
   }
 }

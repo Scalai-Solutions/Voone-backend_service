@@ -2,6 +2,7 @@ import { WalletProviderType } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import { AutomationDispatchService } from "../../../src/modules/notifications/automations/dispatch.service";
+import { TIER_WELCOME_COPY } from "../../../src/modules/notifications/automations/tier-upgrade";
 
 interface Setup {
   settings?: Record<string, unknown> | null;
@@ -166,6 +167,24 @@ describe("AutomationDispatchService", () => {
 
     expect(created[0].header).toBe("¡Enhorabuena! Has subido al nivel Oro 🏆");
     expect(created[0].body).toContain("como: descuentos.");
+  });
+
+  it("sends a welcome, not a congratulation, for the tier a member starts in", async () => {
+    const { service, created } = build({ members: [lucia] });
+
+    await service.dispatch({
+      clinicId: "c1",
+      event: "TIER_UPGRADE",
+      idempotencyKey: "tier:m1:Bronce",
+      recipients: [
+        { memberId: "m1", values: { new_tier: "Bronce", benefits_summary: "descuentos" } }
+      ],
+      copy: TIER_WELCOME_COPY
+    });
+
+    expect(created[0].header).toContain("bienvenida");
+    expect(created[0].header).not.toContain("Enhorabuena");
+    expect(created[0].body).toContain("nivel Bronce");
   });
 
   it("re-queues leftover deliveries even when there are no new recipients", async () => {

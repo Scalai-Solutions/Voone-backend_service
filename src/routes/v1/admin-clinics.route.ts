@@ -12,7 +12,10 @@ import { asyncHandler } from "../../common/middleware/async-handler";
 import { createRequireStaffKey } from "../../common/middleware/staff-key";
 import { config } from "../../config/env";
 import { prisma } from "../../infrastructure/database/prisma-client";
-import { provisionClinicSchema } from "../../modules/clinics/clinic-provisioning.schema";
+import {
+  CONTACT_PHONE_PATTERN,
+  provisionClinicSchema
+} from "../../modules/clinics/clinic-provisioning.schema";
 import {
   createPasswordSetupLink,
   hashPassword,
@@ -92,22 +95,22 @@ export const newPasswordSchema = z
 const passwordSetupSchema = z
   .object({
     password: newPasswordSchema,
-    confirmPassword: z.string().min(1, "Confirm your password")
+    confirmPassword: z.string().min(1, "Confirma tu contraseña")
   })
   .refine((value) => value.password === value.confirmPassword, {
     path: ["confirmPassword"],
-    message: "Passwords do not match"
+    message: "Las contraseñas no coinciden"
   });
 
 const passwordChangeSchema = z
   .object({
-    currentPassword: z.string().min(1, "Current password is required"),
+    currentPassword: z.string().min(1, "Indica tu contraseña actual"),
     newPassword: newPasswordSchema,
-    confirmPassword: z.string().min(1, "Confirm your password")
+    confirmPassword: z.string().min(1, "Confirma tu contraseña")
   })
   .refine((value) => value.newPassword === value.confirmPassword, {
     path: ["confirmPassword"],
-    message: "Passwords do not match"
+    message: "Las contraseñas no coinciden"
   });
 
 /**
@@ -135,7 +138,16 @@ const clinicDetailsSchema = z.object({
     .union([z.literal(""), z.string().trim().email("El email de facturación no es válido.")])
     .optional(),
   billingAddressLine: z.string().optional(),
-  billingPostalCode: z.string().optional()
+  billingPostalCode: z.string().optional(),
+  contactPhone: z
+    .union([
+      z.literal(""),
+      z.string().trim().regex(CONTACT_PHONE_PATTERN, "El teléfono del centro no es válido.")
+    ])
+    .optional(),
+  contactEmail: z
+    .union([z.literal(""), z.string().trim().email("El email del centro no es válido.")])
+    .optional()
 });
 
 /** A billing field's new value: `undefined` leaves it untouched, an empty string clears it to null. */
@@ -208,6 +220,8 @@ const toAdminClinicSummary = (clinic: AdminClinicSummaryInput) => ({
   billingEmail: clinic.billingEmail ?? null,
   billingAddressLine: clinic.billingAddressLine ?? null,
   billingPostalCode: clinic.billingPostalCode ?? null,
+  contactPhone: clinic.contactPhone ?? null,
+  contactEmail: clinic.contactEmail ?? null,
   notificationsMonthlyQuota: clinic.notificationsMonthlyQuota,
   notificationsUsedThisMonth: clinic.notificationsUsedThisMonth,
   notificationsRemainingThisMonth: Math.max(
@@ -542,7 +556,7 @@ adminClinicsRouter.post(
     const user = await prisma.user.findUnique({ where: { id: userId } });
 
     if (!user || !verifyPassword(parsed.data.currentPassword, user.passwordHash)) {
-      res.status(401).json({ message: "Current password is incorrect" });
+      res.status(401).json({ message: "La contraseña actual no es correcta" });
       return;
     }
 
@@ -658,7 +672,7 @@ adminClinicsRouter.get(
     if (!setupToken) {
       res.status(404).json({
         code: "PASSWORD_SETUP_LINK_INVALID",
-        message: "Password setup link is invalid or expired"
+        message: "Este enlace no es válido o ha caducado. Pide uno nuevo al equipo de Voone."
       });
       return;
     }
@@ -692,7 +706,7 @@ adminClinicsRouter.post(
     if (!setupToken) {
       res.status(404).json({
         code: "PASSWORD_SETUP_LINK_INVALID",
-        message: "Password setup link is invalid or expired"
+        message: "Este enlace no es válido o ha caducado. Pide uno nuevo al equipo de Voone."
       });
       return;
     }
@@ -804,6 +818,8 @@ adminClinicsRouter.patch(
     const billingEmail = billingPatch(details.data.billingEmail);
     const billingAddressLine = billingPatch(details.data.billingAddressLine);
     const billingPostalCode = billingPatch(details.data.billingPostalCode);
+    const contactPhone = billingPatch(details.data.contactPhone);
+    const contactEmail = billingPatch(details.data.contactEmail);
 
     await prisma.clinic.update({
       where: { id: clinic.id },
@@ -819,14 +835,21 @@ adminClinicsRouter.patch(
         ...(billingTaxId !== undefined ? { billingTaxId } : {}),
         ...(billingEmail !== undefined ? { billingEmail } : {}),
         ...(billingAddressLine !== undefined ? { billingAddressLine } : {}),
-        ...(billingPostalCode !== undefined ? { billingPostalCode } : {})
+        ...(billingPostalCode !== undefined ? { billingPostalCode } : {}),
+        ...(contactPhone !== undefined ? { contactPhone } : {}),
+        ...(contactEmail !== undefined ? { contactEmail } : {})
       }
     });
 
     // The clinic's name is on every card (Google's issuer, Apple's organization and description),
     // so a rename has to reach the cards members already hold, like a design change does. Not
     // awaited: a clinic with thousands of members must not hold the save.
-    if (details.data.name !== undefined && details.data.name !== clinic.name) {
+    // The contact buttons are on every card too.
+    if (
+      (details.data.name !== undefined && details.data.name !== clinic.name) ||
+      (contactPhone !== undefined && contactPhone !== clinic.contactPhone) ||
+      (contactEmail !== undefined && contactEmail !== clinic.contactEmail)
+    ) {
       void refreshClinicCards(clinic.id).catch(() => undefined);
     }
 

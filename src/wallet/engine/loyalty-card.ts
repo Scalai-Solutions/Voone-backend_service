@@ -50,7 +50,11 @@ export const cardTemplateSchema = z.object({
   appointmentUrl: z.string().url().max(2048).optional(),
   appLinkText: z.string().min(1).max(30).optional(),
   appLinkDescription: z.string().min(1).max(120).optional(),
-  extraButtons: z.array(cardButtonSchema).max(CARD_EXTRA_BUTTONS_MAX).optional(),
+  // The clinic's own buttons plus its two contact ones (call, email).
+  extraButtons: z
+    .array(cardButtonSchema)
+    .max(CARD_EXTRA_BUTTONS_MAX + 2)
+    .optional(),
   pointsLabel: z.string().min(1).max(32),
   tierLabel: z.string().min(1).max(32),
   benefitsText: z.string().min(1).max(CARD_TEXT_MAX_LENGTH).optional(),
@@ -159,13 +163,12 @@ export const loyaltyCardSchema = z
 
     /**
      * A x2 waiting for the member's next visit, for a clinic on a programme: a double-points perk
-     * (`until` is its stored expiry) or a referred member who has not paid yet (no end date). It
-     * comes from the same decision the visit credit takes, so the card never promises what the
-     * credit will not do. Absent when nothing is waiting.
+     * (`until` is its stored expiry). It comes from the same decision the visit credit takes, so
+     * the card never promises what the credit will not do. Absent when nothing is waiting.
      */
     boost: z
       .object({
-        kind: z.enum(["perk", "referral"]),
+        kind: z.literal("perk"),
         until: z.string().datetime().optional()
       })
       .optional(),

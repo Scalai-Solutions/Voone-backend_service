@@ -91,7 +91,7 @@ export interface RecordVisitInput {
   bonusPoints?: number;
   /**
    * Set by reception when `bonusPoints` is the x2/x3/x5/x10 slider's flat extra rather than a
-   * typed gift. While a x2 applies (a waiting perk or a referred client's first payment) the
+   * typed gift. While a x2 applies (a waiting double-points perk) the
    * visit is already x2 in total, so that extra is ignored: the visit is NOT refused.
    */
   boostMultiplier?: number;
@@ -401,7 +401,7 @@ export class VisitService {
 
         // Behind the same lock, so two sessions recorded at once cannot take the same number.
         const bono = input.kind === "BONO_SESSION" ? await this.resolveBono(tx, input) : null;
-        const { cents, hasTreatment } = this.price(input, bono);
+        const { cents, paidCents, hasTreatment } = this.price(input, bono);
 
         if (discounted > 0) {
           const used = await tx.paidVisit.aggregate({
@@ -438,12 +438,10 @@ export class VisitService {
         const before = Math.max(ledger.lifetime, last?.lifetimeAfter ?? 0);
 
         // The visit is doubled by a waiting double-points perk (the next payment in which money
-        // changes hands, RUNTIME_DECISIONS.doublePointsAppliesTo) or by a referred client's first
-        // payment; see double-points.ts, which the reception lookup shares. x2 in total, never x4.
-        // A package session in between does not use either up, and neither does a payment that
-        // earns no progress (a medicine-only basket): there is nothing to double, so nothing is
-        // spent. When both are present the REFERRAL doubles the visit and the perk is KEPT for
-        // the next one.
+        // changes hands, RUNTIME_DECISIONS.doublePointsAppliesTo); see double-points.ts, which the
+        // reception lookup shares. x2 in total, never x4. A package session in between does not use
+        // it up, and neither does a payment that earns no progress (a medicine-only basket): there
+        // is nothing to double, so nothing is spent. A referred client's first visit is not doubled.
         const double =
           input.kind === "PAYMENT" && earnsProgress(cents)
             ? await pendingDouble(tx, input.memberId, occurredAt)
@@ -466,12 +464,14 @@ export class VisitService {
             source: VisitSource.STAFF_ENTRY,
             // What EARNS progress, not what was paid: the table holds the number the maths used.
             amountCents: cents,
+            paidCents,
             hasTreatment,
             discountedProducts: discounted,
             idempotencyKey: input.idempotencyKey,
             memberBonoId: bono?.id ?? null,
             bonoSessionNumber: bono?.session ?? null,
             bonusProgress: bonusEuros > 0 ? bonusEuros : null,
+            reason: input.kind === "PAYMENT" ? paymentReason(input.lines) : null,
             progressAwarded: progress,
             lifetimeBefore: before,
             lifetimeAfter: before + progress,
@@ -630,14 +630,14 @@ export class VisitService {
     };
   }
 
-  /** What the visit earns, and whether it counts as treatment — or a clear refusal. */
+  /** What the visit earns and what was paid, and whether it counts as treatment — or a clear refusal. */
   private price(
     input: RecordVisitInput,
     bono: ResolvedBono | null
-  ): { cents: number; hasTreatment: boolean } {
+  ): { cents: number; paidCents: number; hasTreatment: boolean } {
     if (input.kind === "BONO_SESSION") {
       // A tracked bono's session is worth exactly what the plan says per session.
-      if (bono) return { cents: bono.cents, hasTreatment: true };
+      if (bono) return { cents: bono.cents, paidCents: bono.cents, hasTreatment: true };
 
       const pack = input.package;
 
@@ -647,7 +647,7 @@ export class VisitService {
 
       const cents = bonoSessionCents(toCents(pack.priceEuro), pack.sessions);
 
-      return { cents, hasTreatment: true };
+      return { cents, paidCents: cents, hasTreatment: true };
     }
 
     const lines = input.lines ?? [];
@@ -670,7 +670,11 @@ export class VisitService {
       }
     }
 
-    return { cents: earningCents(asLines), hasTreatment: includesTreatment(asLines) };
+    return {
+      cents: earningCents(asLines),
+      paidCents: totalCents,
+      hasTreatment: includesTreatment(asLines)
+    };
   }
 
   /**

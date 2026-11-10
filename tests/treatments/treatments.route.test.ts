@@ -16,7 +16,8 @@ const row: TreatmentRow = {
   name: "Limpieza",
   priceEuro: 45,
   points: 450,
-  categoryId: "FAC"
+  categoryId: "FAC",
+  prize: null
 };
 
 const buildApp = () => {

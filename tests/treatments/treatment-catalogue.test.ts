@@ -7,6 +7,7 @@ import {
 } from "../../src/common/errors/treatment.errors";
 import {
   createTreatment,
+  PRIZE_MESSAGE,
   listForEditor,
   listTreatments,
   removeTreatment,
@@ -357,6 +358,7 @@ describe("deleting", () => {
         memberId: member.id,
         kind: VisitKind.PAYMENT,
         amountCents: 8000,
+        paidCents: 8000,
         idempotencyKey: "tr-visit-1",
         occurredAt: new Date("2026-10-01T10:00:00Z")
       }
@@ -529,9 +531,63 @@ describe("what the editor is told", () => {
   it("says which store applies and lists its rows", async () => {
     expect(await listForEditor(db, programme.id)).toEqual({
       usesCatalogue: true,
+      usesPrize: false,
       items: [expect.objectContaining({ id: seedItem.id, name: "Existente", categoryId: "FAC" })]
     });
-    expect(await listForEditor(db, plain.id)).toEqual({ usesCatalogue: false, items: [] });
+    expect(await listForEditor(db, plain.id)).toEqual({
+      usesCatalogue: false,
+      usesPrize: false,
+      items: []
+    });
+  });
+});
+
+describe("the prize answer", () => {
+  it("is refused at a centre that does not mark prizes, so one tick cannot switch the filter on", async () => {
+    expect(
+      await message(
+        createTreatment(db, programme.id, {
+          name: "Nuevo",
+          priceEuro: 10,
+          categoryId: "FAC",
+          prize: true
+        })
+      )
+    ).toBe(PRIZE_MESSAGE);
+    expect(await message(updateTreatment(db, programme.id, seedItem.id, { prize: true }))).toBe(
+      PRIZE_MESSAGE
+    );
+  });
+
+  it("is kept off by default at a centre that marks prizes, and can be set on purpose", async () => {
+    await db.catalogItem.update({ where: { id: seedItem.id }, data: { prizeEligible: true } });
+
+    const added = await createTreatment(db, programme.id, {
+      name: "Sin marcar",
+      priceEuro: 10,
+      categoryId: "FAC"
+    });
+    const chosen = await createTreatment(db, programme.id, {
+      name: "Premio",
+      priceEuro: 10,
+      categoryId: "FAC",
+      prize: true
+    });
+
+    expect(added.prize).toBeNull();
+    expect(chosen.prize).toBe(true);
+    expect((await updateTreatment(db, programme.id, chosen.id, { prize: false })).prize).toBe(
+      false
+    );
+    expect((await listForEditor(db, programme.id)).usesPrize).toBe(true);
+  });
+
+  it("is untouched by an edit that does not mention it", async () => {
+    await db.catalogItem.update({ where: { id: seedItem.id }, data: { prizeEligible: true } });
+
+    const renamed = await updateTreatment(db, programme.id, seedItem.id, { name: "Otro nombre" });
+
+    expect(renamed.prize).toBe(true);
   });
 });
 

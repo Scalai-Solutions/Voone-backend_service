@@ -135,6 +135,18 @@ const HEADER_NAMES = new Set(["nombre", "name", "tratamiento", "servicio", "conc
 const HEADER_PRICES = new Set(["precio", "price", "importe", "tarifa", "pvp"]);
 const HEADER_PRODUCTS = new Set(["producto", "product", "retail", "esproducto"]);
 const HEADER_CATEGORIES = new Set(["categoria", "category", "familia", "grupo"]);
+/** "Prize (Y/N)" and its Spanish forms; what is in brackets is dropped before comparing. */
+const HEADER_PRIZES = new Set(["prize", "premio", "es premio", "regalo", "es regalo"]);
+
+/** The header cell without a trailing "(Y/N)" or "(S/N)" hint, so "Prize (Y/N)" reads as "prize". */
+const bare = (cell: string): string =>
+  plain(cell)
+    .replace(/\s*\([^)]*\)\s*$/, "")
+    .trim();
+
+/** Y/N in the prize column, in English and Spanish. A blank cell is not an answer. */
+const PRIZE_YES = new Set(["y", "yes", "s", "si", "true", "1", "x"]);
+const PRIZE_NO = new Set(["n", "no", "false", "0"]);
 
 /** sí/no in a "producto" column: a spreadsheet marks its retail rows either way. */
 const PRODUCT_YES = new Set(["si", "yes", "true", "1", "x"]);
@@ -146,6 +158,7 @@ interface ColumnMap {
   price: number;
   product?: number;
   category?: number;
+  prize?: number;
 }
 
 /**
@@ -158,9 +171,16 @@ const headerMapOf = (cells: string[]): ColumnMap | null => {
   let price = -1;
   let product = -1;
   let category = -1;
+  let prize = -1;
 
   cells.forEach((cell, position) => {
     const value = plain(cell);
+
+    if (prize < 0 && HEADER_PRIZES.has(bare(cell))) {
+      prize = position;
+
+      return;
+    }
 
     if (name < 0 && HEADER_NAMES.has(value)) name = position;
     else if (price < 0 && HEADER_PRICES.has(value)) price = position;
@@ -174,7 +194,8 @@ const headerMapOf = (cells: string[]): ColumnMap | null => {
     name,
     price,
     ...(product >= 0 ? { product } : {}),
-    ...(category >= 0 ? { category } : {})
+    ...(category >= 0 ? { category } : {}),
+    ...(prize >= 0 ? { prize } : {})
   };
 };
 
@@ -209,6 +230,7 @@ export const parseCatalogCsv = (text: string): CsvImport => {
   const skipped: SkippedRow[] = [];
   const notes: string[] = [];
   const used = new Map<string, number>();
+  let blankPrizes = 0;
 
   // A spreadsheet export often leads with a byte-order mark that would otherwise glue itself
   // to the first column header.
@@ -300,6 +322,29 @@ export const parseCatalogCsv = (text: string): CsvImport => {
       if (read.categoryId) kind.categoryId = read.categoryId;
     }
 
+    // The prize column, when the header has one: Y or N for every row. A blank is read as N, because
+    // once the column exists only the rows marked Y are prizes; anything else is a row to fix.
+    let prize: boolean | undefined;
+
+    if (map?.prize !== undefined) {
+      const answer = plain(cells[map.prize] ?? "");
+
+      if (PRIZE_YES.has(answer)) prize = true;
+      else if (PRIZE_NO.has(answer)) prize = false;
+      else if (answer === "") {
+        prize = false;
+        blankPrizes += 1;
+      } else {
+        skipped.push({
+          line,
+          reason: `La columna de premio tiene que ser Y o N (o Sí / No): ${cells[map.prize].trim()}.`,
+          raw
+        });
+
+        return;
+      }
+    }
+
     if (price.range) {
       notes.push(
         `Línea ${line}: "${name}" tenía un precio con rango (${priceText.trim()}); se ha guardado el punto medio, ${price.value} €.`
@@ -315,9 +360,27 @@ export const parseCatalogCsv = (text: string): CsvImport => {
       externalId: seen === 0 ? base : `${base}-${seen + 1}`,
       name,
       priceEuro: price.value,
-      ...kind
+      ...kind,
+      ...(prize === undefined ? {} : { prize })
     });
   });
+
+  // Said once for the file, not once per row.
+  if (columns !== null && (columns as ColumnMap).prize !== undefined) {
+    const yes = items.filter((item) => item.prize === true).length;
+
+    if (blankPrizes > 0) {
+      notes.push(
+        `${blankPrizes} filas tenían la columna de premio vacía y se han tomado como N: solo las filas con Y pueden ser premio.`
+      );
+    }
+
+    notes.push(
+      yes === 0
+        ? "Ninguna fila está marcada con Y en la columna de premio: el programa no podrá crear premios."
+        : `${yes} filas marcadas como premio (Y).`
+    );
+  }
 
   return { items, skipped, notes };
 };

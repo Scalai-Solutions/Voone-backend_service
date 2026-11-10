@@ -109,6 +109,16 @@ const DETAIL_HISTORY = 50;
 
 type SpendingStats = { moneySpent: number; lastVisitedAt: string | null };
 
+/** A visit that earned no points (medicine), with what was paid so staff see it counted. */
+export const zeroPointVisitLabel = (reason: string | null, paidCents: number): string => {
+  const paid =
+    paidCents > 0
+      ? ` · ${(paidCents / 100).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}`
+      : "";
+
+  return `${reason ?? "Visita de pago"}${paid} (no suma puntos)`;
+};
+
 const splitTreatmentNames = (reason: string | null): string[] =>
   reason
     ? reason
@@ -401,6 +411,13 @@ export class MemberDirectoryService {
         take: historyTake,
         select: { id: true, points: true, kind: true, reason: true, createdAt: true }
       },
+      // A visit that earned nothing (medicine) has no ledger row, so the history reads it here.
+      paidVisits: {
+        where: { progressAwarded: 0 },
+        orderBy: { occurredAt: "desc" as const },
+        take: historyTake,
+        select: { id: true, reason: true, paidCents: true, occurredAt: true }
+      },
       // Programme rewards are redeemed outside the ledger, so the history reads them here.
       rewards: {
         where: { redeemedAt: { not: null } },
@@ -473,6 +490,13 @@ export class MemberDirectoryService {
         detail: unknown;
         redeemedAt: Date | null;
       }>;
+      /** Visits that earned no points; absent where the caller did not select them. */
+      paidVisits?: Array<{
+        id: string;
+        reason: string | null;
+        paidCents: number;
+        occurredAt: Date;
+      }>;
     },
     appleUpdatesRegistered: boolean | null
   ): MemberSummary {
@@ -519,6 +543,12 @@ export class MemberDirectoryService {
           label: row.reason ?? row.kind,
           points: row.points,
           at: row.createdAt
+        })),
+        ...(member.paidVisits ?? []).map((visit) => ({
+          id: visit.id,
+          label: zeroPointVisitLabel(visit.reason, visit.paidCents),
+          points: 0,
+          at: visit.occurredAt
         })),
         // A double-points perk is spent by the next visit, not handed over, so it is not a
         // redemption (the dashboard and the card make the same distinction).
@@ -614,7 +644,7 @@ export class MemberDirectoryService {
     const rows = await this.prisma.paidVisit.groupBy({
       by: ["memberId"],
       where: { clinicId, memberId: { in: memberIds } },
-      _sum: { amountCents: true },
+      _sum: { paidCents: true },
       _max: { occurredAt: true }
     });
 
@@ -622,7 +652,7 @@ export class MemberDirectoryService {
       rows.map((row) => [
         row.memberId,
         {
-          moneySpent: (row._sum.amountCents ?? 0) / 100,
+          moneySpent: (row._sum.paidCents ?? 0) / 100,
           lastVisitedAt: row._max.occurredAt?.toISOString() ?? null
         }
       ])

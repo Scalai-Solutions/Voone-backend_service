@@ -68,21 +68,30 @@ const esNum = (v: number): string => String(v).replace(".", ",");
  * Order matters and is not arbitrary: a category the centre set always wins, because the
  * centre knows its own price list better than a keyword table does.
  */
-export const classify = (items: CatalogItem[]): ClassifiedItem[] =>
-  items.map((it) => {
-    if (it.cat && CATEGORIES[it.cat]) return { ...it, cat: it.cat, src: it.src ?? "centro" };
-    if (it.product) return { ...it, cat: "COS" as CategoryCode, src: "producto" };
+export const classify = (items: CatalogItem[]): ClassifiedItem[] => {
+  // The centre's "Prize (Y/N)" column. As soon as any row answers, the answers decide: a row not
+  // marked Y is never a prize. A catalogue with no answers at all keeps the engine's own rules.
+  const prizeAnswered = items.some((it) => it.prize !== undefined && it.prize !== null);
+
+  return items.map((it) => {
+    const off = prizeAnswered && it.prize !== true ? { prizeOff: true } : {};
+
+    if (it.cat && CATEGORIES[it.cat])
+      return { ...it, ...off, cat: it.cat, src: it.src ?? "centro" };
+    if (it.product) return { ...it, ...off, cat: "COS" as CategoryCode, src: "producto" };
 
     const name = (it.name || "").toLowerCase();
 
     for (const [code, words] of KEYWORDS) {
-      if (words.some((w) => name.includes(w))) return { ...it, cat: code, src: "palabra clave" };
+      if (words.some((w) => name.includes(w)))
+        return { ...it, ...off, cat: code, src: "palabra clave" };
     }
 
     // Parked in DIA so downstream code always has a category, but flagged: DIA earns no
     // points and is never a reward, so an unclassified row cannot quietly become one.
-    return { ...it, cat: "DIA" as CategoryCode, src: "sin clasificar", review: true };
+    return { ...it, ...off, cat: "DIA" as CategoryCode, src: "sin clasificar", review: true };
   });
+};
 
 /* ----------------------------------------------------------------- step 2: estimate */
 
@@ -356,7 +365,7 @@ export const candidates = (items: ClassifiedItem[], ans: Answers): Candidate[] =
   const occ = OCCUPANCY[ans?.occupancy] ?? OCCUPANCY.o2;
 
   return items
-    .filter((i) => CATEGORIES[i.cat]?.reward && i.price > 0)
+    .filter((i) => CATEGORIES[i.cat]?.reward && i.price > 0 && !i.prizeOff)
     .map((i) => toCandidate(i, occ));
 };
 
@@ -368,10 +377,12 @@ export const candidates = (items: ClassifiedItem[], ans: Answers): Candidate[] =
  * such a row in DIA, which is otherwise allowed, so `review` must be checked first); and only
  * then the legal block on medical items.
  */
-export type ManualRefusal = "price" | "category" | "medical";
+export type ManualRefusal = "price" | "prize" | "category" | "medical";
 
 export const manualRefusal = (item: ClassifiedItem): ManualRefusal | null => {
   if (!(item.price > 0)) return "price";
+  // The centre said which rows are prizes, and this is not one of them.
+  if (item.prizeOff) return "prize";
   if (item.review || !CATEGORIES[item.cat]) return "category";
   if (!CATEGORIES[item.cat].manualReward) return "medical";
 
@@ -528,7 +539,7 @@ export const choosePerks = (
 ): { kinds: string[]; pool: Candidate[]; dias: ClassifiedItem[] } => {
   const T = est.ticket;
   const dias = cls
-    .filter((i) => i.cat === "DIA" && !i.review)
+    .filter((i) => i.cat === "DIA" && !i.review && !i.prizeOff)
     .sort((a, b) => (a.id < b.id ? -1 : 1));
   const pool = cands
     .filter(

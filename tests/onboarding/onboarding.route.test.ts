@@ -252,7 +252,8 @@ describe("the catalogue", () => {
         "name",
         "needsReview",
         "position",
-        "priceEuro"
+        "priceEuro",
+        "prize"
       ].sort()
     );
   });
@@ -832,13 +833,14 @@ describe("a centre's own staff", () => {
       data: { clinicId: clinic.id, referrerId: referrer.id, referredId: m.id }
     });
 
+    // A referred client's first visit is not doubled: the reception screen has nothing to announce.
     expect((await call("GET", `${path}/rewards`)).body.doublePoints).toEqual({
-      applies: true,
-      reason: "referral",
+      applies: false,
+      reason: null,
       until: null
     });
 
-    // The slider's flag is accepted, ignored while the double applies, and the visit is not refused.
+    // So the slider's extra counts, as it does for anyone with no double waiting.
     const visit = await call("POST", `${path}/visits`, {
       kind: "PAYMENT",
       lines: [{ amountEuro: 20 }],
@@ -850,11 +852,10 @@ describe("a centre's own staff", () => {
     expect(visit.status).toBe(200);
     expect(visit.body).toMatchObject({
       progress: 40,
-      doubled: true,
-      doubleReason: "referral",
-      bonusPoints: 0
+      doubled: false,
+      doubleReason: null,
+      bonusPoints: 200
     });
-    expect((await call("GET", `${path}/rewards`)).body.doublePoints.applies).toBe(false);
   });
 
   it("rejects a slider multiplier that is not one the slider offers", async () => {

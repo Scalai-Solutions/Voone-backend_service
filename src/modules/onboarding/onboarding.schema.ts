@@ -68,7 +68,8 @@ const catalogItemShape = {
     .max(1, "El coste es un porcentaje entre 0 y 1")
     .nullable()
     .optional(),
-  estimated: z.boolean().optional()
+  estimated: z.boolean().optional(),
+  prize: z.boolean().nullable().optional()
 };
 
 export const catalogItemSchema = z.object(catalogItemShape);

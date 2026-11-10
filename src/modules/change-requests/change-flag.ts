@@ -81,6 +81,7 @@ const KNOWN_REFUSALS = new Map<string, string>([
   ["Esa alternativa no existe.", "That alternative does not exist."],
   ["Ese artículo no está en el catálogo.", "That item is not in the programme's catalogue."],
   [MANUAL_REFUSALS.price, "That item has no price, so it cannot be a reward."],
+  [MANUAL_REFUSALS.prize, "The clinic has not marked that item as a prize in its catalogue."],
   [
     MANUAL_REFUSALS.category,
     "That item needs a category in the catalogue before it can be a reward."

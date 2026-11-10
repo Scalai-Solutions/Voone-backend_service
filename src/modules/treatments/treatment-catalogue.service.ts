@@ -21,6 +21,8 @@ import { POINTS_PER_EURO } from "../onboarding/runtime/points-unit";
  * editor edits, whatever state the centre's programme is in.
  */
 
+export const PRIZE_MESSAGE =
+  "Este centro no marca premios en su catálogo, así que no se puede indicar si un tratamiento es premio.";
 export const PRICE_MESSAGE = "El precio debe estar entre 0,01 € y 100.000 €.";
 export const NAME_MESSAGE = "Escribe el nombre del tratamiento.";
 export const CATEGORY_MESSAGE = "Elige una categoría de la lista.";
@@ -49,6 +51,11 @@ export interface TreatmentRow {
   points: number;
   /** An engine category at a programme centre; always null elsewhere. */
   categoryId: string | null;
+  /**
+   * The centre's Prize (Y/N) answer for the row: true for Y, false for N, null when it never said
+   * (and always null for a plain centre). Only meaningful at a centre that marks prizes at all.
+   */
+  prize: boolean | null;
 }
 
 const price = z
@@ -76,11 +83,17 @@ const category = z
   .transform((value) => value ?? undefined);
 
 /** Owner input. Unknown fields are dropped: the owner never enters a cost. */
-export const createTreatmentSchema = z.object({ name, priceEuro: price, categoryId: category });
+export const createTreatmentSchema = z.object({
+  name,
+  priceEuro: price,
+  categoryId: category,
+  prize: z.boolean().optional()
+});
 export const updateTreatmentSchema = z.object({
   name: name.optional(),
   priceEuro: price.optional(),
-  categoryId: category
+  categoryId: category,
+  prize: z.boolean().optional()
 });
 
 export type CreateTreatmentInput = z.input<typeof createTreatmentSchema>;
@@ -108,12 +121,14 @@ const catalogRow = (item: {
   name: string;
   priceCents: number;
   categoryId: string | null;
+  prizeEligible: boolean | null;
 }): TreatmentRow => ({
   id: item.id,
   name: item.name,
   priceEuro: item.priceCents / 100,
   points: Math.max(1, Math.round(item.priceCents / 10)),
-  categoryId: item.categoryId
+  categoryId: item.categoryId,
+  prize: item.prizeEligible
 });
 
 const plainRow = (item: {
@@ -128,7 +143,8 @@ const plainRow = (item: {
   // Renamed at the boundary: the dashboard calls it `points`, the schema calls it
   // pointsAllotted. Neither has to move for the other.
   points: item.pointsAllotted,
-  categoryId: null
+  categoryId: null,
+  prize: null
 });
 
 const plainPoints = (priceEuro: number): number =>
@@ -145,6 +161,15 @@ const requireWholeEuro = (priceEuro: number): void => {
  * written there too; a live programme with no non-product rows is read from ClinicTreatment,
  * so it is written there.
  */
+/**
+ * Whether this centre marks which rows can be a prize: any catalogue row has a Prize (Y/N) answer.
+ * Only then does the answer mean anything, because only then does the engine filter on it, so a
+ * centre that never uses the column cannot switch the filter on for the whole catalogue by
+ * marking one treatment.
+ */
+export const usesPrize = async (prisma: PrismaClient, clinicId: string): Promise<boolean> =>
+  (await prisma.catalogItem.count({ where: { clinicId, prizeEligible: { not: null } } })) > 0;
+
 export const usesCatalogue = async (prisma: PrismaClient, clinicId: string): Promise<boolean> =>
   (await prisma.catalogItem.count({ where: { clinicId, isProduct: false } })) > 0;
 
@@ -162,7 +187,7 @@ const readTreatments = async (
     const catalogItems = await prisma.catalogItem.findMany({
       where: { clinicId, isProduct: false },
       orderBy: [{ position: "asc" }, { externalId: "asc" }],
-      select: { id: true, name: true, priceCents: true, categoryId: true }
+      select: { id: true, name: true, priceCents: true, categoryId: true, prizeEligible: true }
     });
 
     return catalogItems.map(catalogRow);
@@ -191,10 +216,15 @@ export const listTreatments = async (
 export const listForEditor = async (
   prisma: PrismaClient,
   clinicId: string
-): Promise<{ usesCatalogue: boolean; items: TreatmentRow[] }> => {
+): Promise<{ usesCatalogue: boolean; usesPrize: boolean; items: TreatmentRow[] }> => {
   const catalogue = await usesCatalogue(prisma, clinicId);
 
-  return { usesCatalogue: catalogue, items: await readTreatments(prisma, clinicId, catalogue) };
+  return {
+    usesCatalogue: catalogue,
+    // The form shows the prize choice only at a centre that marks prizes.
+    usesPrize: catalogue && (await usesPrize(prisma, clinicId)),
+    items: await readTreatments(prisma, clinicId, catalogue)
+  };
 };
 
 /** The scan screen's rows: whole euros and the field names the dashboard already uses. */
@@ -225,6 +255,10 @@ export const createTreatment = async (
   if (await usesCatalogue(prisma, clinicId)) {
     if (!validCategory(data.categoryId)) throw new TreatmentValidationError(CATEGORY_MESSAGE);
 
+    if (data.prize !== undefined && !(await usesPrize(prisma, clinicId))) {
+      throw new TreatmentValidationError(PRIZE_MESSAGE);
+    }
+
     const rows = await prisma.catalogItem.count({ where: { clinicId } });
 
     if (rows >= CATALOGUE_MAX) throw new TreatmentValidationError(CATALOGUE_FULL_MESSAGE);
@@ -245,6 +279,8 @@ export const createTreatment = async (
         estimated: false,
         needsReview: false,
         classificationSource: "centro",
+        // Not said means not a prize at a centre that marks them: the owner ticks it on purpose.
+        prizeEligible: data.prize ?? null,
         position: (last._max.position ?? -1) + 1
       }
     });
@@ -321,6 +357,10 @@ export const updateTreatment = async (
       throw new TreatmentValidationError(CATEGORY_MESSAGE);
     }
 
+    if (data.prize !== undefined && !(await usesPrize(prisma, clinicId))) {
+      throw new TreatmentValidationError(PRIZE_MESSAGE);
+    }
+
     const item = await scopedOrNotFound(() =>
       prisma.catalogItem.update({
         where: { id, clinicId, isProduct: false },
@@ -335,7 +375,8 @@ export const updateTreatment = async (
             categoryId: data.categoryId,
             needsReview: false,
             classificationSource: "centro"
-          })
+          }),
+          ...(data.prize !== undefined && { prizeEligible: data.prize })
         }
       })
     );
