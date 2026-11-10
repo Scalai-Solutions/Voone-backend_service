@@ -412,6 +412,9 @@ export const PRODUCTION_DETAILS_TEMPLATE_FIELD_PATHS = [
   // Per member: the code and sign-up link to recommend the clinic. Absent from the object when
   // the card has no share link, where the item simply does not render.
   "object.textModulesData['referral']",
+  // Per member: the latest movements, newest first. Absent from the object of a member with none,
+  // where the item simply does not render.
+  "object.textModulesData['history']",
   // The sign-up link itself, tappable: a URL inside the text module above is not.
   "object.linksModuleData.uris['referral']",
   "class.textModulesData['benefits']",

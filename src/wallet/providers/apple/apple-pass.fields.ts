@@ -1,4 +1,5 @@
 import { boostText, referralText } from "../../engine/boost-text";
+import { historyText } from "../../engine/history-text";
 import { LoyaltyCard } from "../../engine/loyalty-card";
 import { availableRewardCount, availableRewardsText } from "../../engine/rewards-text";
 import { tierBenefitsText } from "../../engine/tier-benefits-text";
@@ -143,6 +144,14 @@ export const buildStoreCardFields = (data: LoyaltyCard): StoreCardFields => {
 
   if (boost !== undefined) {
     backFields.push({ key: "boost", label: PASS_LABELS.boost, value: boost });
+  }
+
+  // The latest movements, one line each. Back only, and no changeMessage: the points field already
+  // notifies on a visit, and a second buzz for the same visit would only be noise.
+  const history = historyText(data);
+
+  if (history !== undefined) {
+    backFields.push({ key: "history", label: PASS_LABELS.history, value: history });
   }
 
   const tierText = tierBenefitsText(data);

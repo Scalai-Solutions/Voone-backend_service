@@ -23,6 +23,7 @@ import { CATEGORIES } from "../engine.config";
 import { OnboardingError } from "../onboarding.service";
 import { activeProgramView } from "./program-tier.port";
 import type { ProgramView } from "./program-view";
+import { BONO_REASON_PREFIX, PAYMENT_REASON_PREFIX } from "./visit-reason";
 import {
   bonoSessionCents,
   discountAllowance,
@@ -163,7 +164,9 @@ export type VisitRecordedHook = (visit: { memberId: string; clinicId: string }) 
 export const paymentReason = (lines: VisitLine[] | undefined): string => {
   const names = [...new Set((lines ?? []).map((l) => l.name?.trim()).filter(Boolean))];
 
-  return names.length ? `Visita de pago: ${names.join(", ")}`.slice(0, 200) : "Visita de pago";
+  return names.length
+    ? `${PAYMENT_REASON_PREFIX}${names.join(", ")}`.slice(0, 200)
+    : "Visita de pago";
 };
 
 export class VisitService {
@@ -602,7 +605,7 @@ export class VisitService {
         )?.name
       : packageName?.trim();
 
-    return name ? `Sesión de bono: ${name}`.slice(0, 200) : "Sesión de bono";
+    return name ? `${BONO_REASON_PREFIX}${name}`.slice(0, 200) : "Sesión de bono";
   }
 
   private sessionOf(bono: {

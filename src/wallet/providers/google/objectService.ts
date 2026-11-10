@@ -24,6 +24,9 @@ export const NEXT_REWARD_MODULE_HEADER = "Próxima recompensa";
 /** The per-member module with the member's code and sign-up link, to recommend the clinic. */
 export const REFERRAL_MODULE_ID = "referral";
 export const REFERRAL_MODULE_HEADER = "Recomienda";
+/** The per-member module with the latest movements, the same lines as the back of the Apple pass. */
+export const HISTORY_MODULE_ID = "history";
+export const HISTORY_MODULE_HEADER = "Historial";
 
 /**
  * How many rewards are waiting, on the front of the card. A text module, not secondaryLoyaltyPoints:
@@ -193,7 +196,8 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
     patch.tierBenefits !== undefined ||
     patch.boost !== undefined ||
     patch.nextReward !== undefined ||
-    patch.referral !== undefined
+    patch.referral !== undefined ||
+    patch.history !== undefined
   ) {
     // A PATCH of textModulesData REPLACES the whole array, so the object is read first and the
     // changed modules are merged into what it holds: nothing the object already carries is lost.
@@ -246,6 +250,9 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
         : []),
       ...(patch.referral
         ? [{ id: REFERRAL_MODULE_ID, header: REFERRAL_MODULE_HEADER, body: patch.referral.text }]
+        : []),
+      ...(patch.history
+        ? [{ id: HISTORY_MODULE_ID, header: HISTORY_MODULE_HEADER, body: patch.history.text }]
         : [])
     ]);
     // The merge keeps modules it does not know, so a stale optional module is dropped by name.
@@ -253,7 +260,8 @@ export const patchObject = async (objectId: string, patch: LoyaltyObjectPatch): 
       ...(patch.tierBenefits === null ? [TIER_BENEFITS_MODULE_ID] : []),
       ...(patch.boost === null ? [BOOST_MODULE_ID] : []),
       ...(patch.nextReward === null ? [NEXT_REWARD_MODULE_ID] : []),
-      ...(patch.referral === null ? [REFERRAL_MODULE_ID] : [])
+      ...(patch.referral === null ? [REFERRAL_MODULE_ID] : []),
+      ...(patch.history === null ? [HISTORY_MODULE_ID] : [])
     ];
     const next = merged.filter((module) => !staleIds.includes(module.id));
 
@@ -518,6 +526,9 @@ const toGoogleLoyaltyObjectBody = (input: LoyaltyObjectInput): GoogleLoyaltyObje
         : []),
       ...(input.referral
         ? [{ id: REFERRAL_MODULE_ID, header: REFERRAL_MODULE_HEADER, body: input.referral.text }]
+        : []),
+      ...(input.history
+        ? [{ id: HISTORY_MODULE_ID, header: HISTORY_MODULE_HEADER, body: input.history.text }]
         : [])
     ],
     linksModuleData: toReferralLinks(input.referral?.url),

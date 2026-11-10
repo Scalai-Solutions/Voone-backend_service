@@ -631,12 +631,14 @@ enum PointsTransactionKind {
 /// wrong number simply becomes the truth. Every balance in the system is derived from
 /// these rows, so a bug is fixed by correcting the ledger and replaying it.
 ///
-/// Deliberately holds NO treatment data. An append-only table and the Art. 17 right to
-/// erasure cannot both hold if special-category data is in it: erasing would mean
-/// breaking the one invariant this table exists to guarantee. Treatments, if a clinic is
-/// ever permitted to record them (VOO-5), live in their own erasable table that this one
-/// references by id and does not depend on. See
-/// docs/superpowers/specs/2026-09-25-points-ledger-design.md.
+/// Holds no diagnosis or clinical note. It does hold, in `reason`, the NAME of the treatment
+/// reception picked from the catalogue for a visit ("Visita de pago: Limpieza facial"); the
+/// card's history shows it back to the member (Nov 2026). That name can reveal health
+/// information, so it is covered in the data-processing agreement, and an erased member's
+/// rows are anonymised with the member. The original design (docs/superpowers/specs/
+/// 2026-09-25-points-ledger-design.md) kept treatments out of this table entirely; the
+/// visit code no longer does, and the helper that reads a name back is
+/// runtime/visit-reason.ts, the only place that may.
 model PointsTransaction {
   id       String @id @default(uuid())
   memberId String
@@ -654,8 +656,9 @@ model PointsTransaction {
   points Int
   kind   PointsTransactionKind
 
-  /// Staff-authored, for ADJUSTMENT. Free text and therefore never a treatment name:
-  /// the UI must not offer one, and nothing here should be parsed.
+  /// For a visit credit, what reception recorded ("Visita de pago: <names>", read back only by
+  /// runtime/visit-reason.ts). For ADJUSTMENT it is a staff note: free text, never shown to a
+  /// member and never read as a treatment name.
   reason String?
 
   /// Opaque pointer at whatever caused this — a scan, an import, a referral. Carries no
