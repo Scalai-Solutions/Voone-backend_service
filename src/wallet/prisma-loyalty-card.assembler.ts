@@ -15,11 +15,7 @@ import type { Program } from "../modules/onboarding/engine.types";
 import { presentProgram } from "../modules/onboarding/presentation";
 import { programView } from "../modules/onboarding/runtime/program-view";
 import { toPoints } from "../modules/onboarding/runtime/points-unit";
-import {
-  chooseDouble,
-  DOUBLE_PERK,
-  PERK_ORDER
-} from "../modules/onboarding/runtime/double-points";
+import { chooseDouble, DOUBLE_PERK, PERK_ORDER } from "../modules/onboarding/runtime/double-points";
 import { isDoublePointsPerk, nextRewardFor } from "../modules/onboarding/runtime/rules";
 import { tierRewardsSchema } from "../modules/templates/templates.schema";
 
