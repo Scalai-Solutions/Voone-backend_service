@@ -170,10 +170,10 @@ describe("Google card: the referral share", () => {
   it("carries the boost and the referral together without losing either", async () => {
     await issue(rewardsPass);
 
-    await provider().syncCard(ref, { ...withReferral, boost: { kind: "referral" } });
+    await provider().syncCard(ref, { ...withReferral, boost: { kind: "perk" } });
 
     expect(moduleOf("referral")?.body).toBe(TEXT);
-    expect(moduleOf("boost")?.body).toBe("Tu primera visita suma el doble de puntos.");
+    expect(moduleOf("boost")?.body).toBe("Tu próxima visita suma el doble de puntos.");
   });
 
   it("still updates the balance, and succeeds, when Google rejects the module", async () => {

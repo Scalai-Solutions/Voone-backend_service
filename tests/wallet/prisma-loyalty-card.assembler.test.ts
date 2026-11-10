@@ -854,7 +854,7 @@ describe("PrismaLoyaltyCardAssembler: the pending boost (x2)", () => {
   const build = (value: unknown) =>
     new PrismaLoyaltyCardAssembler(prismaFor(value), SECRET, () => NOW).assemble(member.id);
 
-  it("costs a clinic with no programme no extra query, and asks the paid visit only of a referred member", async () => {
+  it("costs a clinic with no programme no extra query, and never looks at a member's referral", async () => {
     const findUnique = vi.fn(async () => ({ ...member }));
 
     await new PrismaLoyaltyCardAssembler(
@@ -866,14 +866,11 @@ describe("PrismaLoyaltyCardAssembler: the pending boost (x2)", () => {
     expect(findUnique).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(findUnique.mock.calls[0])).not.toMatch(/referredBy|paidVisits/);
 
-    await build(programmeMember());
-
-    expect(lookups.referral).toHaveBeenCalledTimes(1);
-    expect(lookups.paidVisit).not.toHaveBeenCalled();
-
     await build(programmeMember({ referredBy: { id: "r1" } }));
 
-    expect(lookups.paidVisit).toHaveBeenCalledTimes(1);
+    // A referred client's first visit is not doubled, so the card has nothing to ask about it.
+    expect(lookups.referral).not.toHaveBeenCalled();
+    expect(lookups.paidVisit).not.toHaveBeenCalled();
   });
 
   it("shows a waiting x2 perk with the date it lapses", async () => {
@@ -884,27 +881,18 @@ describe("PrismaLoyaltyCardAssembler: the pending boost (x2)", () => {
     expect(card.rewards?.available).toEqual([]);
   });
 
-  it("shows a referred member with no payment yet, with no end date", async () => {
+  it("announces nothing for a referred member who has not paid yet: no x2 on a first visit", async () => {
     const card = await build(programmeMember({ referredBy: { id: "r1" } }));
-
-    expect(card.boost).toEqual({ kind: "referral" });
-    expect(card.boost).not.toHaveProperty("until");
-  });
-
-  it("shows nothing once the referred member has paid", async () => {
-    const card = await build(
-      programmeMember({ referredBy: { id: "r1" }, paidVisits: [{ id: "v" }] })
-    );
 
     expect(card.boost).toBeUndefined();
   });
 
-  it("names the referral when both are waiting: the same call as the visit credit makes", async () => {
+  it("shows only the perk when a referred member also has one waiting", async () => {
     const card = await build(
       programmeMember({ referredBy: { id: "r1" }, rewards: [perk("2026-11-30T10:00:00Z")] })
     );
 
-    expect(card.boost).toEqual({ kind: "referral" });
+    expect(card.boost).toEqual({ kind: "perk", until: "2026-11-30T10:00:00.000Z" });
   });
 
   it("ignores a perk that has lapsed", async () => {

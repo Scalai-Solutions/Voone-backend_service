@@ -156,13 +156,12 @@ export const loyaltyCardSchema = z
 
     /**
      * A x2 waiting for the member's next visit, for a clinic on a programme: a double-points perk
-     * (`until` is its stored expiry) or a referred member who has not paid yet (no end date). It
-     * comes from the same decision the visit credit takes, so the card never promises what the
-     * credit will not do. Absent when nothing is waiting.
+     * (`until` is its stored expiry). It comes from the same decision the visit credit takes, so
+     * the card never promises what the credit will not do. Absent when nothing is waiting.
      */
     boost: z
       .object({
-        kind: z.enum(["perk", "referral"]),
+        kind: z.literal("perk"),
         until: z.string().datetime().optional()
       })
       .optional(),
