@@ -53,12 +53,14 @@ const serviceFor = (
   programme: boolean,
   catalogue: Array<{ id: string; name: string; priceCents: number; categoryId: null }> = [],
   credits: Array<{ memberId: string; reason: string; createdAt: Date }> = [],
-  tier: string | null = row.tier
+  tier: string | null = row.tier,
+  extra: Record<string, unknown> = {}
 ) => {
   // The member as the directory's own query returns her, including whether the clinic's
   // programme is live.
   const current = {
     ...row,
+    ...extra,
     tier,
     clinic: {
       template: {
@@ -112,6 +114,29 @@ describe("member directory at a programme centre", () => {
       label: "Recompensa canjeada: Limpieza facial",
       points: 0,
       date: "2026-10-20"
+    });
+  });
+
+  it("lists a visit that earned no points (medicine) with what was paid", async () => {
+    const member = await serviceFor(true, [], [], row.tier, {
+      paidVisits: [
+        {
+          id: "v-med",
+          reason: "Visita de pago: Hiperhidrosis",
+          paidCents: 65000,
+          occurredAt: new Date("2026-10-22")
+        }
+      ]
+    }).get("m-1");
+
+    expect(member.history[0]).toEqual({
+      id: "v-med",
+      // Intl puts a no-break space before the €.
+      label: expect.stringMatching(
+        /^Visita de pago: Hiperhidrosis · 650,00\s€ \(no suma puntos\)$/
+      ),
+      points: 0,
+      date: "2026-10-22"
     });
   });
 
