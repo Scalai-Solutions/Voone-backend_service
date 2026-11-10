@@ -205,7 +205,7 @@ describe("Google optional modules: a patch that only changes their text", () => 
       ...rewardsPass,
       tier: "Plata",
       tierBenefits: { tier: "Plata", lines: ["A"] },
-      boost: { kind: "referral" },
+      boost: { kind: "perk" },
       referral: { code: "AB2CD", url: "https://voone.app/alta/x?ref=AB2CD" }
     });
 

@@ -10,7 +10,6 @@ const perk: LoyaltyCard = {
   ...rewardsPass,
   boost: { kind: "perk", until: "2026-09-12T10:00:00.000Z" }
 };
-const referral: LoyaltyCard = { ...rewardsPass, boost: { kind: "referral" } };
 
 describe("the boost text, shared by both wallets", () => {
   it("says the next visit doubles and when the perk lapses, in the Madrid date, 'sept' style", () => {
@@ -23,10 +22,6 @@ describe("the boost text, shared by both wallets", () => {
     expect(
       boostText({ ...perk, boost: { kind: "perk", until: "2026-09-12T22:30:00.000Z" } })
     ).toContain("hasta el 13 sept.");
-  });
-
-  it("says the first visit doubles for a referred member, with no date", () => {
-    expect(boostText(referral)).toBe("Tu primera visita suma el doble de puntos.");
   });
 
   it("has no text without a boost", () => {
@@ -64,7 +59,7 @@ describe("the boost on the back of the Apple pass", () => {
   });
 
   it("keeps every key unique", () => {
-    const keys = buildStoreCardFields(referral).backFields.map((f) => f.key);
+    const keys = buildStoreCardFields(perk).backFields.map((f) => f.key);
 
     expect(new Set(keys).size).toBe(keys.length);
   });
@@ -110,7 +105,7 @@ describe("the referral on the back of the Apple pass", () => {
   it("is absent for a card with no referral, and keeps every key unique with all the fields", () => {
     expect(field(rewardsPass)).toBeUndefined();
 
-    const keys = buildStoreCardFields({ ...shared, boost: { kind: "referral" } }).backFields.map(
+    const keys = buildStoreCardFields({ ...shared, boost: { kind: "perk" } }).backFields.map(
       (f) => f.key
     );
 

@@ -90,7 +90,7 @@ export interface RecordVisitInput {
   bonusPoints?: number;
   /**
    * Set by reception when `bonusPoints` is the x2/x3/x5/x10 slider's flat extra rather than a
-   * typed gift. While a x2 applies (a waiting perk or a referred client's first payment) the
+   * typed gift. While a x2 applies (a waiting double-points perk) the
    * visit is already x2 in total, so that extra is ignored: the visit is NOT refused.
    */
   boostMultiplier?: number;
@@ -435,12 +435,10 @@ export class VisitService {
         const before = Math.max(ledger.lifetime, last?.lifetimeAfter ?? 0);
 
         // The visit is doubled by a waiting double-points perk (the next payment in which money
-        // changes hands, RUNTIME_DECISIONS.doublePointsAppliesTo) or by a referred client's first
-        // payment; see double-points.ts, which the reception lookup shares. x2 in total, never x4.
-        // A package session in between does not use either up, and neither does a payment that
-        // earns no progress (a medicine-only basket): there is nothing to double, so nothing is
-        // spent. When both are present the REFERRAL doubles the visit and the perk is KEPT for
-        // the next one.
+        // changes hands, RUNTIME_DECISIONS.doublePointsAppliesTo); see double-points.ts, which the
+        // reception lookup shares. x2 in total, never x4. A package session in between does not use
+        // it up, and neither does a payment that earns no progress (a medicine-only basket): there
+        // is nothing to double, so nothing is spent. A referred client's first visit is not doubled.
         const double =
           input.kind === "PAYMENT" && earnsProgress(cents)
             ? await pendingDouble(tx, input.memberId, occurredAt)

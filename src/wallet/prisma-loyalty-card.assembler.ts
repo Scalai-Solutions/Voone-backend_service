@@ -15,12 +15,7 @@ import type { Program } from "../modules/onboarding/engine.types";
 import { presentProgram } from "../modules/onboarding/presentation";
 import { programView } from "../modules/onboarding/runtime/program-view";
 import { toPoints } from "../modules/onboarding/runtime/points-unit";
-import {
-  chooseDouble,
-  DOUBLE_PERK,
-  isReferralPending,
-  PERK_ORDER
-} from "../modules/onboarding/runtime/double-points";
+import { chooseDouble, DOUBLE_PERK, PERK_ORDER } from "../modules/onboarding/runtime/double-points";
 import { isDoublePointsPerk, nextRewardFor } from "../modules/onboarding/runtime/rules";
 import { tierRewardsSchema } from "../modules/templates/templates.schema";
 
@@ -143,8 +138,7 @@ const tierBenefitsFor = (
  * reception lookup use (double-points.ts), so the card never promises what the credit will not do.
  *
  * Called for a programme centre only, so a legacy clinic pays no extra query. The waiting perk is
- * among the open rewards the member query already loaded; the referral is looked up first and the
- * paid visit only when there is one. Only when the card's list is full (20 rewards) and shows no
+ * among the open rewards the member query already loaded. Only when the card's list is full (20 rewards) and shows no
  * perk is the perk asked for on its own, so a perk is never lost behind a long list. No clock but
  * the expiry filter's `now`.
  */
@@ -157,38 +151,32 @@ const boostFor = async (
   now: Date,
   listFull: boolean
 ): Promise<LoyaltyCard["boost"]> => {
-  const referralPending = await isReferralPending(prisma, member.id);
   let perk: { id: string; expiresAt: Date } | null = null;
+  const open = (member.rewards ?? []).find(
+    (r) => isDoublePointsPerk(r.kind, r.detail) && r.expiresAt.getTime() > now.getTime()
+  );
 
-  if (!referralPending) {
-    const open = (member.rewards ?? []).find(
-      (r) => isDoublePointsPerk(r.kind, r.detail) && r.expiresAt.getTime() > now.getTime()
-    );
-
-    if (open) {
-      perk = { id: "", expiresAt: open.expiresAt };
-    } else if (listFull) {
-      perk = await prisma.memberReward.findFirst({
-        where: {
-          memberId: member.id,
-          kind: MemberRewardKind.VENTAJA,
-          redeemedAt: null,
-          expiresAt: { gt: now },
-          detail: { path: ["perk"], equals: DOUBLE_PERK }
-        },
-        orderBy: [...PERK_ORDER],
-        select: { id: true, expiresAt: true }
-      });
-    }
+  if (open) {
+    perk = { id: "", expiresAt: open.expiresAt };
+  } else if (listFull) {
+    perk = await prisma.memberReward.findFirst({
+      where: {
+        memberId: member.id,
+        kind: MemberRewardKind.VENTAJA,
+        redeemedAt: null,
+        expiresAt: { gt: now },
+        detail: { path: ["perk"], equals: DOUBLE_PERK }
+      },
+      orderBy: [...PERK_ORDER],
+      select: { id: true, expiresAt: true }
+    });
   }
 
-  const decided = chooseDouble(referralPending, perk);
+  const decided = chooseDouble(perk);
 
-  if (!decided.applies || !decided.reason) return undefined;
+  if (!decided.applies) return undefined;
 
-  return decided.reason === "referral"
-    ? { kind: "referral" }
-    : { kind: "perk", until: decided.until ?? undefined };
+  return { kind: "perk", until: decided.until ?? undefined };
 };
 
 /**
