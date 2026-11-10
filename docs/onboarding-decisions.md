@@ -122,8 +122,10 @@ reception screen already does it. The data model deliberately does not assume it
 - Redemption is **enforced by the backend, not by convention**: a reward can only be
   redeemed against a `PaidVisit` of the same member and centre, on the same Madrid calendar
   day, and the check reads rows the database holds.
-- Visits hold amounts and counts, never what was bought. Treatment names are special-category
-  data in this product, and a record that must be kept cannot also be erasable.
+- `PaidVisit` holds amounts and counts, never what was bought. The treatment name reception
+  picks is kept only in the points-ledger `reason` of the visit's credit (see
+  `PointsTransaction`), and the member's card shows it back to them (Nov 2026). The name can
+  reveal health information, so it is listed in the data-processing agreement.
 
 **Where.** `prisma/schema.prisma` (`PaidVisit`); `runtime/visit.service.ts`;
 `runtime/rules.ts` (`checkRedemption`); `runtime/decisions.ts`;
