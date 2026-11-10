@@ -367,7 +367,7 @@ describe("the visit result's balance", () => {
 });
 
 describe("what earns progress", () => {
-  it("counts pharmacological medicine like any treatment", async () => {
+  it("counts nothing for pharmacological medicine", async () => {
     const m = await makeMember();
     const out = await visits.record({
       clinicId: clinic.id,
@@ -380,17 +380,17 @@ describe("what earns progress", () => {
       idempotencyKey: "med"
     });
 
-    // 360 euros were paid and all 360 earn.
-    expect(out.progress).toBe(360);
+    // 360 euros were paid; 60 earned. "Dinero gastado" reads the 360.
+    expect(out.progress).toBe(60);
     expect(
       await db.paidVisit.findFirstOrThrow({
         where: { memberId: m.id },
         select: { amountCents: true, paidCents: true }
       })
-    ).toEqual({ amountCents: 36000, paidCents: 36000 });
+    ).toEqual({ amountCents: 6000, paidCents: 36000 });
   });
 
-  it("records a medicine-only visit and credits it", async () => {
+  it("still records a medicine-only visit, which is a payment for redemption purposes", async () => {
     const m = await makeMember();
     const out = await visits.record({
       clinicId: clinic.id,
@@ -400,7 +400,10 @@ describe("what earns progress", () => {
       idempotencyKey: "med-only"
     });
 
-    expect(out.progress).toBe(300);
+    expect(out.progress).toBe(0);
+    expect(out.issued).toEqual([]);
+    // No ledger row for zero progress, but the visit exists to redeem against.
+    expect(await db.pointsTransaction.count({ where: { memberId: m.id } })).toBe(0);
     expect(await db.paidVisit.count({ where: { memberId: m.id } })).toBe(1);
   });
 
@@ -942,7 +945,7 @@ describe("double points: a waiting perk, and no double for a referred client's f
       clinicId: clinic.id,
       memberId: m.id,
       kind: "PAYMENT",
-      lines: [{ amountEuro: 0.1 }],
+      lines: [{ category: "MFA", amountEuro: 300 }],
       idempotencyKey: "c1-med"
     });
 
@@ -1030,7 +1033,7 @@ describe("double points: a waiting perk, and no double for a referred client's f
       clinicId: clinic.id,
       memberId: newcomer.id,
       kind: "PAYMENT",
-      lines: [{ amountEuro: 0.1 }],
+      lines: [{ category: "MFA", amountEuro: 300 }],
       idempotencyKey: "r-med"
     });
     const session = await visits.record({

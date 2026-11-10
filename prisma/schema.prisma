@@ -930,6 +930,10 @@ model PaidVisit {
   /// Included in progressAwarded, held separately so an audit can tell purchase from gift.
   bonusProgress Int?
 
+  /// What the visit was, as the history shows it ("Visita de pago: Hiperhidrosis"). Kept on the
+  /// visit because one that earns nothing (medicine) has no ledger row to carry it.
+  reason String?
+
   redemptions MemberReward[] @relation("RedeemedAt")
 
   @@unique([clinicId, idempotencyKey])

@@ -468,6 +468,7 @@ export class VisitService {
             memberBonoId: bono?.id ?? null,
             bonoSessionNumber: bono?.session ?? null,
             bonusProgress: bonusEuros > 0 ? bonusEuros : null,
+            reason: input.kind === "PAYMENT" ? paymentReason(input.lines) : null,
             progressAwarded: progress,
             lifetimeBefore: before,
             lifetimeAfter: before + progress,

@@ -201,15 +201,15 @@ describe("resolveTier", () => {
 });
 
 describe("what earns progress", () => {
-  it("counts pharmacological medicine and medical acts like any treatment", () => {
-    // Product decision 2026-11-10: medicine earns progress too.
+  it("excludes pharmacological medicine and medical acts", () => {
+    // A legal constraint in Spain. Neither earns progress, whatever was paid.
     expect(
       earningCents([
         { category: "FAC", amountCents: 6000 },
         { category: "MFA", amountCents: 30000 },
         { category: "MNF", amountCents: 9000 }
       ])
-    ).toBe(45000);
+    ).toBe(6000);
   });
 
   it("counts retail, diagnosis and an uncategorised line", () => {
