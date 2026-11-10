@@ -102,12 +102,14 @@ const serviceEditProposed = strict({
   treatmentId: id.optional(),
   name: treatmentName.optional(),
   priceEuro: treatmentPrice.optional(),
-  categoryId: categoryId.optional()
-}).refine(atLeastOneOf(["name", "priceEuro", "categoryId"]), NOTHING_TO_CHANGE);
+  categoryId: categoryId.optional(),
+  prize: z.boolean().optional()
+}).refine(atLeastOneOf(["name", "priceEuro", "categoryId", "prize"]), NOTHING_TO_CHANGE);
 const serviceAddProposed = strict({
   name: treatmentName,
   priceEuro: treatmentPrice,
-  categoryId: categoryId.optional()
+  categoryId: categoryId.optional(),
+  prize: z.boolean().optional()
 });
 const serviceRemoveProposed = strict({ treatmentId: id.optional() });
 

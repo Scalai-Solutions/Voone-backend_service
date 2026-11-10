@@ -242,7 +242,8 @@ export class PrismaCatalogueChanges implements CatalogueChanges {
       name: proposed.name as string,
       priceEuro: proposed.priceEuro as number,
       // What the owner asked for wins; the admin's category only fills in when there is none.
-      categoryId: str(proposed.categoryId) ?? categoryOverride
+      categoryId: str(proposed.categoryId) ?? categoryOverride,
+      ...(typeof proposed.prize === "boolean" ? { prize: proposed.prize } : {})
     });
 
     return {
@@ -274,13 +275,13 @@ export class PrismaCatalogueChanges implements CatalogueChanges {
     proposed: Fields
   ): Promise<AppliedChange> {
     const before = await this.existingTreatment(db, clinicId, id);
-    const patch = only(proposed, ["name", "priceEuro", "categoryId"]);
+    const patch = only(proposed, ["name", "priceEuro", "categoryId", "prize"]);
     const treatment = await updateTreatment(db, clinicId, before.id, patch);
 
     return {
       kind: "treatment",
       action: "updated",
-      summary: `Updated treatment "${before.name}" (${describe(patch, { name: "name", priceEuro: "price", categoryId: "category" })})`,
+      summary: `Updated treatment "${before.name}" (${describe(patch, { name: "name", priceEuro: "price", categoryId: "category", prize: "prize" })})`,
       treatment
     };
   }

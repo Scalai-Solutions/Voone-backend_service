@@ -74,6 +74,21 @@ export const toEngineCatalog = (rows: CatalogRow[]): CatalogItem[] =>
       : { prize: row.prizeEligible })
   }));
 
+/**
+ * What the engine will use of a catalogue's Prize (Y/N) answers: null when no row has one, else the
+ * sorted ids marked Y. Two catalogues with the same signature give the same prize candidates, so a
+ * programme built from one is not outdated by the other.
+ */
+export const prizeSignature = (items: CatalogItem[]): string | null =>
+  items.some((item) => item.prize !== undefined && item.prize !== null)
+    ? JSON.stringify(
+        items
+          .filter((item) => item.prize === true)
+          .map((item) => item.id)
+          .sort()
+      )
+    : null;
+
 export interface CatalogRepository {
   /** Every row for a clinic, in the stored order the engine must always be given. */
   listForClinic(clinicId: string): Promise<CatalogRow[]>;

@@ -201,6 +201,61 @@ describe("a treatment change by the centre", () => {
   });
 });
 
+describe("the prize choice on a treatment ticket", () => {
+  const seed = (prizeEligible: boolean | null) =>
+    db.catalogItem.create({
+      data: {
+        clinicId: cat.id,
+        externalId: "ext-uno",
+        name: "Uno",
+        priceCents: 5000,
+        categoryId: "FAC",
+        prizeEligible,
+        position: 0
+      }
+    });
+
+  it("is recorded on a new treatment at a centre that marks prizes", async () => {
+    await seed(true);
+
+    await file(cat, {
+      type: "SERVICE_ADD",
+      proposed: { name: "Con premio", priceEuro: 40, categoryId: "FAC", prize: true }
+    });
+
+    expect(
+      await db.catalogItem.findFirstOrThrow({ where: { clinicId: cat.id, name: "Con premio" } })
+    ).toMatchObject({ prizeEligible: true });
+  });
+
+  it("can be changed on its own by an edit, which counts as a change", async () => {
+    const row = await seed(true);
+
+    await file(cat, {
+      type: "SERVICE_EDIT",
+      targetRef: { treatmentId: row.id },
+      proposed: { prize: false }
+    });
+
+    expect((await db.catalogItem.findUniqueOrThrow({ where: { id: row.id } })).prizeEligible).toBe(
+      false
+    );
+  });
+
+  it("is refused, and stores nothing, at a centre that does not mark prizes", async () => {
+    await seed(null);
+
+    await expect(
+      file(cat, {
+        type: "SERVICE_ADD",
+        proposed: { name: "Nuevo", priceEuro: 40, categoryId: "FAC", prize: true }
+      })
+    ).rejects.toBeInstanceOf(TreatmentValidationError);
+
+    expect(await stored(cat.id)).toEqual([]);
+  });
+});
+
 describe("a change the catalogue refuses", () => {
   it("answers in the catalogue's own words and stores nothing", async () => {
     await db.catalogItem.create({

@@ -320,6 +320,78 @@ describe("generating and publishing a programme", () => {
   });
 });
 
+describe("the Prize (Y/N) answers and a live programme", () => {
+  const withAnswers = (yes: Set<string>): CatalogInput[] =>
+    asInput(fixture).map((row) => ({ ...row, prize: yes.has(row.externalId as string) }));
+
+  const goLive = async () => {
+    await repo.replaceForClinic(clinic.id, asInput(fixture));
+    const draft = await service.createDraft(clinic.id, ANSWERS);
+
+    await service.publish(clinic.id, draft.id);
+
+    return draft;
+  };
+
+  /** Every other prize candidate, so the filter leaves a catalogue the engine can still use. */
+  const someCandidates = async (): Promise<Set<string>> => {
+    const draft = await service.preview(clinic.id, ANSWERS);
+    const ids = draft.chosen.flatMap((c) => c.o.items.map((i) => i.id));
+
+    return new Set(
+      draft.catalog
+        .filter((c) => c.price > 0 && c.cat !== "MED")
+        .map((c) => c.id)
+        .filter((id) => !ids.includes(id))
+        .concat(ids)
+    );
+  };
+
+  it("says nothing is outdated while no row has an answer", async () => {
+    await goLive();
+
+    expect(await service.prizeStatus(clinic.id)).toEqual({ usesPrize: false, liveOutdated: false });
+  });
+
+  it("says the live programme is outdated once the answers change, and not before", async () => {
+    await goLive();
+    const yes = await someCandidates();
+
+    await repo.replaceForClinic(clinic.id, withAnswers(yes));
+
+    expect(await service.prizeStatus(clinic.id)).toEqual({ usesPrize: true, liveOutdated: true });
+  });
+
+  it("builds a draft from the live answers and the new catalogue, and stops being outdated once published", async () => {
+    await goLive();
+    const yes = await someCandidates();
+
+    await repo.replaceForClinic(clinic.id, withAnswers(yes));
+
+    const draft = await service.redraftFromLive(clinic.id);
+    const output = draft.output as unknown as Program;
+
+    expect(draft.status).toBe(OnboardingProgramStatus.BORRADOR);
+    expect(draft.answers).toEqual(ANSWERS);
+    expect(
+      output.chosen.flatMap((c) => c.o.items.map((i) => i.id)).filter((id) => !yes.has(id))
+    ).toEqual([]);
+
+    // A draft changes nothing members see: the live programme still predates the answers.
+    expect((await service.prizeStatus(clinic.id)).liveOutdated).toBe(true);
+
+    await service.publish(clinic.id, draft.id);
+
+    expect(await service.prizeStatus(clinic.id)).toEqual({ usesPrize: true, liveOutdated: false });
+  });
+
+  it("refuses to redraft a clinic with no live programme", async () => {
+    await repo.replaceForClinic(clinic.id, asInput(fixture));
+
+    await expect(service.redraftFromLive(clinic.id)).rejects.toMatchObject({ statusCode: 409 });
+  });
+});
+
 describe("editing texts and cloning a draft", () => {
   it("setTexts stores the edit and refuses a programme that is no longer a draft", async () => {
     await repo.replaceForClinic(clinic.id, asInput(fixture));
