@@ -53,6 +53,7 @@ export const swapReward = (
 
 export const MANUAL_REFUSALS: Record<ManualRefusal, string> = {
   price: "Ese artículo no tiene precio, así que no puede ser un premio.",
+  prize: "El centro no ha marcado este artículo como premio (Y) en su catálogo.",
   category: "Asigna una categoría a este artículo en el catálogo antes de usarlo como premio.",
   medical: "Los tratamientos y productos médicos no se pueden dar como premio."
 };

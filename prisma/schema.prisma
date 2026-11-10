@@ -754,6 +754,11 @@ model CatalogItem {
   /// The centre's own cost ratio for this row, 0 to 1. Beats the category default.
   costPctOverride Float?
 
+  /// The centre's "Prize (Y/N)" answer. Null means the centre never said. Once ANY row of a
+  /// clinic's catalogue has an answer, only rows marked true can be a prize (see
+  /// `prizeOff` in the engine); a clinic that never answered keeps the engine's own rules.
+  prizeEligible Boolean?
+
   /// The price is Voone's estimate rather than the centre's figure, so it is excluded
   /// from ticket estimation.
   estimated Boolean @default(false)

@@ -80,6 +80,8 @@ contradicts itself, the reference implementation won.
 | Storage              | `catalog.repository.ts`, `onboarding.service.ts` (`CatalogItem`, `OnboardingProgram`)          |
 | Presentation         | `presentation.ts` — a programme with **no cost figures**, by construction                      |
 | Import               | `catalog-csv.ts` — `;` or tab, bad rows skipped and reported                                   |
+
+**Prize column.** A header named `Prize (Y/N)` (or `Premio (S/N)`) marks each row Y or N. Once any row of a clinic's catalogue has an answer, only rows marked Y are ever a prize: milestone rewards and their alternatives, the recurring and birthday gifts, the surprise pool, the free-diagnosis perk, and the admin's hand picks. A blank cell counts as N; a catalogue with no answers keeps the engine's own rules. Stored as `CatalogItem.prizeEligible` (null = never answered); `classify` sets `prizeOff` on the rows that are out. A programme already generated is not changed until it is generated again.
 | Runtime rules (pure) | `runtime/rules.ts`, `runtime/program-view.ts`, `runtime/decisions.ts`                          |
 | Runtime services     | `runtime/visit.service.ts`, `reward.service.ts`, `referral.service.ts`, `program-tier.port.ts` |
 | HTTP                 | `src/routes/v1/onboarding.route.ts`                                                            |

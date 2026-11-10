@@ -164,6 +164,8 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
         categoryId: row.categoryId,
         costPctOverride: row.costPctOverride,
         estimated: row.estimated,
+        // The centre's Y/N answer; null when it never gave one.
+        prize: row.prizeEligible,
         position: row.position,
         category: c?.cat ?? null,
         classifiedBy: c?.src ?? null,

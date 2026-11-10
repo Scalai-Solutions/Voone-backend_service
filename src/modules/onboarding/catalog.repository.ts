@@ -30,6 +30,11 @@ export interface CatalogInput {
   categoryId?: string | null;
   costPctOverride?: number | null;
   estimated?: boolean;
+  /**
+   * The "Prize (Y/N)" answer. Undefined leaves a stored answer alone, so an editor that does not
+   * know the column cannot wipe it; null clears it.
+   */
+  prize?: boolean | null;
 }
 
 /** Euros to cents, rounded half away from zero so 12.005 does not fall to 12.00. */
@@ -62,7 +67,11 @@ export const toEngineCatalog = (rows: CatalogRow[]): CatalogItem[] =>
     product: row.isProduct,
     cat: asCategory(row.categoryId),
     costPct: row.costPctOverride,
-    estimated: row.estimated
+    estimated: row.estimated,
+    // Absent, not false, when the centre never answered: classify tells the two apart.
+    ...(row.prizeEligible === null || row.prizeEligible === undefined
+      ? {}
+      : { prize: row.prizeEligible })
   }));
 
 export interface CatalogRepository {
@@ -111,6 +120,8 @@ export class PrismaCatalogRepository implements CatalogRepository {
       categoryId: item.categoryId ?? null,
       costPctOverride: item.costPctOverride ?? null,
       estimated: item.estimated ?? false,
+      // Undefined stays undefined here: an update then leaves the stored answer alone.
+      prizeEligible: item.prize,
       position: index
     }));
 
@@ -147,9 +158,10 @@ export class PrismaCatalogRepository implements CatalogRepository {
               categoryId: row.categoryId,
               costPctOverride: row.costPctOverride,
               estimated: row.estimated,
+              ...(row.prizeEligible !== undefined ? { prizeEligible: row.prizeEligible } : {}),
               position: row.position
             },
-            create: { clinicId, ...row }
+            create: { clinicId, ...row, prizeEligible: row.prizeEligible ?? null }
           });
         }
       },
@@ -172,6 +184,7 @@ export class PrismaCatalogRepository implements CatalogRepository {
     if (patch.isProduct !== undefined) data.isProduct = patch.isProduct;
     if (patch.costPctOverride !== undefined) data.costPctOverride = patch.costPctOverride;
     if (patch.estimated !== undefined) data.estimated = patch.estimated;
+    if (patch.prize !== undefined) data.prizeEligible = patch.prize;
 
     if (patch.categoryId !== undefined) {
       data.categoryId = patch.categoryId;
