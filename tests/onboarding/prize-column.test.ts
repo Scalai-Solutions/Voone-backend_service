@@ -8,6 +8,7 @@ vi.mock("../../src/modules/onboarding/engine.config", async (importOriginal) => 
   return referenceTuningMock(importOriginal as never);
 });
 
+import { CATEGORIES } from "../../src/modules/onboarding/engine.config";
 import { parseCatalogCsv } from "../../src/modules/onboarding/catalog-csv";
 import {
   PrismaCatalogRepository,
@@ -238,7 +239,9 @@ describe("the engine looks only at rows marked Y", () => {
 
     if (isEngineError(program)) throw new Error(program.error);
 
-    const off = classify(items).find((row) => row.prizeOff && row.price > 0 && row.cat !== "MED");
+    const off = classify(items).find(
+      (row) => row.prizeOff && row.price > 0 && CATEGORIES[row.cat].manualReward
+    );
 
     expect(off).toBeDefined();
     expect(isGiftable(off!)).toBe(false);

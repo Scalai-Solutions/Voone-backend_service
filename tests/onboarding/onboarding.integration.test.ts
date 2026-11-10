@@ -6,6 +6,7 @@ import {
   toEngineCatalog,
   type CatalogInput
 } from "../../src/modules/onboarding/catalog.repository";
+import { CATEGORIES } from "../../src/modules/onboarding/engine.config";
 import { run } from "../../src/modules/onboarding/engine";
 import type { Answers, CatalogItem, Program } from "../../src/modules/onboarding/engine.types";
 import { isEngineError } from "../../src/modules/onboarding/engine.types";
@@ -340,7 +341,7 @@ describe("the Prize (Y/N) answers and a live programme", () => {
 
     return new Set(
       draft.catalog
-        .filter((c) => c.price > 0 && c.cat !== "MED")
+        .filter((c) => c.price > 0 && CATEGORIES[c.cat].reward)
         .map((c) => c.id)
         .filter((id) => !ids.includes(id))
         .concat(ids)
