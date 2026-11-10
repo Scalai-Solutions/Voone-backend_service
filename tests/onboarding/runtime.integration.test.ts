@@ -380,8 +380,11 @@ describe("what earns progress", () => {
       idempotencyKey: "med"
     });
 
-    // 360 euros were paid; 60 earned.
+    // 360 euros were paid; 60 earned. "Dinero gastado" reads the 360.
     expect(out.progress).toBe(60);
+    expect(
+      await db.paidVisit.findFirstOrThrow({ where: { memberId: m.id }, select: { amountCents: true, paidCents: true } })
+    ).toEqual({ amountCents: 6000, paidCents: 36000 });
   });
 
   it("still records a medicine-only visit, which is a payment for redemption purposes", async () => {

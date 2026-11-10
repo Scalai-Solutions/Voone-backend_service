@@ -535,6 +535,8 @@ describe("toProvisionedSummary", () => {
         billingEmail: null,
         billingAddressLine: null,
         billingPostalCode: null,
+        contactPhone: null,
+        contactEmail: null,
         createdAt: new Date(),
         updatedAt: new Date()
       },
@@ -582,6 +584,8 @@ describe("toProvisionedSummary", () => {
           billingEmail: null,
           billingAddressLine: null,
           billingPostalCode: null,
+          contactPhone: null,
+          contactEmail: null,
           createdAt: new Date(),
           updatedAt: new Date()
         },

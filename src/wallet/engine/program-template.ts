@@ -23,8 +23,10 @@ export type TemplateForProgram = Pick<
   /** The stored JSON list of further buttons; absent on older fixtures. */
   extraButtons?: unknown;
   /** `onboardingPrograms` is the clinic's live programme, if any: at most one row, id only. */
-  clinic: { name: string; onboardingPrograms?: Array<unknown> };
+  clinic: ClinicContact & { name: string; onboardingPrograms?: Array<unknown> };
 };
+
+type ClinicContact = { contactPhone?: string | null; contactEmail?: string | null };
 
 /** The stored extra buttons, keeping only the well-formed ones so a bad row cannot break a sync. */
 export const extraButtonsOf = (value: unknown) =>
@@ -33,6 +35,25 @@ export const extraButtonsOf = (value: unknown) =>
 
     return parsed.success ? [parsed.data] : [];
   });
+
+/**
+ * The centre's phone and email as tappable buttons, after its own: every wallet already renders
+ * the template's buttons as links, so tel: and mailto: work on both without provider code.
+ */
+export const contactButtonsOf = (clinic: ClinicContact) => {
+  const digits = clinic.contactPhone?.replace(/[^\d+]/g, "");
+
+  return [
+    ...(digits ? [{ label: "Llamar al centro", url: `tel:${digits}` }] : []),
+    ...(clinic.contactEmail ? [{ label: "Escribir al centro", url: `mailto:${clinic.contactEmail}` }] : [])
+  ].filter((button) => cardButtonSchema.safeParse(button).success);
+};
+
+/** The clinic's own buttons, then its contact ones. */
+export const cardButtonsOf = (extraButtons: unknown, clinic: ClinicContact) => [
+  ...extraButtonsOf(extraButtons),
+  ...contactButtonsOf(clinic)
+];
 
 /** A clinic template as the provider-neutral programme the wallets provision and refresh. */
 export const programTemplateFor = (template: TemplateForProgram): ProgramTemplate => ({
@@ -49,7 +70,7 @@ export const programTemplateFor = (template: TemplateForProgram): ProgramTemplat
     appointmentUrl: template.appointmentUrl ?? undefined,
     appLinkText: template.appLinkText ?? undefined,
     appLinkDescription: template.appLinkDescription ?? undefined,
-    extraButtons: extraButtonsOf(template.extraButtons),
+    extraButtons: cardButtonsOf(template.extraButtons, template.clinic),
     pointsLabel: template.pointsLabel,
     tierLabel: template.tierLabel,
     benefitsText: template.benefitsText,

@@ -28,6 +28,8 @@ export interface DispatchRequest {
   recipients: readonly AutomationRecipient[];
   /** Stored on the Notification for the audit trail. */
   meta?: Record<string, unknown>;
+  /** Fixed copy for this send in place of the clinic's template for the event. */
+  copy?: { header: string; body: string };
 }
 
 export type DispatchSkip = "DISABLED" | "MARKETING_OFF" | "MISSING_CLINIC_VALUE" | "NO_CLINIC";
@@ -80,7 +82,7 @@ export class AutomationDispatchService {
     if (!clinic) return skipped("NO_CLINIC");
 
     const settings = clinic.notificationSettings;
-    const automation = resolveAutomations(clinic.automations)[event];
+    const automation = { ...resolveAutomations(clinic.automations)[event], ...request.copy };
 
     if (!automation.enabled) return skipped("DISABLED");
     if (definition.marketing && settings?.marketingEnabled === false) {
