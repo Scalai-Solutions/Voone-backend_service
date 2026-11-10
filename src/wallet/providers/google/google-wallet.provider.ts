@@ -4,6 +4,7 @@ import { config } from "../../../config/env";
 import { DEFAULT_WALLET_BENEFIT_CTA } from "../../../modules/templates/default-voone-template";
 import { availableRewardCount, availableRewardsText } from "../../engine/rewards-text";
 import { boostText } from "../../engine/boost-text";
+import { historyText } from "../../engine/history-text";
 import { tierBenefitsText } from "../../engine/tier-benefits-text";
 import { BaseWalletProvider } from "../../engine/base-wallet-provider";
 import type { LoyaltyCard } from "../../engine/loyalty-card";
@@ -97,6 +98,7 @@ export class GoogleWalletProvider extends BaseWalletProvider {
           !input.tierBenefits &&
           !input.boost &&
           !input.referral &&
+          !input.history &&
           !input.nextReward) ||
         !(error instanceof GoogleWalletApiError) ||
         error.status !== 400
@@ -117,7 +119,8 @@ export class GoogleWalletProvider extends BaseWalletProvider {
         tierBenefits: undefined,
         boost: undefined,
         nextReward: undefined,
-        referral: undefined
+        referral: undefined,
+        history: undefined
       });
     }
 
@@ -149,6 +152,7 @@ export class GoogleWalletProvider extends BaseWalletProvider {
     const boost = this.toBoost(card);
     const nextReward = this.toNextReward(card);
     const referral = this.toReferral(card);
+    const history = this.toHistory(card);
 
     try {
       await patchObject(ref.externalId, {
@@ -157,7 +161,9 @@ export class GoogleWalletProvider extends BaseWalletProvider {
         // Nothing pending removes a stale module, exactly as for the tier benefits.
         boost: boost ?? null,
         nextReward: nextReward ?? null,
-        referral: referral ?? null
+        referral: referral ?? null,
+        // No movements removes a stale module, exactly as for the boost.
+        history: history ?? null
       });
     } catch (error) {
       console.error("[wallet] Google card rewards and tier benefits were not updated", {
@@ -347,6 +353,7 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       boost: this.toBoost(card),
       nextReward: this.toNextReward(card),
       referral: this.toReferral(card),
+      history: this.toHistory(card),
       state: "ACTIVE"
     };
   }
@@ -387,6 +394,13 @@ export class GoogleWalletProvider extends BaseWalletProvider {
           text: `${reward.title}\nTe faltan ${reward.remainingPoints.toLocaleString("es-ES")} puntos`
         }
       : { text: reward.description };
+  }
+
+  /** The same lines the Apple back field carries, so the two wallets never disagree. */
+  private toHistory(card: LoyaltyCard): LoyaltyOptionalModuleInput | undefined {
+    const text = historyText(card);
+
+    return text === undefined ? undefined : { text };
   }
 
   private toBoost(card: LoyaltyCard): LoyaltyOptionalModuleInput | undefined {

@@ -92,6 +92,8 @@ export interface LoyaltyObjectInput {
   nextReward?: LoyaltyOptionalModuleInput;
   /** Absent when the card has no referral share: the object then carries no `referral` module. */
   referral?: LoyaltyReferralInput;
+  /** Absent when the member has no movements yet: the object then carries no `history` module. */
+  history?: LoyaltyOptionalModuleInput;
 }
 
 /** The referral module's text, and the sign-up link as a tappable link on the pass. */
@@ -114,5 +116,7 @@ export type LoyaltyObjectPatch = Partial<
   nextReward?: LoyaltyOptionalModuleInput | null;
   /** The module and link; `null` REMOVES both (the card no longer has a share link). */
   referral?: LoyaltyReferralInput | null;
+  /** The module's text; `null` REMOVES a stale module (no movements any more). */
+  history?: LoyaltyOptionalModuleInput | null;
   notify?: boolean;
 };

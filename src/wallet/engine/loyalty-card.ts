@@ -37,6 +37,9 @@ export const cardButtonSchema = z.object({
 
 export const CARD_EXTRA_BUTTONS_MAX = 5;
 
+/** How many movements the card lists: enough to read at a glance, short enough for one field. */
+export const CARD_HISTORY_MAX = 5;
+
 export const cardTemplateSchema = z.object({
   programName: z.string().min(1).max(48),
   backgroundColor: hexColorSchema,
@@ -169,21 +172,23 @@ export const loyaltyCardSchema = z
 
     /**
      * The member's latest points movements, newest first (`CARD_HISTORY_MAX` at most), with the
-     * points as the member reads them (already in the card's unit). Only the Apple card renders it,
-     * on the back. Carries no treatment name and no staff note: the wording comes from `kind`.
+     * points as the member reads them (already in the card's unit). Rendered on the back of the
+     * Apple pass and as a details module on Google. `name` is what reception recorded for a visit
+     * (the treatment or the bono); everything else is worded from `kind`, never from a staff note.
      */
     history: z
       .array(
         z.object({
           at: z.string().datetime(),
           kind: z.enum(["visit", "referral", "gift", "adjustment", "redeem", "expiry"]),
+          name: z.string().min(1).max(60).optional(),
           points: z
             .number()
             .int()
             .refine((n) => n !== 0, "must not be zero")
         })
       )
-      .max(10)
+      .max(CARD_HISTORY_MAX)
       .optional(),
 
     /**

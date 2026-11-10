@@ -21,6 +21,7 @@ import type { Program } from "../modules/onboarding/engine.types";
 import { presentProgram } from "../modules/onboarding/presentation";
 import { programView } from "../modules/onboarding/runtime/program-view";
 import { toPoints } from "../modules/onboarding/runtime/points-unit";
+import { treatmentNameOf } from "../modules/onboarding/runtime/visit-reason";
 import {
   chooseDouble,
   DOUBLE_PERK,
@@ -236,21 +237,35 @@ const HISTORY_KINDS: Record<
 /**
  * The ledger rows as the card lists them. A programme centre keeps euro progress in the ledger and
  * shows points (ten per euro), the same conversion as the balance; a row that rounds to nothing is
- * left out. A positive manual adjustment reads as a gift, a negative one as a correction.
+ * left out. A positive manual adjustment reads as a gift, a negative one as a correction. A visit
+ * carries the name reception recorded for it, when there is one.
  */
 const historyFor = (
-  rows: readonly { kind: PointsTransactionKind; points: number; createdAt: Date }[],
+  rows: readonly {
+    kind: PointsTransactionKind;
+    points: number;
+    reason?: string | null;
+    createdAt: Date;
+  }[],
   programme: boolean
 ): LoyaltyCard["history"] => {
   const entries = rows
-    .map((row) => ({
-      at: row.createdAt.toISOString(),
-      kind:
-        row.kind === PointsTransactionKind.ADJUSTMENT && row.points > 0
-          ? ("gift" as const)
-          : HISTORY_KINDS[row.kind],
-      points: programme ? toPoints(row.points) : row.points
-    }))
+    .map((row) => {
+      // Only a visit's reason says what was done; an adjustment's is a staff note.
+      const name =
+        row.kind === PointsTransactionKind.EARN ? treatmentNameOf(row.reason) : undefined;
+
+      return {
+        at: row.createdAt.toISOString(),
+        kind:
+          row.kind === PointsTransactionKind.ADJUSTMENT && row.points > 0
+            ? ("gift" as const)
+            : HISTORY_KINDS[row.kind],
+        // Cut to the schema's limit, not rejected: a long name must not stop the card syncing.
+        ...(name ? { name: clipText(name, 60, true) } : {}),
+        points: programme ? toPoints(row.points) : row.points
+      };
+    })
     .filter((entry) => entry.points !== 0);
 
   return entries.length > 0 ? entries : undefined;
@@ -287,11 +302,12 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
         },
         // The latest movements for the back of the Apple pass, in the same round trip. The id
         // breaks ties between rows written in the same millisecond so the card is byte-equal each
-        // time. Uses the (memberId, createdAt) index; selects no reason, which can be a staff note.
+        // time. Uses the (memberId, createdAt) index. The reason is read for a visit only, to give
+        // the treatment name reception recorded; for any other kind it is a staff note and is not used.
         pointsLedger: {
           orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           take: CARD_HISTORY_MAX,
-          select: { kind: true, points: true, createdAt: true }
+          select: { kind: true, points: true, reason: true, createdAt: true }
         },
         // The latest clinic message, in the same round trip for the same reason as the programme.
         walletMessage: true,

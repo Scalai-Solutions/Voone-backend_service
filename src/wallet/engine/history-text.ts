@@ -1,16 +1,17 @@
 import { formatMadridDayMonth } from "./card-message";
 import type { LoyaltyCard } from "./loyalty-card";
-import { MONTHS_ES_REWARDS } from "./rewards-text";
+import { clipText, MONTHS_ES_REWARDS } from "./rewards-text";
 
-/** How many movements the card lists: enough to read at a glance, short enough for one back field. */
-export const CARD_HISTORY_MAX = 10;
+export { CARD_HISTORY_MAX } from "./loyalty-card";
 
 type Entry = NonNullable<LoyaltyCard["history"]>[number];
 
+/** The longest treatment name a line carries; a longer one is cut with an ellipsis. */
+const NAME_MAX = 40;
+
 /**
- * The words for each kind of movement. Fixed, never the ledger's own `reason`: for a manual
- * adjustment that is a staff note, and for a visit it can be a treatment name, which the ledger
- * deliberately does not treat as card content.
+ * The words for each kind of movement when there is no name to give. Fixed, never the ledger's own
+ * `reason`: for a manual adjustment that is a staff note, which must not reach a client's phone.
  */
 const LABELS: Record<Entry["kind"], string> = {
   visit: "Visita",
@@ -39,7 +40,7 @@ export const historyText = (card: Pick<LoyaltyCard, "history">): string | undefi
   return entries
     .map(
       (entry) =>
-        `${formatMadridDayMonth(new Date(entry.at), MONTHS_ES_REWARDS)} · ${LABELS[entry.kind]} · ${signed(entry.points)} puntos`
+        `${formatMadridDayMonth(new Date(entry.at), MONTHS_ES_REWARDS)} · ${entry.name ? clipText(entry.name, NAME_MAX, true) : LABELS[entry.kind]} · ${signed(entry.points)} puntos`
     )
     .join("\n");
 };

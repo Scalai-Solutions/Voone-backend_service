@@ -11,6 +11,8 @@ vi.mock("../../src/modules/onboarding/engine.config", async (importOriginal) => 
 import { run } from "../../src/modules/onboarding/engine";
 import type { CatalogItem } from "../../src/modules/onboarding/engine.types";
 import { isEngineError } from "../../src/modules/onboarding/engine.types";
+import { paymentReason } from "../../src/modules/onboarding/runtime/visit.service";
+import { treatmentNameOf } from "../../src/modules/onboarding/runtime/visit-reason";
 import { historyText } from "../../src/wallet/engine/history-text";
 import { loyaltyCardSchema, type LoyaltyCard } from "../../src/wallet/engine/loyalty-card";
 import { buildStoreCardFields } from "../../src/wallet/providers/apple/apple-pass.fields";
@@ -20,7 +22,7 @@ import catalogFixture from "../onboarding/reference/sapphira.catalogo.json";
 import { rewardsPass } from "../fixtures/loyalty-card.fixture";
 
 const history: NonNullable<LoyaltyCard["history"]> = [
-  { at: "2026-11-12T10:00:00.000Z", kind: "visit", points: 450 },
+  { at: "2026-11-12T10:00:00.000Z", kind: "visit", name: "Limpieza facial", points: 450 },
   { at: "2026-11-02T09:30:00.000Z", kind: "gift", points: 50 },
   { at: "2026-10-20T16:00:00.000Z", kind: "expiry", points: -120 }
 ];
@@ -31,7 +33,7 @@ describe("the history text, for the back of the Apple pass", () => {
   it("lists one line per movement, newest first as given, in the 'nov' style", () => {
     expect(historyText(withHistory)).toBe(
       [
-        "12 nov · Visita · +450 puntos",
+        "12 nov · Limpieza facial · +450 puntos",
         "2 nov · Puntos de regalo · +50 puntos",
         "20 oct · Caducidad · −120 puntos"
       ].join("\n")
@@ -42,6 +44,14 @@ describe("the history text, for the back of the Apple pass", () => {
     expect(
       historyText({ history: [{ at: "2026-11-12T23:30:00.000Z", kind: "visit", points: 10 }] })
     ).toBe("13 nov · Visita · +10 puntos");
+  });
+
+  it("cuts a long name with an ellipsis, so one line stays one line", () => {
+    const text = historyText({
+      history: [{ at: "2026-11-12T10:00:00.000Z", kind: "visit", name: "A".repeat(60), points: 10 }]
+    });
+
+    expect(text).toBe(`12 nov · ${"A".repeat(39)}… · +10 puntos`);
   });
 
   it("groups thousands the Spanish way", () => {
@@ -131,7 +141,7 @@ const row = (kind: string, points: number, createdAt: string) => ({
 });
 
 describe("PrismaLoyaltyCardAssembler: the history", () => {
-  it("asks for the latest ten movements, newest first with the id as tie-break, in the member's own query", async () => {
+  it("asks for the latest five movements, newest first with the id as tie-break, in the member's own query", async () => {
     const findUnique = vi.fn(async () => member);
 
     await assemblerFor(member, findUnique).assemble(member.id);
@@ -141,24 +151,78 @@ describe("PrismaLoyaltyCardAssembler: the history", () => {
         include: expect.objectContaining({
           pointsLedger: {
             orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-            take: 10,
-            select: { kind: true, points: true, createdAt: true }
+            take: 5,
+            select: { kind: true, points: true, reason: true, createdAt: true }
           }
         })
       })
     );
   });
 
-  it("never selects the ledger's reason, which is a staff note for an adjustment", async () => {
-    const findUnique = vi.fn(async () => member);
+  it("gives a visit the treatment name reception recorded, and a bare visit none", async () => {
+    const card = await assemblerFor({
+      ...member,
+      pointsLedger: [
+        {
+          ...row("EARN", 45, "2026-11-12T10:00:00.000Z"),
+          reason: "Visita de pago: Limpieza facial"
+        },
+        { ...row("EARN", 30, "2026-11-10T10:00:00.000Z"), reason: "Visita de pago" },
+        { ...row("EARN", 20, "2026-11-08T10:00:00.000Z"), reason: "Sesión de bono: Pack láser" },
+        {
+          ...row("EARN", 20, "2026-11-06T10:00:00.000Z"),
+          reason: "Visita de pago (doble por recomendación)"
+        }
+      ]
+    }).assemble(member.id);
 
-    await assemblerFor(member, findUnique).assemble(member.id);
+    expect(card.history?.map((entry) => entry.name)).toEqual([
+      "Limpieza facial",
+      undefined,
+      "Pack láser",
+      undefined
+    ]);
+  });
 
-    const args = findUnique.mock.calls[0] as unknown as [
-      { include: { pointsLedger: { select: Record<string, boolean> } } }
-    ];
+  it("uses a name only from a visit: a staff note on any other kind never becomes one", async () => {
+    const card = await assemblerFor({
+      ...member,
+      pointsLedger: [
+        { ...row("ADJUSTMENT", 30, "2026-11-12T10:00:00.000Z"), reason: "Visita de pago: Botox" },
+        { ...row("REFERRAL", 30, "2026-11-11T10:00:00.000Z"), reason: "Visita de pago: Botox" }
+      ]
+    }).assemble(member.id);
 
-    expect(args[0].include.pointsLedger.select).not.toHaveProperty("reason");
+    expect(card.history?.every((entry) => entry.name === undefined)).toBe(true);
+  });
+
+  it("reads back exactly the names the visit service writes", () => {
+    expect(treatmentNameOf(paymentReason([{ name: "Limpieza facial", amountEuro: 50 }]))).toBe(
+      "Limpieza facial"
+    );
+    expect(
+      treatmentNameOf(
+        paymentReason([
+          { name: "Limpieza facial", amountEuro: 50 },
+          { name: "Sérum", amountEuro: 20 }
+        ])
+      )
+    ).toBe("Limpieza facial, Sérum");
+    expect(treatmentNameOf(paymentReason([{ amountEuro: 50 }]))).toBeUndefined();
+  });
+
+  it("cuts a very long name to what the card accepts instead of failing the card", async () => {
+    const card = await assemblerFor({
+      ...member,
+      pointsLedger: [
+        {
+          ...row("EARN", 45, "2026-11-12T10:00:00.000Z"),
+          reason: `Visita de pago: ${"A".repeat(190)}`
+        }
+      ]
+    }).assemble(member.id);
+
+    expect(card.history?.[0].name?.length).toBeLessThanOrEqual(60);
   });
 
   it("puts the rows on the card as they are for a clinic with no programme", async () => {
