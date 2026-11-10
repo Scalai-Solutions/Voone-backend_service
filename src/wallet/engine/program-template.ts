@@ -45,7 +45,9 @@ export const contactButtonsOf = (clinic: ClinicContact) => {
 
   return [
     ...(digits ? [{ label: "Llamar al centro", url: `tel:${digits}` }] : []),
-    ...(clinic.contactEmail ? [{ label: "Escribir al centro", url: `mailto:${clinic.contactEmail}` }] : [])
+    ...(clinic.contactEmail
+      ? [{ label: "Escribir al centro", url: `mailto:${clinic.contactEmail}` }]
+      : [])
   ].filter((button) => cardButtonSchema.safeParse(button).success);
 };
 

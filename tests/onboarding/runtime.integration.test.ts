@@ -383,7 +383,10 @@ describe("what earns progress", () => {
     // 360 euros were paid; 60 earned. "Dinero gastado" reads the 360.
     expect(out.progress).toBe(60);
     expect(
-      await db.paidVisit.findFirstOrThrow({ where: { memberId: m.id }, select: { amountCents: true, paidCents: true } })
+      await db.paidVisit.findFirstOrThrow({
+        where: { memberId: m.id },
+        select: { amountCents: true, paidCents: true }
+      })
     ).toEqual({ amountCents: 6000, paidCents: 36000 });
   });
 

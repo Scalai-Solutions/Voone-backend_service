@@ -176,7 +176,9 @@ describe("AutomationDispatchService", () => {
       clinicId: "c1",
       event: "TIER_UPGRADE",
       idempotencyKey: "tier:m1:Bronce",
-      recipients: [{ memberId: "m1", values: { new_tier: "Bronce", benefits_summary: "descuentos" } }],
+      recipients: [
+        { memberId: "m1", values: { new_tier: "Bronce", benefits_summary: "descuentos" } }
+      ],
       copy: TIER_WELCOME_COPY
     });
 
