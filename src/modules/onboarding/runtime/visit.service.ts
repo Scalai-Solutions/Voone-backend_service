@@ -398,7 +398,7 @@ export class VisitService {
 
         // Behind the same lock, so two sessions recorded at once cannot take the same number.
         const bono = input.kind === "BONO_SESSION" ? await this.resolveBono(tx, input) : null;
-        const { cents, hasTreatment } = this.price(input, bono);
+        const { cents, paidCents, hasTreatment } = this.price(input, bono);
 
         if (discounted > 0) {
           const used = await tx.paidVisit.aggregate({
@@ -461,6 +461,7 @@ export class VisitService {
             source: VisitSource.STAFF_ENTRY,
             // What EARNS progress, not what was paid: the table holds the number the maths used.
             amountCents: cents,
+            paidCents,
             hasTreatment,
             discountedProducts: discounted,
             idempotencyKey: input.idempotencyKey,
@@ -625,14 +626,14 @@ export class VisitService {
     };
   }
 
-  /** What the visit earns, and whether it counts as treatment — or a clear refusal. */
+  /** What the visit earns and what was paid, and whether it counts as treatment — or a clear refusal. */
   private price(
     input: RecordVisitInput,
     bono: ResolvedBono | null
-  ): { cents: number; hasTreatment: boolean } {
+  ): { cents: number; paidCents: number; hasTreatment: boolean } {
     if (input.kind === "BONO_SESSION") {
       // A tracked bono's session is worth exactly what the plan says per session.
-      if (bono) return { cents: bono.cents, hasTreatment: true };
+      if (bono) return { cents: bono.cents, paidCents: bono.cents, hasTreatment: true };
 
       const pack = input.package;
 
@@ -642,7 +643,7 @@ export class VisitService {
 
       const cents = bonoSessionCents(toCents(pack.priceEuro), pack.sessions);
 
-      return { cents, hasTreatment: true };
+      return { cents, paidCents: cents, hasTreatment: true };
     }
 
     const lines = input.lines ?? [];
@@ -665,7 +666,11 @@ export class VisitService {
       }
     }
 
-    return { cents: earningCents(asLines), hasTreatment: includesTreatment(asLines) };
+    return {
+      cents: earningCents(asLines),
+      paidCents: totalCents,
+      hasTreatment: includesTreatment(asLines)
+    };
   }
 
   /**

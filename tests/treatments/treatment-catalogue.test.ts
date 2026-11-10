@@ -357,6 +357,7 @@ describe("deleting", () => {
         memberId: member.id,
         kind: VisitKind.PAYMENT,
         amountCents: 8000,
+        paidCents: 8000,
         idempotencyKey: "tr-visit-1",
         occurredAt: new Date("2026-10-01T10:00:00Z")
       }

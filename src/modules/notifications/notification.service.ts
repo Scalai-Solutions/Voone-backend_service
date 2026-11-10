@@ -371,7 +371,7 @@ export class NotificationService {
   }
 
   /**
-   * A member just saved their Google pass: congratulate them on the tier they start in (Bronce),
+   * A member just saved their Google pass: welcome them to the tier they start in (Bronce),
    * now that a device holds the pass and the push can reach it. Not after the first treatment:
    * they were in that tier from the start. The same automation and idempotency key as a real
    * upgrade, so a Google retry, or a later move into the same tier, never sends it twice.
@@ -387,7 +387,8 @@ export class NotificationService {
     return this.tierUpgrades.notify({
       memberId: member.id,
       clinicId: member.clinicId,
-      newTier: member.tier
+      newTier: member.tier,
+      welcome: true
     });
   }
 

@@ -52,6 +52,11 @@ model Clinic {
   billingAddressLine String?
   billingPostalCode  String?
 
+  /// How members reach the centre, from onboarding: tappable call and email buttons on every
+  /// wallet card. Null when unset.
+  contactPhone String?
+  contactEmail String?
+
   users                 User[]
   treatments            ClinicTreatment[]
   template              ClinicTemplate?
@@ -877,6 +882,11 @@ model PaidVisit {
   /// For PAYMENT, what was paid that earns progress. For BONO_SESSION, the package price
   /// divided by its sessions. Cents, for the same reason as CatalogItem.priceCents.
   amountCents Int
+
+  /// What the client actually paid ("Dinero gastado"), medicine included, which earns no
+  /// progress and so is missing from amountCents. Equals amountCents for a bono session.
+  /// Defaults to 0 only so a backend older than this column can still record visits.
+  paidCents Int @default(0)
 
   /// False when the visit was retail only. A referral counts on the referred person's
   /// first payment for a TREATMENT, so buying a moisturiser must not trigger it.

@@ -84,7 +84,7 @@ const serviceFor = (
       groupBy: async () => [
         {
           memberId: "m-1",
-          _sum: { amountCents: 6000 },
+          _sum: { paidCents: 6000 },
           _max: { occurredAt: new Date("2026-10-19T10:00:00Z") }
         }
       ]

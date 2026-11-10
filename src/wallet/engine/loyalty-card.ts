@@ -47,7 +47,11 @@ export const cardTemplateSchema = z.object({
   appointmentUrl: z.string().url().max(2048).optional(),
   appLinkText: z.string().min(1).max(30).optional(),
   appLinkDescription: z.string().min(1).max(120).optional(),
-  extraButtons: z.array(cardButtonSchema).max(CARD_EXTRA_BUTTONS_MAX).optional(),
+  // The clinic's own buttons plus its two contact ones (call, email).
+  extraButtons: z
+    .array(cardButtonSchema)
+    .max(CARD_EXTRA_BUTTONS_MAX + 2)
+    .optional(),
   pointsLabel: z.string().min(1).max(32),
   tierLabel: z.string().min(1).max(32),
   benefitsText: z.string().min(1).max(CARD_TEXT_MAX_LENGTH).optional(),

@@ -122,6 +122,8 @@ const createClinicWithTemplate = (
           name: input.name,
           addressLine: input.addressLine,
           pincode: input.pincode,
+          contactPhone: input.contactPhone || null,
+          contactEmail: input.contactEmail || null,
           // A new centre is a draft until onboarding finishes and it is activated: no public
           // sign-up page, no notifications (founders' E2E items 15-17).
           isActive: false,

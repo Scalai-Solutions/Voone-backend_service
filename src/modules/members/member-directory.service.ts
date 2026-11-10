@@ -614,7 +614,7 @@ export class MemberDirectoryService {
     const rows = await this.prisma.paidVisit.groupBy({
       by: ["memberId"],
       where: { clinicId, memberId: { in: memberIds } },
-      _sum: { amountCents: true },
+      _sum: { paidCents: true },
       _max: { occurredAt: true }
     });
 
@@ -622,7 +622,7 @@ export class MemberDirectoryService {
       rows.map((row) => [
         row.memberId,
         {
-          moneySpent: (row._sum.amountCents ?? 0) / 100,
+          moneySpent: (row._sum.paidCents ?? 0) / 100,
           lastVisitedAt: row._max.occurredAt?.toISOString() ?? null
         }
       ])

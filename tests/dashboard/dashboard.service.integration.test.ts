@@ -69,6 +69,7 @@ const visit = (clinicId: string, memberId: string, amountCents: number, at: stri
       memberId,
       kind: VisitKind.PAYMENT,
       amountCents,
+      paidCents: amountCents,
       idempotencyKey: `dash-visit-${seq}`,
       occurredAt: new Date(at)
     }

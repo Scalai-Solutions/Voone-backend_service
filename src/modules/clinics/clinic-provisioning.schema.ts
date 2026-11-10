@@ -10,6 +10,9 @@ import {
 } from "../templates/default-voone-template";
 import { createTemplateSchema, treatmentInputSchema } from "../templates/templates.schema";
 
+/** Digits with the usual separators, as a person types a landline or mobile. */
+export const CONTACT_PHONE_PATTERN = /^\+?[\d\s().-]{6,24}$/;
+
 /**
  * Onboards a clinic.
  *
@@ -41,6 +44,20 @@ export const provisionClinicSchema = z.object({
   pincode: z.string().trim().min(3, "Añade el código postal").max(12),
   ownerName: z.string().trim().min(2).max(120).optional().or(z.literal("")),
   ownerEmail: z.string().trim().toLowerCase().email().max(254).optional().or(z.literal("")),
+  contactPhone: z
+    .string()
+    .trim()
+    .regex(CONTACT_PHONE_PATTERN, "Teléfono del centro no válido")
+    .optional()
+    .or(z.literal("")),
+  contactEmail: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .email("Email del centro no válido")
+    .max(254)
+    .optional()
+    .or(z.literal("")),
 
   presetId: z.string().trim().min(1, "Elige un preset"),
   programName: z.string().trim().min(2, "Añade el nombre del programa").max(120),

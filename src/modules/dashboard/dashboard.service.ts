@@ -39,7 +39,7 @@ export interface DashboardOverview {
   revenueThisMonthCents: number;
   /** The old `pointsIssuedThisMonth` figure, honestly named: all time, same source, in cents. */
   revenueAllTimeCents: number;
-  /** Real euros recorded through visits, all time, in cents. Same source as revenueAllTimeCents. */
+  /** What clients actually paid through visits, all time, in cents: PaidVisit.paidCents, medicine included. */
   moneySpentTotalCents: number;
   /**
    * Rewards redeemed this month: programme rewards by MemberReward.redeemedAt (not counting a
@@ -161,7 +161,7 @@ export class DashboardService {
       () =>
         this.prisma.paidVisit.aggregate({
           where: { clinicId },
-          _sum: { amountCents: true }
+          _sum: { amountCents: true, paidCents: true }
         }),
 
       () =>
@@ -254,7 +254,7 @@ export class DashboardService {
       pointsIssuedThisMonth: programme ? toPoints(creditedProgress) : creditedProgress,
       revenueThisMonthCents: revenueMonth._sum.amountCents ?? 0,
       revenueAllTimeCents: allTimeCents,
-      moneySpentTotalCents: allTimeCents,
+      moneySpentTotalCents: revenueAllTime._sum.paidCents ?? 0,
       rewardsRedeemedThisMonth: programmeRedeemed + ledgerRedeemed,
       topClientsThisMonth: topSpenders.map((row) => ({
         memberId: row.memberId,
