@@ -1,5 +1,5 @@
 import { CLINIC_TIME_ZONE, dayKeyIn, startOfYearIn } from "../../../common/utils/zoned-month";
-import { P, TIERS } from "../engine.config";
+import { CATEGORIES, P, TIERS } from "../engine.config";
 import { rha } from "../engine.math";
 import type { CategoryCode, TierCode } from "../engine.types";
 import { RUNTIME_DECISIONS } from "./decisions";
@@ -105,19 +105,17 @@ export interface PurchaseLine {
 }
 
 /**
- * The part of a purchase that earns progress: every line, medicine included (product decision
- * 2026-11-10). Medicine is still never a reward (CATEGORIES[...].reward).
+ * The part of a purchase that earns progress.
  *
- * The previous rule, kept for reference: pharmacological medicine and medical acts (MFA, MNF)
- * earned nothing, described as a legal constraint in Spain. Restore it by uncommenting
- * (and importing CATEGORIES from ../engine.config again).
+ * Pharmacological medicine and medical acts earn nothing, which is a legal constraint in
+ * Spain rather than a product preference: the guide is explicit, and the counter at reception
+ * is where it has to hold. A line with no category is an ordinary treatment.
  */
 export const earningCents = (lines: PurchaseLine[]): number =>
   lines.reduce((sum, line) => {
-    // const earns = !line.category || CATEGORIES[line.category]?.points !== false;
-    // return earns ? sum + line.amountCents : sum;
+    const earns = !line.category || CATEGORIES[line.category]?.points !== false;
 
-    return sum + line.amountCents;
+    return earns ? sum + line.amountCents : sum;
   }, 0);
 
 /** Treatment rather than retail, which is what a referral needs on a first payment. */
