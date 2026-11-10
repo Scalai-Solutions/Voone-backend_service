@@ -106,6 +106,7 @@ const person = (phone: string, extra: Record<string, unknown> = {}) => ({
 });
 
 const wipe = async (): Promise<void> => {
+  await db.memberSaving.deleteMany({ where: { clinicId: clinic.id } });
   await db.memberReward.deleteMany({ where: { clinicId: clinic.id } });
   await db.referral.deleteMany({ where: { clinicId: clinic.id } });
   await db.pointsTransaction.deleteMany({ where: { clinicId: clinic.id } });

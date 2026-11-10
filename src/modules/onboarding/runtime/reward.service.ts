@@ -4,6 +4,7 @@ import { POST_CHANGE_SYNC_DELAY_MS } from "../../../wallet/engine/wallet-sync.qu
 import { OnboardingError } from "../onboarding.service";
 import { publicDouble, pendingDouble, type DoublePoints } from "./double-points";
 import { checkRedemption, isDoublePointsPerk, isInSurprisePool } from "./rules";
+import { giftSaving, parsePerkValues, recordSaving } from "./savings";
 
 /**
  * Listing and redeeming the rewards a member has been issued.
@@ -191,14 +192,40 @@ export class RewardService {
     // The guard in the WHERE clause is what makes this safe under a race: two receptionists
     // redeeming the same reward at once both pass the check above, and exactly one update
     // matches a row that is still unredeemed.
-    const updated = await this.prisma.memberReward.updateMany({
-      where: { id: reward.id, redeemedAt: null },
-      data: {
-        redeemedAt: now,
-        redeemedVisitId: visit!.id,
-        redeemedBy: input.redeemedBy,
-        surpriseItem: isSurprise ? input.surpriseItem : null
+    //
+    // What the gift saved the member is written in the same transaction, only once this update has
+    // won: a redemption that lost the race must not count, and one that counts must not be lost.
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.memberReward.updateMany({
+        where: { id: reward.id, redeemedAt: null },
+        data: {
+          redeemedAt: now,
+          redeemedVisitId: visit!.id,
+          redeemedBy: input.redeemedBy,
+          surpriseItem: isSurprise ? input.surpriseItem : null
+        }
+      });
+
+      if (result.count === 0) return result;
+
+      const clinic = await tx.clinic.findUnique({
+        where: { id: reward.clinicId },
+        select: { perkValues: true }
+      });
+      const saving = giftSaving(reward.kind, reward.detail, parsePerkValues(clinic?.perkValues));
+
+      if (saving) {
+        await recordSaving(tx, {
+          clinicId: reward.clinicId,
+          memberId: reward.memberId,
+          kind: saving.kind,
+          cents: saving.cents,
+          sourceKey: `reward:${reward.id}`,
+          createdBy: input.redeemedBy
+        });
       }
+
+      return result;
     });
 
     if (updated.count === 0) throw new OnboardingError("Este premio ya se canjeó.", 409);

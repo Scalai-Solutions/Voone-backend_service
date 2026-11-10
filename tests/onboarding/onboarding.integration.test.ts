@@ -386,6 +386,33 @@ describe("the Prize (Y/N) answers and a live programme", () => {
     expect(await service.prizeStatus(clinic.id)).toEqual({ usesPrize: true, liveOutdated: false });
   });
 
+  it("keeps what the centre says each perk is worth, in euros, and clears one with null or 0", async () => {
+    expect(await service.perkValues(clinic.id)).toEqual({
+      diag: null,
+      mejora: null,
+      sorpresa: null
+    });
+
+    expect(await service.setPerkValues(clinic.id, { diag: 40, sorpresa: 25.5 })).toEqual({
+      diag: 40,
+      mejora: null,
+      sorpresa: 25.5
+    });
+
+    // A key left out keeps its value; null and 0 clear.
+    expect(await service.setPerkValues(clinic.id, { mejora: 10, diag: null })).toEqual({
+      diag: null,
+      mejora: 10,
+      sorpresa: 25.5
+    });
+    expect(await service.setPerkValues(clinic.id, { mejora: 0, sorpresa: null })).toEqual({
+      diag: null,
+      mejora: null,
+      sorpresa: null
+    });
+    expect((await db.clinic.findUniqueOrThrow({ where: { id: clinic.id } })).perkValues).toBeNull();
+  });
+
   it("refuses to redraft a clinic with no live programme", async () => {
     await repo.replaceForClinic(clinic.id, asInput(fixture));
 

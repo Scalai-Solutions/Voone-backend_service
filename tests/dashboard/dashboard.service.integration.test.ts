@@ -38,6 +38,7 @@ const serviceAt = (iso: string) =>
   );
 
 const wipe = async (clinicId: string): Promise<void> => {
+  await db.memberSaving.deleteMany({ where: { clinicId } });
   await db.memberReward.deleteMany({ where: { clinicId } });
   await db.paidVisit.deleteMany({ where: { clinicId } });
   await db.pointsTransaction.deleteMany({ where: { clinicId } });

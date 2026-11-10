@@ -909,7 +909,7 @@ adminClinicsRouter.delete(
      * added after this handler was written and are the reason deletes of any clinic with
      * real activity failed.
      *
-     * The timeout is raised above Prisma's 5s default because these are thirteen
+     * The timeout is raised above Prisma's 5s default because these are fourteen
      * sequential round trips over tables a real clinic has filled — members, ledgers,
      * visits, rewards — and at ~600ms each the default is reached around the eighth
      * query, whereupon Prisma abandons the transaction mid-list (P2028) and the clinic
@@ -923,6 +923,7 @@ adminClinicsRouter.delete(
         await tx.notificationDelivery.deleteMany({ where: { member: { clinicId: clinic.id } } });
         // Rewards reference PaidVisit (redeemedVisitId) and OnboardingProgram, so they go first.
         await tx.memberReward.deleteMany({ where: { clinicId: clinic.id } });
+        await tx.memberSaving.deleteMany({ where: { clinicId: clinic.id } });
         await tx.paidVisit.deleteMany({ where: { clinicId: clinic.id } });
         await tx.referral.deleteMany({ where: { clinicId: clinic.id } });
         await tx.pointsTransaction.deleteMany({ where: { clinicId: clinic.id } });

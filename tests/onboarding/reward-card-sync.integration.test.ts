@@ -106,6 +106,7 @@ const pay = (memberId: string, amountEuro: number, key: string) =>
   });
 
 const wipe = async (): Promise<void> => {
+  await db.memberSaving.deleteMany({ where: { clinicId: clinic.id } });
   await db.memberReward.deleteMany({ where: { clinicId: clinic.id } });
   await db.referral.deleteMany({ where: { clinicId: clinic.id } });
   await db.paidVisit.deleteMany({ where: { clinicId: clinic.id } });

@@ -117,7 +117,17 @@ const lineSchema = z.object({
   amountEuro: z
     .number({ message: "El importe tiene que ser un número" })
     .min(0, "El importe no puede ser negativo")
-    .max(100_000, "El importe es demasiado alto")
+    .max(100_000, "El importe es demasiado alto"),
+  /**
+   * Set on a cosmetics line bought at the tier discount: what that product costs at list price,
+   * before the discount. It is what the member's savings are worked out from, and its presence is
+   * what marks the line as a discounted product.
+   */
+  discountedListPriceEuro: z
+    .number({ message: "El precio de lista tiene que ser un número" })
+    .positive("El precio de lista tiene que ser mayor que cero")
+    .max(100_000, "El precio de lista es demasiado alto")
+    .optional()
 });
 
 /** The multipliers reception's slider offers; it flags its flat extra so a x2 can ignore it. */
@@ -177,6 +187,21 @@ export const calculatorSchema = z.object({
   clients: z.number({ message: "Los clientes tienen que ser un número" }).optional(),
   ticket: z.number({ message: "El ticket medio tiene que ser un número" }).optional()
 });
+
+/**
+ * What each kind of perk is worth to a member, in euros, for the savings total. A key left out keeps
+ * its value; null or 0 clears it. The double-points perk is not among them: it is points, not money.
+ */
+const perkValueEuro = z
+  .number({ message: "El valor tiene que ser un número" })
+  .min(0, "El valor no puede ser negativo")
+  .max(10_000, "El valor es demasiado alto")
+  .nullable()
+  .optional();
+
+export const perkValuesSchema = z
+  .object({ diag: perkValueEuro, mejora: perkValueEuro, sorpresa: perkValueEuro })
+  .strict();
 
 export const tierBenefitsSchema = z.object({
   benefits: z

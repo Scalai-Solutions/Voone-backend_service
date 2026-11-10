@@ -27,6 +27,7 @@ import { classify, estimate } from "./engine";
 import type { Answers, CatalogItem, EngineError, Program, TierCode } from "./engine.types";
 import { isEngineError } from "./engine.types";
 import { placeMembersOnProgram } from "./runtime/placement";
+import { parsePerkValues, PERK_VALUE_KEYS, type PerkValues } from "./runtime/savings";
 import { recalibrationAdvice, type RecalibrationAdvice } from "./runtime/rules";
 import { swapReward, swapRewardToItem } from "./swap";
 import { applyTexts, type TextEdits } from "./texts";
@@ -222,6 +223,52 @@ export class OnboardingService {
         prizeSignature(current) !==
           prizeSignature((live.catalogSnapshot ?? []) as unknown as CatalogItem[])
     };
+  }
+
+  /** What the centre says each perk is worth to a member, in euros, for the savings total. */
+  async perkValues(clinicId: string): Promise<Record<string, number | null>> {
+    const clinic = await this.prisma.clinic.findUniqueOrThrow({
+      where: { id: clinicId },
+      select: { perkValues: true }
+    });
+    const stored = parsePerkValues(clinic.perkValues);
+
+    return Object.fromEntries(
+      PERK_VALUE_KEYS.map((key) => [key, stored[key] === undefined ? null : stored[key]! / 100])
+    );
+  }
+
+  /**
+   * Sets the value of the perks named, in euros; null or 0 clears one. Applies from the next
+   * redemption: what members already saved was written with its own amount and is not touched.
+   */
+  async setPerkValues(
+    clinicId: string,
+    edits: Partial<Record<(typeof PERK_VALUE_KEYS)[number], number | null | undefined>>
+  ): Promise<Record<string, number | null>> {
+    const clinic = await this.prisma.clinic.findUniqueOrThrow({
+      where: { id: clinicId },
+      select: { perkValues: true }
+    });
+    const next: PerkValues = parsePerkValues(clinic.perkValues);
+
+    for (const key of PERK_VALUE_KEYS) {
+      const euros = edits[key];
+
+      if (euros === undefined) continue;
+
+      const cents = euros === null ? 0 : Math.round(euros * 100);
+
+      if (cents > 0) next[key] = cents;
+      else delete next[key];
+    }
+
+    await this.prisma.clinic.update({
+      where: { id: clinicId },
+      data: { perkValues: Object.keys(next).length ? next : Prisma.DbNull }
+    });
+
+    return this.perkValues(clinicId);
   }
 
   /**

@@ -23,6 +23,7 @@ import {
   catalogPatchSchema,
   catalogReplaceSchema,
   csvImportSchema,
+  perkValuesSchema,
   redeemSchema,
   calculatorSchema,
   swapSchema,
@@ -496,6 +497,25 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
     })
   );
 
+  /** What the centre says each perk is worth to a member, which the savings total counts. */
+  router.get(
+    "/admin/clinics/:clinicId/onboarding/perk-values",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      res.json(await deps.onboarding.perkValues(await clinicOr404(req.params.clinicId)));
+    })
+  );
+
+  router.put(
+    "/admin/clinics/:clinicId/onboarding/perk-values",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const edits = parse(perkValuesSchema, req.body);
+
+      res.json(await deps.onboarding.setPerkValues(await clinicOr404(req.params.clinicId), edits));
+    })
+  );
+
   /** Whether the clinic marks prizes, and whether its live programme predates the current answers. */
   router.get(
     "/admin/clinics/:clinicId/onboarding/prize-status",
@@ -573,7 +593,8 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
               lines: body.lines.map((l) => ({
                 name: l.name,
                 amountEuro: l.amountEuro,
-                category: l.category as CategoryCode | undefined
+                category: l.category as CategoryCode | undefined,
+                discountedListPriceEuro: l.discountedListPriceEuro
               })),
               discountedProducts: body.discountedProducts
             }

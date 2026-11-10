@@ -464,11 +464,13 @@ export const buildClassTemplateInfo = (
           )
         }
       },
-      // How many rewards are waiting: the stamp-card count, on the front of the card. Absent
-      // from objects of a clinic with no programme, where the row simply does not render.
+      // How many rewards are waiting: the stamp-card count, on the front of the card, and beside it
+      // what the programme has saved the member. Each is absent from objects that do not carry it (a
+      // clinic with no programme, a member who has saved nothing), where its cell simply stays empty.
       {
-        oneItem: {
-          item: toTemplateItem("object.textModulesData['rewards_count']")
+        twoItems: {
+          startItem: toTemplateItem("object.textModulesData['rewards_count']"),
+          endItem: toTemplateItem("object.textModulesData['savings']")
         }
       }
     ]

@@ -57,8 +57,14 @@ export interface MilestoneView {
 export interface ProgramView {
   tiers: TierView[];
   milestones: MilestoneView[];
-  recurring: { every: number; startsAt: number; title: string };
-  referral: Array<{ n: number; title: string; items: Array<{ id: string; name: string }> }>;
+  /** `value`: the reward's retail value in euros, kept on what is issued so a saving can count it. */
+  recurring: { every: number; startsAt: number; title: string; value?: number };
+  referral: Array<{
+    n: number;
+    title: string;
+    items: Array<{ id: string; name: string }>;
+    value?: number;
+  }>;
   /** Progress a referred client starts with. */
   welcome: number;
 }
@@ -119,11 +125,17 @@ export const programView = (output: Program): ProgramView => {
   return {
     tiers,
     milestones,
-    recurring: { every: output.rec.every, startsAt: diamond, title: rewardTitle(output.rec) },
+    recurring: {
+      every: output.rec.every,
+      startsAt: diamond,
+      title: rewardTitle(output.rec),
+      value: output.rec.o.value
+    },
     referral: output.refLad.map((r) => ({
       n: r.n,
       title: r.name,
-      items: r.o.items.map((i) => ({ id: i.id, name: i.name }))
+      items: r.o.items.map((i) => ({ id: i.id, name: i.name })),
+      value: r.o.value
     })),
     welcome: output.welcome
   };

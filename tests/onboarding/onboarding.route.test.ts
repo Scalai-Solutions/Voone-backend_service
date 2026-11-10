@@ -125,6 +125,7 @@ const fixtureItems = (catalogFixture as CatalogItem[]).map((i) => ({
 const admin = (suffix: string) => `/admin/clinics/${clinic.id}/onboarding${suffix}`;
 
 const wipe = async (): Promise<void> => {
+  await db.memberSaving.deleteMany({ where: { clinicId: clinic.id } });
   await db.memberReward.deleteMany({ where: { clinicId: clinic.id } });
   await db.referral.deleteMany({ where: { clinicId: clinic.id } });
   await db.paidVisit.deleteMany({ where: { clinicId: clinic.id } });

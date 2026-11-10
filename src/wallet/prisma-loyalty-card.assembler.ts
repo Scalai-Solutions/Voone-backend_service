@@ -377,6 +377,9 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
           }
         : undefined,
       history: historyFor(member.pointsLedger ?? [], Boolean(live)),
+      // Euros, as a programme centre's prices are. Nothing until the first saving.
+      savings:
+        member.savingsCents > 0 ? { cents: member.savingsCents, currency: "EUR" } : undefined,
       // A pending x2, for a programme centre only.
       boost: live
         ? await boostFor(

@@ -5,6 +5,7 @@ import { DEFAULT_WALLET_BENEFIT_CTA } from "../../../modules/templates/default-v
 import { availableRewardCount, availableRewardsText } from "../../engine/rewards-text";
 import { boostText } from "../../engine/boost-text";
 import { historyText } from "../../engine/history-text";
+import { savingsText } from "../../engine/savings-text";
 import { tierBenefitsText } from "../../engine/tier-benefits-text";
 import { BaseWalletProvider } from "../../engine/base-wallet-provider";
 import type { LoyaltyCard } from "../../engine/loyalty-card";
@@ -99,6 +100,7 @@ export class GoogleWalletProvider extends BaseWalletProvider {
           !input.boost &&
           !input.referral &&
           !input.history &&
+          !input.savings &&
           !input.nextReward) ||
         !(error instanceof GoogleWalletApiError) ||
         error.status !== 400
@@ -120,7 +122,8 @@ export class GoogleWalletProvider extends BaseWalletProvider {
         boost: undefined,
         nextReward: undefined,
         referral: undefined,
-        history: undefined
+        history: undefined,
+        savings: undefined
       });
     }
 
@@ -153,6 +156,7 @@ export class GoogleWalletProvider extends BaseWalletProvider {
     const nextReward = this.toNextReward(card);
     const referral = this.toReferral(card);
     const history = this.toHistory(card);
+    const savings = this.toSavings(card);
 
     try {
       await patchObject(ref.externalId, {
@@ -163,7 +167,9 @@ export class GoogleWalletProvider extends BaseWalletProvider {
         nextReward: nextReward ?? null,
         referral: referral ?? null,
         // No movements removes a stale module, exactly as for the boost.
-        history: history ?? null
+        history: history ?? null,
+        // Nothing saved yet removes a stale module, exactly as for the history.
+        savings: savings ?? null
       });
     } catch (error) {
       console.error("[wallet] Google card rewards and tier benefits were not updated", {
@@ -354,6 +360,7 @@ export class GoogleWalletProvider extends BaseWalletProvider {
       nextReward: this.toNextReward(card),
       referral: this.toReferral(card),
       history: this.toHistory(card),
+      savings: this.toSavings(card),
       state: "ACTIVE"
     };
   }
@@ -399,6 +406,13 @@ export class GoogleWalletProvider extends BaseWalletProvider {
   /** The same lines the Apple back field carries, so the two wallets never disagree. */
   private toHistory(card: LoyaltyCard): LoyaltyOptionalModuleInput | undefined {
     const text = historyText(card);
+
+    return text === undefined ? undefined : { text };
+  }
+
+  /** The same total the Apple front field carries, so the two wallets never disagree. */
+  private toSavings(card: LoyaltyCard): LoyaltyOptionalModuleInput | undefined {
+    const text = savingsText(card);
 
     return text === undefined ? undefined : { text };
   }
