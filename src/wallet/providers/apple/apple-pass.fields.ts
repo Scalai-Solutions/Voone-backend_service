@@ -83,6 +83,19 @@ export const buildStoreCardFields = (data: LoyaltyCard): StoreCardFields => {
     });
   }
 
+  // What the programme has saved the member, on the front beside the name and number. Absent until
+  // the first saving, so a new member's card has no cell that reads zero. No changeMessage: a total
+  // that only ever grows is not worth a lock-screen alert on its own.
+  if (data.savings) {
+    secondaryFields.push({
+      key: "savings",
+      label: PASS_LABELS.savings,
+      value: data.savings.cents / 100,
+      currencyCode: data.savings.currency,
+      textAlignment: "PKTextAlignmentRight"
+    });
+  }
+
   if (data.reward) {
     // iOS shrinks a long value to fit its cell, so a sentence here is unreadable. Where the reward's
     // name and the distance are known apart, the cell carries only the distance and the name goes

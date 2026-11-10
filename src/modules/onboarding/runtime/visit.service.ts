@@ -1,6 +1,7 @@
 import {
   MemberBonoStatus,
   MemberRewardKind,
+  MemberSavingKind,
   PointsTransactionKind,
   VisitKind,
   VisitSource,
@@ -23,6 +24,7 @@ import { CATEGORIES } from "../engine.config";
 import { OnboardingError } from "../onboarding.service";
 import { activeProgramView } from "./program-tier.port";
 import type { ProgramView } from "./program-view";
+import { discountSaving, recordSaving } from "./savings";
 import { BONO_REASON_PREFIX, PAYMENT_REASON_PREFIX } from "./visit-reason";
 import {
   bonoSessionCents,
@@ -67,6 +69,12 @@ export interface VisitLine {
   name?: string;
   category?: CategoryCode;
   amountEuro: number;
+  /**
+   * A cosmetics line bought at the tier discount: its list price in euros, before the discount.
+   * Marks the line as a discounted product and is what the member's savings are worked out from.
+   * It never changes what the visit earns.
+   */
+  discountedListPriceEuro?: number;
 }
 
 export interface RecordVisitInput {
@@ -362,7 +370,31 @@ export class VisitService {
    */
   private async open(input: RecordVisitInput, view: ProgramView) {
     const occurredAt = input.occurredAt ?? this.now();
-    const discounted = input.discountedProducts ?? 0;
+    const marked = (input.lines ?? []).filter((l) => l.discountedListPriceEuro !== undefined);
+
+    // One count feeds both the yearly allowance and the savings. If the typed count and the marked
+    // lines disagreed, picking either would let a caller use up the allowance without it showing,
+    // or save more than they used.
+    if (
+      input.discountedProducts !== undefined &&
+      marked.length > 0 &&
+      input.discountedProducts !== marked.length
+    ) {
+      throw new OnboardingError(
+        "El número de productos con descuento no coincide con las líneas marcadas.",
+        400
+      );
+    }
+
+    if (marked.some((l) => l.category !== undefined && l.category !== "COS")) {
+      throw new OnboardingError(
+        "El descuento de nivel solo se aplica a productos de cosmética.",
+        400
+      );
+    }
+
+    const discounted = input.discountedProducts ?? marked.length;
+    const listCents = marked.reduce((sum, l) => sum + toCents(l.discountedListPriceEuro ?? 0), 0);
 
     if (
       input.bonusPoints !== undefined &&
@@ -467,6 +499,7 @@ export class VisitService {
             paidCents,
             hasTreatment,
             discountedProducts: discounted,
+            discountedListCents: listCents > 0 ? listCents : null,
             idempotencyKey: input.idempotencyKey,
             memberBonoId: bono?.id ?? null,
             bonoSessionNumber: bono?.session ?? null,
@@ -479,6 +512,23 @@ export class VisitService {
             createdBy: input.createdBy
           }
         });
+
+        // What the tier's discount saved, from the tier held NOW, under the same lock as the visit.
+        // The rate is kept on the row: the tier a member holds changes, what they saved then does not.
+        const rate = tier?.discount ?? 0;
+        const saved = discounted > 0 ? discountSaving(listCents, rate) : 0;
+
+        if (saved > 0) {
+          await recordSaving(tx, {
+            clinicId: input.clinicId,
+            memberId: input.memberId,
+            kind: MemberSavingKind.DISCOUNT,
+            cents: saved,
+            sourceKey: `visit:${visit.id}`,
+            discountRate: rate,
+            createdBy: input.createdBy
+          });
+        }
 
         // Consume the session in the same commit as the visit that used it: a crash between
         // the two cannot leave a session both recorded and still available.
@@ -717,7 +767,10 @@ export class VisitService {
         kind: MemberRewardKind.RECURRENTE,
         sourceKey: `v${version}:rec:${k}`,
         title: view.recurring.title,
-        detail: { every: view.recurring.every } as Prisma.InputJsonValue
+        detail: {
+          every: view.recurring.every,
+          ...(view.recurring.value ? { value: view.recurring.value } : {})
+        } as Prisma.InputJsonValue
       }))
     ];
 
@@ -794,7 +847,11 @@ export class VisitService {
           kind: MemberRewardKind.REFERIDO,
           sourceKey: reward.sourceKey,
           title: reward.title,
-          detail: { referral: rank, step: reward.step } as Prisma.InputJsonValue,
+          detail: {
+            referral: rank,
+            step: reward.step,
+            ...(reward.value ? { value: reward.value } : {})
+          } as Prisma.InputJsonValue,
           issuedAt: counted.countedAt,
           expiresAt: rewardExpiry(counted.countedAt)
         }

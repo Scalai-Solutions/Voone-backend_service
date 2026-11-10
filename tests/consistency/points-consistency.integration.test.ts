@@ -241,6 +241,7 @@ const wipe = async (clinicId: string): Promise<void> => {
   await db.applePassCredential.deleteMany({ where: { serialNumber: { in: serials } } });
   await db.notificationDelivery.deleteMany({ where: { member: { clinicId } } });
   await db.notification.deleteMany({ where: { clinicId } });
+  await db.memberSaving.deleteMany({ where: { clinicId } });
   await db.memberReward.deleteMany({ where: { clinicId } });
   await db.paidVisit.deleteMany({ where: { clinicId } });
   await db.pointsTransaction.deleteMany({ where: { clinicId } });

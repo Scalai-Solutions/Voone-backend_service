@@ -29,6 +29,7 @@ export const PASS_LABELS = {
   availableRewards: "RECOMPENSAS DISPONIBLES",
   boost: "PUNTOS DOBLES",
   history: "HISTORIAL",
+  savings: "AHORRO",
   referral: "RECOMIENDA",
   rewardsChangeMessage: "Tus regalos disponibles: %@",
   // The bare format: the lock-screen notification is the field's own value, which already

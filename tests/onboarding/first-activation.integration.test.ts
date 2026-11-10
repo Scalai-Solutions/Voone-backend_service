@@ -33,6 +33,7 @@ let clinic: Clinic;
 let seq = 0;
 
 const wipe = async (): Promise<void> => {
+  await db.memberSaving.deleteMany({ where: { clinicId: clinic.id } });
   await db.memberReward.deleteMany({ where: { clinicId: clinic.id } });
   await db.paidVisit.deleteMany({ where: { clinicId: clinic.id } });
   await db.pointsTransaction.deleteMany({ where: { clinicId: clinic.id } });

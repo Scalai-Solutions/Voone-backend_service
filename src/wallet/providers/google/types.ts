@@ -94,6 +94,8 @@ export interface LoyaltyObjectInput {
   referral?: LoyaltyReferralInput;
   /** Absent when the member has no movements yet: the object then carries no `history` module. */
   history?: LoyaltyOptionalModuleInput;
+  /** Absent until the member has saved something: the object then carries no `savings` module. */
+  savings?: LoyaltyOptionalModuleInput;
 }
 
 /** The referral module's text, and the sign-up link as a tappable link on the pass. */
@@ -118,5 +120,6 @@ export type LoyaltyObjectPatch = Partial<
   referral?: LoyaltyReferralInput | null;
   /** The module's text; `null` REMOVES a stale module (no movements any more). */
   history?: LoyaltyOptionalModuleInput | null;
+  savings?: LoyaltyOptionalModuleInput | null;
   notify?: boolean;
 };

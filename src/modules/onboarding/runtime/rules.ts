@@ -304,6 +304,8 @@ export interface ReferralReward {
   title: string;
   /** Which of the five steps defines the reward. After ten this is always the tenth. */
   step: number;
+  /** Retail value in euros, when the programme carries one. */
+  value?: number;
 }
 
 /**
@@ -315,13 +317,15 @@ export interface ReferralReward {
 export const referralRewardAt = (view: ProgramView, count: number): ReferralReward | null => {
   const exact = view.referral.find((r) => r.n === count);
 
-  if (exact) return { sourceKey: `ref:${count}`, title: exact.title, step: exact.n };
+  if (exact) {
+    return { sourceKey: `ref:${count}`, title: exact.title, step: exact.n, value: exact.value };
+  }
 
   const last = view.referral[view.referral.length - 1];
   const every = RUNTIME_DECISIONS.referralRepeatEvery;
 
   if (last && count > last.n && (count - last.n) % every === 0) {
-    return { sourceKey: `ref:${count}`, title: last.title, step: last.n };
+    return { sourceKey: `ref:${count}`, title: last.title, step: last.n, value: last.value };
   }
 
   return null;

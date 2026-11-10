@@ -137,6 +137,17 @@ export const loyaltyCardSchema = z
       .optional(),
 
     /**
+     * What the programme has saved this member, from Member.savingsCents. Absent until the first
+     * saving: a card never shows a zero.
+     */
+    savings: z
+      .object({
+        cents: z.number().int().positive(),
+        currency: z.string().regex(/^[A-Z]{3}$/, "must be an ISO 4217 currency code")
+      })
+      .optional(),
+
+    /**
      * The clinic's latest message to this member, already formatted for display. Only the
      * Apple card renders it (Google has its own message API and ignores this).
      */

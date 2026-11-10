@@ -57,6 +57,12 @@ model Clinic {
   contactPhone String?
   contactEmail String?
 
+  /// What the centre says each kind of perk is worth to a member, in cents, keyed by perk
+  /// ("diag", "mejora", "sorpresa"). Null or a missing key counts as 0: a perk adds to a member's
+  /// savings total only when the centre has put a value on it. The double-points perk is never
+  /// valued. Per clinic rather than per programme, because programmes get replaced.
+  perkValues Json?
+
   users                 User[]
   treatments            ClinicTreatment[]
   template              ClinicTemplate?
@@ -76,6 +82,7 @@ model Clinic {
   bonoPlans             BonoPlan[]
   memberBonos           MemberBono[]
   clinicAudiences       ClinicAudience[]
+  memberSavings         MemberSaving[]
 }
 
 model User {
@@ -245,7 +252,12 @@ model Member {
   /// member redeems, which is what stops spending a reward demoting them — and it is
   /// what the milestone and tier engines read.
   lifetimePoints Int      @default(0)
-  createdAt      DateTime @default(now())
+
+  /// What the programme has saved this member, in cents: the cached SUM of their MemberSaving
+  /// rows, kept in the same transaction as each row so a pass build never scans them. Zero until
+  /// the first saving, and the card shows nothing until then.
+  savingsCents Int      @default(0)
+  createdAt    DateTime @default(now())
 
   /// The submission verbatim. Without it, changing the normalization rules is data loss
   /// rather than a backfill.
@@ -317,6 +329,7 @@ model Member {
   referredBy             Referral?              @relation("Referred")
   notificationDeliveries NotificationDelivery[]
   walletMessage          MemberWalletMessage?
+  savings                MemberSaving[]
 
   @@unique([clinicId, phone])
   @@unique([clinicId, code])
@@ -683,6 +696,56 @@ model PointsTransaction {
   @@index([clinicId, createdAt])
 }
 
+/// What a member has saved through the programme: one row per gift redeemed or discount taken.
+///
+/// Append-only, like the points ledger: a correction is a negative ADJUSTMENT row, never an edit.
+/// Holds amounts and where they came from, never what was bought (see PointsTransaction on why a
+/// treatment name does not belong in a table kept for the record). `Member.savingsCents` is the
+/// cached sum, written in the same transaction as the row.
+model MemberSaving {
+  id       String @id @default(uuid())
+  clinicId String
+  clinic   Clinic @relation(fields: [clinicId], references: [id])
+  memberId String
+  member   Member @relation(fields: [memberId], references: [id])
+
+  kind MemberSavingKind
+
+  /// Signed cents. Positive for a saving, negative only for an ADJUSTMENT. A database CHECK keeps
+  /// it non-zero, and positive for every kind but ADJUSTMENT.
+  cents Int
+
+  /// What makes this saving unique for the member: "reward:<id>" for a gift or perk redeemed,
+  /// "visit:<id>" for the discounts taken in a visit. With the member it is the idempotency key,
+  /// so a retried redemption or visit cannot count twice.
+  sourceKey String
+
+  /// The tier discount applied, as a fraction ("0.1"), kept for a DISCOUNT row. A snapshot taken
+  /// with the visit: the tier a member holds changes, what they saved then does not.
+  discountRate Decimal? @db.Decimal(5, 4)
+
+  /// A staff note on an ADJUSTMENT. Never shown to a member.
+  reason String?
+
+  createdAt DateTime @default(now())
+  createdBy String?
+
+  @@unique([memberId, sourceKey])
+  @@index([memberId, createdAt])
+  @@index([clinicId, createdAt])
+}
+
+enum MemberSavingKind {
+  /// A reward from the ladder, the recurring reward or a referral reward, at its retail value.
+  GIFT
+  /// A perk the centre has put a value on.
+  PERK
+  /// The tier's discount on cosmetics bought in a visit.
+  DISCOUNT
+  /// A correction by hand, either way.
+  ADJUSTMENT
+}
+
 /// A short-lived permission to download one member's pass, handed to the browser that
 /// just created that member.
 ///
@@ -904,6 +967,11 @@ model PaidVisit {
   /// allowance rather than stored as a running total, so a correction is a row, not an
   /// edit.
   discountedProducts Int @default(0)
+
+  /// What those cosmetics cost at list price, in cents, as reception entered it (prefilled from the
+  /// centre's price sheet). Null when reception gave no price, in which case the visit saves the
+  /// member nothing on record: the discount is never guessed.
+  discountedListCents Int?
 
   /// Minted by the caller. A double tap at reception must not pay a client twice.
   idempotencyKey String

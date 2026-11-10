@@ -1,11 +1,12 @@
 import {
   MemberRewardKind,
   PointsTransactionKind,
+  Prisma,
   PrismaClient,
   VisitKind,
   type Clinic
 } from "@prisma/client";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Settings of the original programme: this suite is not about the tuned ladder (tuning.test.ts is).
 vi.mock("../../src/modules/onboarding/engine.config", async (importOriginal) => {
@@ -27,6 +28,7 @@ import { PrismaProgramTierPort } from "../../src/modules/onboarding/runtime/prog
 import { programView } from "../../src/modules/onboarding/runtime/program-view";
 import { ReferralService } from "../../src/modules/onboarding/runtime/referral.service";
 import { RewardService, publicDetail } from "../../src/modules/onboarding/runtime/reward.service";
+import { backfillSavings } from "../../src/modules/onboarding/runtime/savings-backfill";
 import { VisitService } from "../../src/modules/onboarding/runtime/visit.service";
 import type { Program } from "../../src/modules/onboarding/engine.types";
 import catalogFixture from "./reference/sapphira.catalogo.json";
@@ -130,6 +132,7 @@ const seed = (memberId: string, amount: number, key = `seed-${memberId}-${amount
 const memberRow = (id: string) => db.member.findUniqueOrThrow({ where: { id } });
 
 const wipe = async (clinicId: string): Promise<void> => {
+  await db.memberSaving.deleteMany({ where: { clinicId } });
   await db.memberReward.deleteMany({ where: { clinicId } });
   await db.referral.deleteMany({ where: { clinicId } });
   await db.paidVisit.deleteMany({ where: { clinicId } });
@@ -1348,5 +1351,365 @@ describe("referrals", () => {
       await referrals.register({ clinicId: bare.id, referredMemberId: b.id, code: "BARE1" })
     ).toMatchObject({ registered: false, reason: "no_program" });
     expect(await db.referral.count({ where: { referrerId: a.id } })).toBe(0);
+  });
+});
+
+describe("what the programme saves a member", () => {
+  const savingRows = (memberId: string) =>
+    db.memberSaving.findMany({ where: { memberId }, orderBy: { createdAt: "asc" } });
+
+  /** A Plata member (3 % on cosmetics), whose visits this suite records. */
+  const plata = async () => {
+    const m = await makeMember({ createdAt: "2026-06-01T10:00:00Z" });
+
+    await seed(m.id, 200);
+    expect((await memberRow(m.id)).tier).toBe("Plata");
+
+    return m;
+  };
+
+  const buy = (
+    memberId: string,
+    key: string,
+    over: {
+      lines?: Array<{
+        category?: "COS" | "FAC";
+        amountEuro: number;
+        discountedListPriceEuro?: number;
+      }>;
+      discountedProducts?: number;
+    } = {}
+  ) =>
+    visits.record({
+      clinicId: clinic.id,
+      memberId,
+      kind: "PAYMENT",
+      lines: over.lines ?? [{ category: "COS", amountEuro: 97, discountedListPriceEuro: 100 }],
+      ...(over.discountedProducts !== undefined
+        ? { discountedProducts: over.discountedProducts }
+        : {}),
+      idempotencyKey: key
+    });
+
+  describe("a discounted product", () => {
+    it("saves the tier's share of the list price, once, and moves the cached total", async () => {
+      const m = await plata();
+      const out = await buy(m.id, "disc-1");
+
+      // 3 % of a 100 € list price.
+      const [row] = await savingRows(m.id);
+
+      expect(row).toMatchObject({
+        kind: "DISCOUNT",
+        cents: 300,
+        sourceKey: `visit:${out.visitId}`
+      });
+      expect(Number(row.discountRate)).toBeCloseTo(0.03, 4);
+      expect((await memberRow(m.id)).savingsCents).toBe(300);
+
+      const visit = await db.paidVisit.findUniqueOrThrow({ where: { id: out.visitId } });
+
+      expect(visit).toMatchObject({ discountedProducts: 1, discountedListCents: 10000 });
+    });
+
+    it("counts a retried visit once", async () => {
+      const m = await plata();
+
+      await buy(m.id, "disc-same");
+      await buy(m.id, "disc-same");
+
+      expect(await savingRows(m.id)).toHaveLength(1);
+      expect((await memberRow(m.id)).savingsCents).toBe(300);
+    });
+
+    it("leaves what the visit earns exactly as it would be without the marking", async () => {
+      const a = await plata();
+      const b = await plata();
+      const marked = await buy(a.id, "marked");
+      const plain = await buy(b.id, "plain", {
+        lines: [{ category: "COS", amountEuro: 97 }],
+        discountedProducts: 1
+      });
+
+      expect(marked.progress).toBe(plain.progress);
+      expect(marked.discountRemaining).toBe(plain.discountRemaining);
+
+      const [rowA, rowB] = await Promise.all(
+        [marked.visitId, plain.visitId].map((id) =>
+          db.paidVisit.findUniqueOrThrow({ where: { id } })
+        )
+      );
+
+      expect(rowA).toMatchObject({
+        amountCents: rowB.amountCents,
+        paidCents: rowB.paidCents,
+        progressAwarded: rowB.progressAwarded
+      });
+    });
+
+    it("records nothing when reception gave no list price: the discount is never guessed", async () => {
+      const m = await plata();
+
+      await buy(m.id, "no-price", {
+        lines: [{ category: "COS", amountEuro: 97 }],
+        discountedProducts: 1
+      });
+
+      expect(await savingRows(m.id)).toHaveLength(0);
+      expect((await memberRow(m.id)).savingsCents).toBe(0);
+    });
+
+    it("refuses a typed count that disagrees with the marked lines, so the allowance cannot be skipped", async () => {
+      const m = await plata();
+
+      await expect(buy(m.id, "mismatch", { discountedProducts: 0 })).rejects.toMatchObject({
+        statusCode: 400
+      });
+      await expect(buy(m.id, "mismatch-2", { discountedProducts: 2 })).rejects.toMatchObject({
+        statusCode: 400
+      });
+      expect(await db.paidVisit.count({ where: { memberId: m.id } })).toBe(0);
+    });
+
+    it("counts the marked lines against the same yearly allowance", async () => {
+      const m = await plata();
+      const three = [1, 2, 3].map(() => ({
+        category: "COS" as const,
+        amountEuro: 97,
+        discountedListPriceEuro: 100
+      }));
+
+      expect((await buy(m.id, "three", { lines: three })).discountRemaining).toBe(0);
+      await expect(buy(m.id, "fourth")).rejects.toMatchObject({ statusCode: 409 });
+      expect((await memberRow(m.id)).savingsCents).toBe(900);
+    });
+
+    it("refuses a treatment marked as a discounted product", async () => {
+      const m = await plata();
+
+      await expect(
+        buy(m.id, "treatment", {
+          lines: [{ category: "FAC", amountEuro: 97, discountedListPriceEuro: 100 }]
+        })
+      ).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    it("saves nothing in Bronce, which has no discount, and refuses it as before", async () => {
+      const m = await makeMember();
+
+      await expect(buy(m.id, "bronce")).rejects.toMatchObject({ statusCode: 409 });
+      expect(await savingRows(m.id)).toHaveLength(0);
+    });
+  });
+
+  describe("a gift redeemed", () => {
+    const firstReward = async () => {
+      const m = await makeMember();
+      const v = await pay(m.id, 65, `gift-${seq}`);
+      const reward = await db.memberReward.findFirstOrThrow({
+        where: { memberId: m.id, kind: MemberRewardKind.PREMIO },
+        orderBy: { issuedAt: "asc" }
+      });
+
+      return { m, v, reward };
+    };
+
+    it("saves the retail value stored on the gift, only once it is redeemed", async () => {
+      const { m, v, reward } = await firstReward();
+      const euros = (reward.detail as { value: number }).value;
+
+      expect(await savingRows(m.id)).toHaveLength(0);
+      expect((await memberRow(m.id)).savingsCents).toBe(0);
+
+      await rewards.redeem({ clinicId: clinic.id, rewardId: reward.id, visitId: v.visitId });
+
+      const [row] = await savingRows(m.id);
+
+      expect(row).toMatchObject({
+        kind: "GIFT",
+        cents: Math.round(euros * 100),
+        sourceKey: `reward:${reward.id}`
+      });
+      expect((await memberRow(m.id)).savingsCents).toBe(Math.round(euros * 100));
+    });
+
+    it("counts one redemption once, however many receptionists tap at the same moment", async () => {
+      const { m, v, reward } = await firstReward();
+      const tries = await Promise.allSettled(
+        [1, 2, 3].map(() =>
+          rewards.redeem({ clinicId: clinic.id, rewardId: reward.id, visitId: v.visitId })
+        )
+      );
+
+      expect(tries.filter((t) => t.status === "fulfilled")).toHaveLength(1);
+      expect(await savingRows(m.id)).toHaveLength(1);
+    });
+
+    it("counts a reward issued before its value was stored as nothing, rather than guessing", async () => {
+      const { m, v, reward } = await firstReward();
+
+      await db.memberReward.update({ where: { id: reward.id }, data: { detail: { items: [] } } });
+      await rewards.redeem({ clinicId: clinic.id, rewardId: reward.id, visitId: v.visitId });
+
+      expect(await savingRows(m.id)).toHaveLength(0);
+    });
+  });
+
+  describe("a perk redeemed", () => {
+    const perk = async (kind: "diag" | "mejora" | "sorpresa") => {
+      const m = await makeMember();
+      const v = await pay(m.id, 65, `perk-${seq}`);
+      const row = await db.memberReward.create({
+        data: {
+          clinicId: clinic.id,
+          memberId: m.id,
+          programId: (
+            await db.onboardingProgram.findFirstOrThrow({ where: { clinicId: clinic.id } })
+          ).id,
+          kind: MemberRewardKind.VENTAJA,
+          sourceKey: `test:${kind}:${seq}`,
+          title: `Perk ${kind}`,
+          detail: {
+            perk: kind,
+            description: "x",
+            ...(kind === "sorpresa" ? { pool: [{ id: "a", name: "A" }] } : {})
+          },
+          expiresAt: new Date("2027-01-01T00:00:00Z")
+        }
+      });
+
+      return { m, v, row };
+    };
+
+    const redeemPerk = (p: Awaited<ReturnType<typeof perk>>, kind: string) =>
+      rewards.redeem({
+        clinicId: clinic.id,
+        rewardId: p.row.id,
+        visitId: p.v.visitId,
+        ...(kind === "sorpresa" ? { surpriseItem: "a" } : {})
+      });
+
+    afterEach(async () => {
+      await db.clinic.update({ where: { id: clinic.id }, data: { perkValues: Prisma.DbNull } });
+    });
+
+    it("counts nothing until the centre has put a value on that perk", async () => {
+      const p = await perk("diag");
+
+      await redeemPerk(p, "diag");
+
+      expect(await savingRows(p.m.id)).toHaveLength(0);
+    });
+
+    it("counts the value the centre set for that kind, and no other", async () => {
+      await db.clinic.update({
+        where: { id: clinic.id },
+        data: { perkValues: { diag: 4000, sorpresa: 2500 } }
+      });
+
+      const diag = await perk("diag");
+      const upgrade = await perk("mejora");
+      const surprise = await perk("sorpresa");
+
+      await redeemPerk(diag, "diag");
+      await redeemPerk(upgrade, "mejora");
+      await redeemPerk(surprise, "sorpresa");
+
+      expect(await savingRows(diag.m.id)).toMatchObject([{ kind: "PERK", cents: 4000 }]);
+      expect(await savingRows(upgrade.m.id)).toHaveLength(0);
+      expect(await savingRows(surprise.m.id)).toMatchObject([{ kind: "PERK", cents: 2500 }]);
+    });
+
+    it("never counts the double-points perk, even if a value is stored under its name", async () => {
+      await db.clinic.update({ where: { id: clinic.id }, data: { perkValues: { doble: 9999 } } });
+
+      const m = await makeMember();
+      const v = await pay(m.id, 65, `doble-${seq}`);
+      const row = await db.memberReward.create({
+        data: {
+          clinicId: clinic.id,
+          memberId: m.id,
+          programId: (
+            await db.onboardingProgram.findFirstOrThrow({ where: { clinicId: clinic.id } })
+          ).id,
+          kind: MemberRewardKind.VENTAJA,
+          sourceKey: `test:doble:${seq}`,
+          title: "Puntos dobles",
+          detail: { perk: "doble", description: "x" },
+          expiresAt: new Date("2027-01-01T00:00:00Z")
+        }
+      });
+
+      await expect(
+        rewards.redeem({ clinicId: clinic.id, rewardId: row.id, visitId: v.visitId })
+      ).rejects.toMatchObject({ statusCode: 409 });
+      expect(await savingRows(m.id)).toHaveLength(0);
+    });
+  });
+
+  describe("the backfill of gifts already redeemed", () => {
+    it("writes a row per redeemed gift with a stored value, sets the total, and does nothing twice", async () => {
+      const m = await makeMember();
+      const v = await pay(m.id, 65, `bf-${seq}`);
+      const reward = await db.memberReward.findFirstOrThrow({
+        where: { memberId: m.id, kind: MemberRewardKind.PREMIO },
+        orderBy: { issuedAt: "asc" }
+      });
+      const cents = Math.round((reward.detail as { value: number }).value * 100);
+
+      // Redeemed the way it was before savings existed: no row, no total.
+      await db.memberReward.update({
+        where: { id: reward.id },
+        data: { redeemedAt: clock, redeemedVisitId: v.visitId }
+      });
+
+      const dry = await backfillSavings(db, { clinicId: clinic.id, apply: false });
+
+      expect(dry).toMatchObject({ counted: 1, members: 1, cents, written: 0 });
+      expect(await savingRows(m.id)).toHaveLength(0);
+
+      await backfillSavings(db, { clinicId: clinic.id, apply: true });
+      await backfillSavings(db, { clinicId: clinic.id, apply: true });
+
+      expect(await savingRows(m.id)).toHaveLength(1);
+      expect((await memberRow(m.id)).savingsCents).toBe(cents);
+    });
+
+    it("never counts a perk, and skips a gift with no stored value", async () => {
+      const m = await makeMember();
+      const v = await pay(m.id, 65, `bf-skip-${seq}`);
+      const reward = await db.memberReward.findFirstOrThrow({
+        where: { memberId: m.id, kind: MemberRewardKind.PREMIO }
+      });
+
+      await db.memberReward.update({
+        where: { id: reward.id },
+        data: { detail: { items: [] }, redeemedAt: clock, redeemedVisitId: v.visitId }
+      });
+
+      expect(await backfillSavings(db, { clinicId: clinic.id, apply: true })).toMatchObject({
+        counted: 0,
+        skipped: 1
+      });
+      expect((await memberRow(m.id)).savingsCents).toBe(0);
+    });
+  });
+
+  it("carries the retail value on the recurring and referral rewards, for the programme in force", () => {
+    expect(view.recurring.value).toBeGreaterThan(0);
+    expect(view.referral.length).toBeGreaterThan(0);
+    for (const step of view.referral) expect(step.value).toBeGreaterThan(0);
+  });
+
+  it("rejects a saving of zero, and a negative one that is not a correction, in the database", async () => {
+    const m = await makeMember();
+    const row = (kind: "GIFT" | "ADJUSTMENT", cents: number, key: string) =>
+      db.memberSaving.create({
+        data: { clinicId: clinic.id, memberId: m.id, kind, cents, sourceKey: key }
+      });
+
+    await expect(row("GIFT", 0, "z")).rejects.toThrow();
+    await expect(row("GIFT", -100, "n")).rejects.toThrow();
+    await expect(row("ADJUSTMENT", -100, "ok")).resolves.toMatchObject({ cents: -100 });
   });
 });
