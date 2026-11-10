@@ -168,6 +168,25 @@ export const loyaltyCardSchema = z
       .optional(),
 
     /**
+     * The member's latest points movements, newest first (`CARD_HISTORY_MAX` at most), with the
+     * points as the member reads them (already in the card's unit). Only the Apple card renders it,
+     * on the back. Carries no treatment name and no staff note: the wording comes from `kind`.
+     */
+    history: z
+      .array(
+        z.object({
+          at: z.string().datetime(),
+          kind: z.enum(["visit", "referral", "gift", "adjustment", "redeem", "expiry"]),
+          points: z
+            .number()
+            .int()
+            .refine((n) => n !== 0, "must not be zero")
+        })
+      )
+      .max(10)
+      .optional(),
+
+    /**
      * What the member shares to recommend the clinic, for a clinic on a programme: their own member
      * code and the public sign-up link that carries it (`<base>/alta/<clinic>?ref=<code>`). Absent
      * when any part of the link is unknown, rather than a card with a broken link on it.

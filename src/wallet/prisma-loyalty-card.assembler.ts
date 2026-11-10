@@ -1,10 +1,16 @@
-import { MemberRewardKind, OnboardingProgramStatus, type PrismaClient } from "@prisma/client";
+import {
+  MemberRewardKind,
+  OnboardingProgramStatus,
+  PointsTransactionKind,
+  type PrismaClient
+} from "@prisma/client";
 
 import { MemberNotFoundError } from "../common/errors/membership.errors";
 import { WalletConfigurationError } from "../common/errors/wallet.errors";
 import { LoyaltyCardAssembler } from "./engine/loyalty-card-assembler";
 import { LoyaltyCard, loyaltyCardSchema, MEMBER_CODE_PATTERN } from "./engine/loyalty-card";
 import { formatCardMessage } from "./engine/card-message";
+import { CARD_HISTORY_MAX } from "./engine/history-text";
 import { extraButtonsOf } from "./engine/program-template";
 import { clipCardText } from "./engine/card-text";
 import { clipText } from "./engine/rewards-text";
@@ -216,6 +222,40 @@ const referralField = (
   referral: LoyaltyCard["referral"]
 ): { referral?: LoyaltyCard["referral"] } => (referral ? { referral } : {});
 
+const HISTORY_KINDS: Record<
+  PointsTransactionKind,
+  NonNullable<LoyaltyCard["history"]>[number]["kind"]
+> = {
+  [PointsTransactionKind.EARN]: "visit",
+  [PointsTransactionKind.REFERRAL]: "referral",
+  [PointsTransactionKind.REDEEM]: "redeem",
+  [PointsTransactionKind.EXPIRY]: "expiry",
+  [PointsTransactionKind.ADJUSTMENT]: "adjustment"
+};
+
+/**
+ * The ledger rows as the card lists them. A programme centre keeps euro progress in the ledger and
+ * shows points (ten per euro), the same conversion as the balance; a row that rounds to nothing is
+ * left out. A positive manual adjustment reads as a gift, a negative one as a correction.
+ */
+const historyFor = (
+  rows: readonly { kind: PointsTransactionKind; points: number; createdAt: Date }[],
+  programme: boolean
+): LoyaltyCard["history"] => {
+  const entries = rows
+    .map((row) => ({
+      at: row.createdAt.toISOString(),
+      kind:
+        row.kind === PointsTransactionKind.ADJUSTMENT && row.points > 0
+          ? ("gift" as const)
+          : HISTORY_KINDS[row.kind],
+      points: programme ? toPoints(row.points) : row.points
+    }))
+    .filter((entry) => entry.points !== 0);
+
+  return entries.length > 0 ? entries : undefined;
+};
+
 /** The most rewards a card shows; the pass only ever lists a handful and counts the rest. */
 const AVAILABLE_REWARDS_LIMIT = 20;
 
@@ -244,6 +284,14 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
           orderBy: [{ expiresAt: "asc" }, { issuedAt: "asc" }, { id: "asc" }],
           take: AVAILABLE_REWARDS_LIMIT,
           select: { title: true, kind: true, detail: true, expiresAt: true }
+        },
+        // The latest movements for the back of the Apple pass, in the same round trip. The id
+        // breaks ties between rows written in the same millisecond so the card is byte-equal each
+        // time. Uses the (memberId, createdAt) index; selects no reason, which can be a staff note.
+        pointsLedger: {
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          take: CARD_HISTORY_MAX,
+          select: { kind: true, points: true, createdAt: true }
         },
         // The latest clinic message, in the same round trip for the same reason as the programme.
         walletMessage: true,
@@ -324,6 +372,7 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
               }))
           }
         : undefined,
+      history: historyFor(member.pointsLedger ?? [], Boolean(live)),
       // A pending x2, for a programme centre only.
       boost: live
         ? await boostFor(
