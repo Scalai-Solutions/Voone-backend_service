@@ -138,6 +138,25 @@ describe("storing the answer", () => {
   });
 });
 
+describe("clearing an answer", () => {
+  it("writes null when the editor sends null, so Sin respuesta really clears a saved answer", async () => {
+    const upsert = vi.fn(async () => ({}));
+    const tx = { catalogItem: { deleteMany: vi.fn(async () => ({})), upsert } };
+    const prisma = {
+      $transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx),
+      catalogItem: { findMany: vi.fn(async () => []) }
+    } as unknown as PrismaClient;
+
+    await new PrismaCatalogRepository(prisma).replaceForClinic("c1", [
+      { externalId: "a", name: "A", priceEuro: 10, prize: null }
+    ]);
+
+    const [call] = upsert.mock.calls as unknown as Array<[{ update: object }]>;
+
+    expect(call[0].update).toMatchObject({ prizeEligible: null });
+  });
+});
+
 describe("the engine looks only at rows marked Y", () => {
   /** The first few catalogue rows that could be a prize on their own, marked Y. */
   const withAnswers = (yes: Set<string>): CatalogItem[] =>
