@@ -272,8 +272,9 @@ export class VisitService {
     const issued = await this.issue(visit, active.id, active.version, active.view, before, after);
 
     // The credit above enqueued a card sync BEFORE these rewards existed, so that sync can build a
-    // card without them. Ask again now that they are written.
-    if (issued.length > 0) await this.requestCardSync(input.memberId);
+    // card without them. Ask again now that they are written. A visit that earned nothing had no
+    // credit to enqueue one, yet its +0 line belongs in the card's history.
+    if (issued.length > 0 || progress <= 0) await this.requestCardSync(input.memberId);
 
     if (visit.kind === VisitKind.PAYMENT && visit.hasTreatment) {
       await this.countReferral(visit, active.id, active.view);

@@ -196,10 +196,8 @@ export const loyaltyCardSchema = z
           at: z.string().datetime(),
           kind: z.enum(["visit", "referral", "gift", "adjustment", "redeem", "expiry"]),
           name: z.string().min(1).max(60).optional(),
-          points: z
-            .number()
-            .int()
-            .refine((n) => n !== 0, "must not be zero")
+          // Zero for a visit that earns nothing (medicine), listed so the client sees it recorded.
+          points: z.number().int()
         })
       )
       .max(CARD_HISTORY_MAX)

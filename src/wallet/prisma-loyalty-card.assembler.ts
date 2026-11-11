@@ -235,9 +235,10 @@ const historyFor = (
     reason?: string | null;
     createdAt: Date;
   }[],
-  programme: boolean
+  programme: boolean,
+  zeroPointVisits: readonly { reason?: string | null; occurredAt: Date }[] = []
 ): LoyaltyCard["history"] => {
-  const entries = rows
+  const ledger = rows
     .map((row) => {
       // Only a visit's reason says what was done; an adjustment's is a staff note.
       const name =
@@ -255,6 +256,24 @@ const historyFor = (
       };
     })
     .filter((entry) => entry.points !== 0);
+
+  // A visit that earned nothing (medicine) writes no ledger row; listed at +0 so the client sees
+  // it was recorded rather than missing.
+  const visits = zeroPointVisits.map((visit) => {
+    const name = treatmentNameOf(visit.reason);
+
+    return {
+      at: visit.occurredAt.toISOString(),
+      kind: "visit" as const,
+      ...(name ? { name: clipText(name, 60, true) } : {}),
+      points: 0
+    };
+  });
+
+  // Both lists arrive newest first; a stable sort keeps a same-instant tie in a fixed order.
+  const entries = [...ledger, ...visits]
+    .sort((a, b) => b.at.localeCompare(a.at))
+    .slice(0, CARD_HISTORY_MAX);
 
   return entries.length > 0 ? entries : undefined;
 };
@@ -296,6 +315,14 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
           orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           take: CARD_HISTORY_MAX,
           select: { kind: true, points: true, reason: true, createdAt: true }
+        },
+        // Visits that earned no points have no ledger row; read here so the history still lists
+        // them. Uses the (memberId, occurredAt) index.
+        paidVisits: {
+          where: { progressAwarded: 0 },
+          orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
+          take: CARD_HISTORY_MAX,
+          select: { reason: true, occurredAt: true }
         },
         // The latest clinic message, in the same round trip for the same reason as the programme.
         walletMessage: true,
@@ -376,7 +403,7 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
               }))
           }
         : undefined,
-      history: historyFor(member.pointsLedger ?? [], Boolean(live)),
+      history: historyFor(member.pointsLedger ?? [], Boolean(live), member.paidVisits ?? []),
       // Euros, as a programme centre's prices are. Nothing until the first saving.
       savings:
         member.savingsCents > 0 ? { cents: member.savingsCents, currency: "EUR" } : undefined,

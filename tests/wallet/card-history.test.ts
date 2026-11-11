@@ -60,6 +60,16 @@ describe("the history text, for the back of the Apple pass", () => {
     ).toContain("+12.500 puntos");
   });
 
+  it("writes a visit that earned nothing as +0, never −0", () => {
+    expect(
+      historyText({
+        history: [
+          { at: "2026-11-12T10:00:00.000Z", kind: "visit", name: "Hiperhidrosis", points: 0 }
+        ]
+      })
+    ).toBe("12 nov · Hiperhidrosis · +0 puntos");
+  });
+
   it("has no text without history, or with an empty one", () => {
     expect(historyText(rewardsPass)).toBeUndefined();
     expect(historyText({ history: [] })).toBeUndefined();
@@ -300,6 +310,54 @@ describe("PrismaLoyaltyCardAssembler: the history", () => {
     }).assemble(member.id);
 
     expect(card.history).toBeUndefined();
+  });
+
+  it("asks for the latest visits that earned no points, which have no ledger row", async () => {
+    const findUnique = vi.fn(async () => member);
+
+    await assemblerFor(member, findUnique).assemble(member.id);
+
+    expect(findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          paidVisits: {
+            where: { progressAwarded: 0 },
+            orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
+            take: 5,
+            select: { reason: true, occurredAt: true }
+          }
+        })
+      })
+    );
+  });
+
+  it("lists a zero-point visit at +0 among the movements, newest first, five at most", async () => {
+    const card = await assemblerFor({
+      ...member,
+      pointsLedger: [
+        row("EARN", 45, "2026-11-12T10:00:00.000Z"),
+        row("EARN", 30, "2026-11-08T10:00:00.000Z"),
+        row("EARN", 20, "2026-11-06T10:00:00.000Z"),
+        row("EARN", 10, "2026-11-04T10:00:00.000Z"),
+        row("EARN", 5, "2026-11-02T10:00:00.000Z")
+      ],
+      paidVisits: [
+        {
+          reason: "Visita de pago: Hiperhidrosis",
+          occurredAt: new Date("2026-11-10T10:00:00.000Z")
+        },
+        { reason: null, occurredAt: new Date("2026-11-01T10:00:00.000Z") }
+      ]
+    }).assemble(member.id);
+
+    expect(card.history).toEqual([
+      { at: "2026-11-12T10:00:00.000Z", kind: "visit", points: 45 },
+      { at: "2026-11-10T10:00:00.000Z", kind: "visit", name: "Hiperhidrosis", points: 0 },
+      { at: "2026-11-08T10:00:00.000Z", kind: "visit", points: 30 },
+      { at: "2026-11-06T10:00:00.000Z", kind: "visit", points: 20 },
+      { at: "2026-11-04T10:00:00.000Z", kind: "visit", points: 10 }
+    ]);
+    expect(loyaltyCardSchema.safeParse(card).success).toBe(true);
   });
 
   it("has no history for a member with an empty ledger", async () => {
