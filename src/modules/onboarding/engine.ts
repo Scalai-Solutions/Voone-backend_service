@@ -529,6 +529,15 @@ export const chooseRewards = (
 
 /* -------------------------------------------------------------------- step 6: perks */
 
+/** The double-points perk's words, shared with a reward the admin turns into double points. */
+export const DOUBLE_PERK_TEXT = {
+  name: "Puntos dobles en tu próxima visita",
+  desc: "La siguiente visita de pago suma el doble de progreso."
+} as const;
+
+/** What a double-points perk is reckoned to cost the centre: the investment share of a ticket. */
+export const doublePerkCost = (inv: number, ticket: number): number => inv * ticket;
+
 /** Fill the non-reward milestones, in a fixed order so two runs agree. */
 export const choosePerks = (
   ms: Milestone[],
@@ -570,12 +579,7 @@ export const choosePerks = (
         cost: 0
       };
     } else if (kind === "doble") {
-      m.perk = {
-        kind: "doble",
-        name: "Puntos dobles en tu próxima visita",
-        desc: "La siguiente visita de pago suma el doble de progreso.",
-        cost: inv * T
-      };
+      m.perk = { kind: "doble", ...DOUBLE_PERK_TEXT, cost: doublePerkCost(inv, T) };
     } else if (kind === "mejora") {
       m.perk = {
         kind: "mejora",
@@ -906,6 +910,29 @@ export const orderBronce = (
   return "kept-to-avoid-repeat";
 };
 
+/**
+ * What a client has actually paid at each milestone, by its `n`.
+ *
+ * Progress euros are not spent euros: a tier multiplier means a Diamante client reaches the same
+ * threshold having paid less. Each step from the milestone before is divided by the multiplier of
+ * the tier it is earned in (the milestone's own segment). Shared by the engine and by an edit of a
+ * threshold, so both compute the same number.
+ */
+export const realThresholds = (ms: readonly Milestone[]): Record<number, number> => {
+  const realTh: Record<number, number> = {};
+  let real = 0;
+  let prevProgress = 0;
+
+  for (const m of ms) {
+    const mult = TIER_BENEFITS[TIERS[m.tramo - 1]].mult;
+    real += (m.th - prevProgress) / mult;
+    prevProgress = m.th;
+    realTh[m.n] = real;
+  }
+
+  return realTh;
+};
+
 /* ----------------------------------------------------------------- guarantees and review */
 
 /**
@@ -922,12 +949,21 @@ export const COST_REVIEW_NOTE =
   "El coste de los premios supera en más de un 50% la inversión elegida. Sube la inversión o añade regalos más baratos.";
 
 /**
- * Review notes that are told to the admin but never stop a programme going live. A dearer reward
- * is a legitimate choice once the admin can see what it does to the five-year result; every other
- * note is a defect Voone has judged and keeps blocking. Matched by exact text, and also true of
- * programmes stored before this existed, whose `review` already carries the note.
+ * The note raised when the catalogue cannot give rewards that rise from one milestone to the next.
+ * Told to the admin, never blocking: the admin can change any reward by hand, and a ladder that
+ * does not rise is a choice the centre may make.
  */
-export const INFORMATIONAL_NOTES: readonly string[] = [COST_REVIEW_NOTE];
+export const ORDER_REVIEW_NOTE =
+  "Con este catálogo los premios no pueden ir de menor a mayor. Añade tratamientos o productos de más valor.";
+
+/**
+ * Review notes that are told to the admin but never stop a programme going live. A dearer reward
+ * is a legitimate choice once the admin can see what it does to the five-year result, and so is a
+ * ladder whose rewards do not rise; every other note is a defect Voone has judged and keeps
+ * blocking. Matched by exact text, and also true of programmes stored before this existed, whose
+ * `review` already carries the note.
+ */
+export const INFORMATIONAL_NOTES: readonly string[] = [COST_REVIEW_NOTE, ORDER_REVIEW_NOTE];
 
 /** The review notes that block publishing. */
 export const blockingReview = (review: readonly string[]): string[] =>
@@ -1037,18 +1073,7 @@ export const run = (items: CatalogItem[], ans: Answers): EngineResult => {
   const perkList = lad.ms.filter((m) => m.type === "ventaja");
   const perkCost = perkList.reduce((s, m) => s + (m.perk?.cost ?? 0), 0);
 
-  // Progress euros are not spent euros: a tier multiplier means a Diamante client reaches
-  // the same threshold having paid less. realTh is what each milestone actually costs.
-  const realTh: Record<number, number> = {};
-  let real = 0;
-  let prevProgress = 0;
-
-  for (const m of lad.ms) {
-    const mult = TIER_BENEFITS[TIERS[m.tramo - 1]].mult;
-    real += (m.th - prevProgress) / mult;
-    prevProgress = m.th;
-    realTh[m.n] = real;
-  }
+  const realTh = realThresholds(lad.ms);
 
   let totalCost = chosen.reduce((s, c) => s + c.o.cost, 0) + perkCost;
   const diamondReal = realTh[lad.last.n];
@@ -1159,9 +1184,7 @@ export const run = (items: CatalogItem[], ans: Answers): EngineResult => {
       `Con tus respuestas, una clienta gastaría ${eurText(est.A)} al año, pero tus precios y tratamientos apuntan a unos ${eurText(est.AEst)}. Comprueba el ticket y la frecuencia.`
     );
   } else if (rx.anyOrder) {
-    review.push(
-      "Con este catálogo los premios no pueden ir de menor a mayor. Añade tratamientos o productos de más valor."
-    );
+    review.push(ORDER_REVIEW_NOTE);
   }
 
   if (costPct > lad.inv * 1.5) review.push(COST_REVIEW_NOTE);

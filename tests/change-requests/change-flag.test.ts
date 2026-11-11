@@ -221,16 +221,13 @@ describe("refusals reach Voone in English", () => {
     );
   });
 
-  it("a real repeated-gift refusal comes out in English", () => {
+  it("a gift repeated in two milestones in a row is no longer refused: it is priced like any other", () => {
     const stored = row();
     const chosen = (stored.output as Program).chosen;
     const itemId = chosen[0].o.items[0].id;
     const result = whatIf(stored, liveCatalogue(), reward(chosen[1].m.n, itemId));
 
-    expect(result.status).toBe("none");
-    expect(result.status === "none" && result.reason).not.toMatch(SPANISH);
-    expect(result.status === "none" && result.reason).toMatch(/consecutive milestones/);
-    expect(result.status === "none" && result.blocked).toBe("repeat");
+    expect(result.status).toBe("ok");
   });
 
   it("marks a medical item as blocked, and an unknown id as nothing to say", () => {

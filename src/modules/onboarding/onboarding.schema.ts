@@ -211,12 +211,6 @@ export const tierBenefitsSchema = z.object({
     .max(6, "Máximo 6 beneficios por nivel")
 });
 
-/** Either one of the engine's two alternatives, or any catalogue item by its id. */
-export const swapSchema = z.union([
-  z.object({ alternative: z.number().int().min(0).max(1) }),
-  z.object({ itemId: z.string().trim().min(1).max(64) })
-]);
-
 /**
  * A text the centre writes for a reward. Trimmed, never empty, no control characters (a pasted
  * newline or NUL would break the single-line pass and wallet fields that carry it), and capped at
@@ -237,6 +231,44 @@ const milestoneNumber = z
   .number({ message: "milestone: indica un número de hito válido" })
   .int("milestone: indica un número de hito válido")
   .min(1, "milestone: indica un número de hito válido");
+
+/** The most a free-text reward may be priced at, in euros: a typo guard, as for any price. */
+export const MAX_FREE_REWARD_EURO = 10_000;
+
+/**
+ * What a milestone's reward becomes: one of the engine's two alternatives, any catalogue item by
+ * its id (a treatment or a product: which one it is follows from the item), double points, a
+ * surprise, or a free text with its price.
+ */
+export const swapSchema = z.union([
+  z.object({ alternative: z.number().int().min(0).max(1) }),
+  z.object({ itemId: z.string().trim().min(1).max(64) }),
+  z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("doble") }),
+    z.object({ kind: z.literal("sorpresa") }),
+    z.object({
+      kind: z.literal("libre"),
+      name: text(120, "El premio"),
+      priceEuro: z
+        .number({ message: "El precio del premio: tiene que ser un número" })
+        .positive("El precio del premio: tiene que ser mayor que 0")
+        .max(MAX_FREE_REWARD_EURO, `El precio del premio: máximo ${MAX_FREE_REWARD_EURO} €`)
+        .refine(
+          (euro) => Math.abs(Math.round(euro * 100) - euro * 100) < 1e-6,
+          "El precio del premio: como mucho dos decimales"
+        )
+    })
+  ])
+]);
+
+/** The spend, in whole euros paid, at which a reward unlocks. The programme sets the real limits. */
+export const thresholdSchema = z.object({
+  realSpend: z
+    .number({ message: "El gasto: tiene que ser un número" })
+    .int("El gasto: tiene que ser un número entero de euros")
+    .min(1, "El gasto: tiene que ser mayor que 0")
+    .max(1_000_000, "El gasto: demasiado alto")
+});
 
 /** Texts editable on a draft. Anything omitted is left as it is. */
 export const textsSchema = z

@@ -1,14 +1,16 @@
 import {
   COST_REVIEW_NOTE,
+  DOUBLE_PERK_TEXT,
   buildGuarantees,
   candidates,
   chooseRecurring,
+  doublePerkCost,
   manualCandidates,
   manualRefusal,
   type ManualRefusal
 } from "./engine";
 import { ids } from "./engine.math";
-import type { Answers, ChosenReward, Program, RewardOption } from "./engine.types";
+import type { Answers, Candidate, Program, RewardOption, SpecialReward } from "./engine.types";
 
 /**
  * Replacing one reward with an alternative the engine proposed.
@@ -16,9 +18,10 @@ import type { Answers, ChosenReward, Program, RewardOption } from "./engine.type
  * The guide has the centre edit its programme from "the suggested alternatives", and an edit
  * is exactly where a valid programme can be made invalid. So a swap is not "put this item
  * there": it re-derives everything the change could touch, refuses only what would break a
- * promise made to clients (a gift the centre may not give, the same gift twice in a row), and
- * lets through everything else: a dearer reward is flagged, and a cheaper one, or a different
- * order, is the admin's call. The admin sees the money consequence, not a refusal.
+ * promise made to clients (a gift the centre may not give), and lets through everything else: a
+ * dearer reward is flagged, and a cheaper one, a different order, or the same gift on two
+ * milestones (even in a row), is the admin's call. The admin sees the money consequence, not a
+ * refusal.
  *
  * Pure: it takes a programme and returns a new one, never the same object.
  */
@@ -26,13 +29,6 @@ import type { Answers, ChosenReward, Program, RewardOption } from "./engine.type
 export type SwapResult = { ok: true; program: Program } | { ok: false; reason: string };
 
 const fail = (reason: string): SwapResult => ({ ok: false, reason });
-
-const sharesItem = (a: RewardOption, b: RewardOption): boolean =>
-  ids(a).some((id) => ids(b).includes(id));
-
-/** The position of the first reward that shares a gift with the one before it, if any. */
-const consecutiveRepeatAt = (chosen: ChosenReward[]): number =>
-  chosen.findIndex((c, i) => i > 0 && sharesItem(c.o, chosen[i - 1].o));
 
 export const swapReward = (
   program: Program,
@@ -97,22 +93,128 @@ export const swapRewardToItem = (
   );
 };
 
+/** A reward that is not a catalogue item, as the admin picks it on "Cambiar". */
+export type SpecialChoice =
+  { kind: "doble" } | { kind: "sorpresa" } | { kind: "libre"; name: string; priceEuro: number };
+
+/**
+ * What a free-text reward is reckoned to cost the centre, as a share of the price the admin gave.
+ * The cabin-treatment ratio: the reward could be anything, and this number stays internal (it only
+ * feeds the cost share and the five-year comparison, never a screen the centre sees).
+ */
+export const FREE_REWARD_COST_RATIO = 0.2;
+
+/** The surprise's words. Reception picks the gift from the pool when it is redeemed. */
+export const SURPRISE_TEXT = {
+  name: "Premio sorpresa",
+  desc: "El centro elige el regalo en el momento del canje."
+} as const;
+
+export const EMPTY_SURPRISE_POOL =
+  "Ningún artículo del catálogo puede ser premio todavía, así que no hay entre qué elegir la sorpresa.";
+
+export const FREE_REWARD_REFUSALS = {
+  name: "Escribe el premio.",
+  price: "El precio del premio tiene que ser mayor que 0."
+} as const;
+
+const byNameThenId = (a: Candidate, b: Candidate): number =>
+  a.name.localeCompare(b.name, "es") || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+/**
+ * Turns a milestone's reward into double points, a surprise, or a free text with its price.
+ *
+ * The milestone stays a reward slot; only what it issues changes (see `programView`): double
+ * points is issued as the same perk the engine places on the ladder, so the next payment spends it
+ * automatically; a surprise is issued as the surprise perk, with `pool` as what reception may give
+ * (the caller passes every item of today's catalogue the admin could hand-pick, medical excluded);
+ * a free text is a gift worth its price.
+ */
+export const swapRewardToSpecial = (
+  program: Program,
+  answers: Answers,
+  milestone: number,
+  choice: SpecialChoice,
+  pool: readonly Candidate[] = []
+): SwapResult => {
+  const at = program.chosen.findIndex((c) => c.m.n === milestone);
+
+  if (at < 0) return fail("Ese hito no tiene un premio que se pueda cambiar.");
+
+  if (choice.kind === "doble") {
+    return replaceReward(
+      program,
+      answers,
+      at,
+      { items: [], value: 0, cost: doublePerkCost(program.lad.inv, program.est.ticket) },
+      -1,
+      { kind: "doble", ...DOUBLE_PERK_TEXT }
+    );
+  }
+
+  if (choice.kind === "sorpresa") {
+    if (pool.length === 0) return fail(EMPTY_SURPRISE_POOL);
+
+    // Sorted so the same catalogue always stores the same pool, in the order reception reads it.
+    const sorted = pool.map((c) => ({ ...c })).sort(byNameThenId);
+    const cost = sorted.reduce((sum, c) => sum + c.cost, 0) / sorted.length;
+
+    return replaceReward(program, answers, at, { items: [], value: 0, cost }, -1, {
+      kind: "sorpresa",
+      ...SURPRISE_TEXT,
+      pool: sorted
+    });
+  }
+
+  const name = choice.name.trim();
+
+  if (!name) return fail(FREE_REWARD_REFUSALS.name);
+  if (!(Number.isFinite(choice.priceEuro) && choice.priceEuro > 0)) {
+    return fail(FREE_REWARD_REFUSALS.price);
+  }
+
+  const value = Math.round(choice.priceEuro * 100) / 100;
+
+  return replaceReward(
+    program,
+    answers,
+    at,
+    { items: [], value, cost: value * FREE_REWARD_COST_RATIO },
+    -1,
+    { kind: "libre", name, desc: "" }
+  );
+};
+
+/**
+ * Puts `replacement` in the reward slot at `at`. `special` says it is double points, a surprise
+ * or a free text; without it the reward is the items in `replacement`, and a special reward the
+ * slot held before is gone.
+ */
 export const replaceReward = (
   program: Program,
   answers: Answers,
   at: number,
   replacement: RewardOption,
-  alternativeIndex: number
+  alternativeIndex: number,
+  special?: SpecialReward
 ): SwapResult => {
   const next = structuredClone(program);
   const entry = next.chosen[at];
   const previous = entry.o;
+  // Only catalogue items can be offered back: a special reward has none to show as an alternative.
+  const previousIsItems = !entry.special && previous.items.length > 0;
 
   entry.o = replacement;
+
+  if (special) entry.special = structuredClone(special);
+  else delete entry.special;
+
   // A label was written for the reward that is leaving; on the new one it would be a lie.
   delete entry.label;
   // The reward swapped out becomes an alternative, so the centre can undo the change.
-  entry.alts = [previous, ...entry.alts.filter((_, k) => k !== alternativeIndex)].slice(0, 2);
+  const kept = entry.alts.filter((_, k) => k !== alternativeIndex);
+
+  entry.alts = (previousIsItems ? [previous, ...kept] : kept).slice(0, 2);
 
   // An alternative elsewhere that uses an item this reward now holds would, if taken, put
   // the same item in the ladder twice. They were valid only while nobody held the item.
@@ -122,32 +224,34 @@ export const replaceReward = (
     if (k !== at) c.alts = c.alts.filter((a) => !ids(a).some((id) => taken.has(id)));
   });
 
-  const repeat = consecutiveRepeatAt(next.chosen);
-
-  if (repeat > 0) {
-    return fail(
-      `Ese cambio repetiría un regalo en dos hitos seguidos (hitos ${next.chosen[repeat - 1].m.n} y ${next.chosen[repeat].m.n}).`
-    );
-  }
-
   // The recurring reward must be worth at least the last ladder reward, so a swap that
-  // raises the last one has to re-pick it.
-  if (at === next.chosen.length - 1) {
+  // raises the last one has to re-pick it. A last reward with no retail value (double points,
+  // a surprise) says nothing about that, and must not cheapen the reward after Diamante.
+  if (at === next.chosen.length - 1 && replacement.value > 0) {
     const cands = candidates(next.catalog, answers);
     const rec = chooseRecurring(next.est.A, replacement.value, next.lad.inv, cands);
 
     if (rec.o) next.rec = rec;
   }
 
+  return { ok: true, program: retotal(next) };
+};
+
+/**
+ * Re-derives what an edit of the rewards or of the thresholds can move: the total cost, its share
+ * of what a client pays to reach Diamante, the guarantees, and the cost note. Mutates and returns
+ * `next`, which the caller has already cloned.
+ */
+export const retotal = (next: Program): Program => {
   next.totalCost = next.chosen.reduce((sum, c) => sum + c.o.cost, 0) + next.perkCost;
   next.costPct = next.totalCost / next.diamondReal;
   next.guarantees = buildGuarantees(next.lad, next.est, next.chosen, next.costPct);
 
   // Cost is NOT a refusal. A dearer alternative is a legitimate choice; what the centre must
-  // not be able to do is make one without being told. So the blocking note follows the number.
+  // not be able to do is make one without being told. So the note follows the number.
   next.review = next.review.filter((note) => note !== COST_REVIEW_NOTE);
 
   if (next.costPct > next.lad.inv * 1.5) next.review.push(COST_REVIEW_NOTE);
 
-  return { ok: true, program: next };
+  return next;
 };

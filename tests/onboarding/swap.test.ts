@@ -23,9 +23,9 @@ import catalog from "./reference/sapphira.catalogo.json";
  * Swapping a reward, which is where a valid programme can be made invalid.
  *
  * The real Sapphira programme offers alternatives at three milestones (7, 17 and 22), so those
- * are exercised as they are. The rule a swap must REFUSE — a gift repeated in two milestones in a row — cannot be reached
- * with the alternatives the engine itself proposes, because it proposes only safe ones; so it is
- * built by planting an unsafe alternative and checking the swap catches it. A refusal that was never provoked would be an assumption.
+ * are exercised as they are. A gift repeated in two milestones in a row is no longer refused (the
+ * centre may give the same thing twice); the engine never proposes one, so the case is built by
+ * planting such an alternative.
  */
 const ANSWERS: Answers = {
   ticket: null,
@@ -143,17 +143,18 @@ describe("swapReward, refusing what it must", () => {
     expect(swapReward(fresh(), ANSWERS, 9, 0)).toMatchObject({ ok: false });
   });
 
-  it("refuses a swap that would repeat a gift in two milestones in a row", () => {
+  it("allows the same gift on two milestones in a row: the centre may give it twice", () => {
     const p = fresh();
     const neighbour = entry(p, 9);
+    const before = p.chosen[p.chosen.indexOf(neighbour) - 1];
 
-    // Plant an alternative at 9 that shares an item with the reward at 7.
-    neighbour.alts = [option(neighbour.o.value, 5, ...p.chosen[3].o.items.map((i) => i.id))];
+    // Plant an alternative at 9 that shares an item with the reward just before it.
+    neighbour.alts = [option(neighbour.o.value, 5, ...before.o.items.map((i) => i.id))];
 
-    expect(swapReward(p, ANSWERS, 9, 0)).toMatchObject({
-      ok: false,
-      reason: expect.stringContaining("Ese cambio repetiría un regalo en dos hitos seguidos")
-    });
+    const result = swapReward(p, ANSWERS, 9, 0);
+
+    expect(result.ok).toBe(true);
+    expect(idsOf(entry((result as { program: Program }).program, 9).o)).toBe(idsOf(before.o));
   });
 });
 
