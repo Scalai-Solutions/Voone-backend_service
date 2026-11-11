@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ClinicNotFoundError } from "../../src/common/errors/membership.errors";
 import { errorHandler } from "../../src/common/middleware/error-handler";
 import { PrismaCatalogRepository } from "../../src/modules/onboarding/catalog.repository";
-import { COST_REVIEW_NOTE } from "../../src/modules/onboarding/engine";
+import { COST_REVIEW_NOTE, ORDER_REVIEW_NOTE } from "../../src/modules/onboarding/engine";
 import type { CatalogItem, Program } from "../../src/modules/onboarding/engine.types";
 import { presentProgram } from "../../src/modules/onboarding/presentation";
 import { OnboardingService } from "../../src/modules/onboarding/onboarding.service";
@@ -614,5 +614,192 @@ describe("the five-year comparison against the engine's recommendation", () => {
 
     expect(r.status).toBe(422);
     expect(JSON.stringify(r.body)).toContain("could not be compared");
+  });
+});
+
+/** A draft generated from the plain fixture, and its first reward that is not the last one. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const plainDraft = async (): Promise<{ draftId: string; milestone: number; program: any }> => {
+  await call("PUT", admin("/catalog"), { items: fixtureItems });
+  const draft = await call("POST", admin("/programs"), ANSWERS);
+  const rewards = draft.body.program.ladder.filter((m: { type: string }) => m.type === "premio");
+
+  return { draftId: draft.body.id, milestone: rewards[1].n, program: draft.body.program };
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const rowOf = (body: { program: { ladder: Array<{ n: number }> } }, n: number): any =>
+  body.program.ladder.find((m) => m.n === n);
+
+describe("the order note no longer blocks publishing", () => {
+  it("publishes a programme whose rewards cannot rise, and shows the note as information", async () => {
+    const { draftId } = await plainDraft();
+    const stored = await db.onboardingProgram.findUniqueOrThrow({ where: { id: draftId } });
+    const output = stored.output as unknown as Program;
+
+    await db.onboardingProgram.update({
+      where: { id: draftId },
+      data: { output: { ...output, review: [ORDER_REVIEW_NOTE] } as unknown as object }
+    });
+
+    const shown = await call("GET", admin(`/programs/${draftId}`));
+
+    expect(shown.body.program.review).toEqual([]);
+    expect(shown.body.program.notes).toEqual([ORDER_REVIEW_NOTE]);
+
+    const published = await call("POST", admin(`/programs/${draftId}/publish`));
+
+    expect(published.status).toBe(200);
+    expect(published.body.status).toBe("ACTIVO");
+  });
+});
+
+describe("the five kinds of reward, over HTTP", () => {
+  it("turns a reward into double points", async () => {
+    const { draftId, milestone } = await plainDraft();
+    const r = await call("PATCH", admin(`/programs/${draftId}/milestones/${milestone}`), {
+      kind: "doble"
+    });
+
+    expect(r.status).toBe(200);
+    expect(rowOf(r.body, milestone).reward).toMatchObject({ kind: "doble", items: [] });
+
+    const stored = await db.onboardingProgram.findUniqueOrThrow({ where: { id: draftId } });
+    const chosen = (stored.output as unknown as Program).chosen.find((c) => c.m.n === milestone)!;
+
+    expect(chosen.special?.kind).toBe("doble");
+  });
+
+  it("turns a reward into a surprise from every item the catalogue can give today", async () => {
+    const { draftId, milestone } = await plainDraft();
+    const r = await call("PATCH", admin(`/programs/${draftId}/milestones/${milestone}`), {
+      kind: "sorpresa"
+    });
+
+    expect(r.status).toBe(200);
+    expect(rowOf(r.body, milestone).reward.kind).toBe("sorpresa");
+
+    const giftable = (await call("GET", admin("/catalog"))).body.items
+      .filter((i: { giftable: boolean }) => i.giftable)
+      .map((i: { externalId: string }) => i.externalId)
+      .sort();
+    const stored = await db.onboardingProgram.findUniqueOrThrow({ where: { id: draftId } });
+    const chosen = (stored.output as unknown as Program).chosen.find((c) => c.m.n === milestone)!;
+
+    expect(chosen.special?.pool?.map((c) => c.id).sort()).toEqual(giftable);
+  });
+
+  it("turns a reward into a free text with its price, and validates both", async () => {
+    const { draftId, milestone } = await plainDraft();
+    const path = admin(`/programs/${draftId}/milestones/${milestone}`);
+
+    const empty = await call("PATCH", path, { kind: "libre", name: "  ", priceEuro: 10 });
+
+    expect(empty.status).toBe(422);
+    expect(JSON.stringify(empty.body)).toContain("El premio: no puede estar vacío");
+
+    for (const priceEuro of [0, 12.345, 20_000]) {
+      const bad = await call("PATCH", path, { kind: "libre", name: "Manicura", priceEuro });
+
+      expect(bad.status, String(priceEuro)).toBe(422);
+      expect(JSON.stringify(bad.body)).toContain("El precio del premio");
+    }
+
+    const r = await call("PATCH", path, {
+      kind: "libre",
+      name: "Manicura de regalo",
+      priceEuro: 24
+    });
+
+    expect(r.status).toBe(200);
+    expect(rowOf(r.body, milestone)).toMatchObject({
+      rewardValueEuro: 24,
+      reward: { name: "Manicura de regalo", kind: "libre" }
+    });
+  });
+
+  it("gives the same item to two rewards in a row", async () => {
+    const { draftId, program } = await plainDraft();
+    const rewards = program.ladder.filter((m: { type: string }) => m.type === "premio");
+    const stored = await db.onboardingProgram.findUniqueOrThrow({ where: { id: draftId } });
+    const first = (stored.output as unknown as Program).chosen[0].o.items[0].id;
+    const r = await call("PATCH", admin(`/programs/${draftId}/milestones/${rewards[1].n}`), {
+      itemId: first
+    });
+
+    expect(r.status).toBe(200);
+  });
+
+  it("refuses an unknown kind", async () => {
+    const { draftId, milestone } = await plainDraft();
+    const r = await call("PATCH", admin(`/programs/${draftId}/milestones/${milestone}`), {
+      kind: "otra-cosa"
+    });
+
+    expect(r.status).toBe(422);
+  });
+});
+
+describe("moving a reward's spend, over HTTP", () => {
+  it("moves it within the range the admin is shown, and refuses outside it", async () => {
+    const { draftId, milestone, program } = await plainDraft();
+    const range = rowOf({ program }, milestone).spendRange as { min: number; max: number };
+    const path = admin(`/programs/${draftId}/milestones/${milestone}/threshold`);
+
+    const r = await call("PUT", path, { realSpend: range.min });
+
+    expect(r.status).toBe(200);
+    expect(rowOf(r.body, milestone).realSpend).toBe(range.min);
+
+    const outside = await call("PUT", path, { realSpend: range.max + 1 });
+
+    expect(outside.status).toBe(409);
+    expect(JSON.stringify(outside.body)).toContain("tiene que estar entre");
+  });
+
+  it("moves a perk too, within its own range", async () => {
+    const { draftId, program } = await plainDraft();
+    const perk = program.ladder.find((m: { type: string }) => m.type === "ventaja");
+    const r = await call("PUT", admin(`/programs/${draftId}/milestones/${perk.n}/threshold`), {
+      realSpend: perk.spendRange.max
+    });
+
+    expect(r.status).toBe(200);
+    expect(rowOf(r.body, perk.n).realSpend).toBe(perk.spendRange.max);
+  });
+
+  it("refuses a tier step, a body that is not whole euros, and a programme that is live", async () => {
+    const { draftId, milestone, program } = await plainDraft();
+    const level = program.ladder.find((m: { type: string }) => m.type === "nivel").n;
+
+    const onLevel = await call("PUT", admin(`/programs/${draftId}/milestones/${level}/threshold`), {
+      realSpend: 100
+    });
+
+    expect(onLevel.status).toBe(409);
+
+    const path = admin(`/programs/${draftId}/milestones/${milestone}/threshold`);
+
+    expect((await call("PUT", path, { realSpend: 12.5 })).status).toBe(422);
+    expect((await call("PUT", path, {})).status).toBe(422);
+
+    // Whatever the fixture's own notes, this test is about the live programme refusing the edit.
+    const stored = await db.onboardingProgram.findUniqueOrThrow({ where: { id: draftId } });
+
+    await db.onboardingProgram.update({
+      where: { id: draftId },
+      data: {
+        output: { ...(stored.output as unknown as Program), review: [] } as unknown as object
+      }
+    });
+
+    const published = await call("POST", admin(`/programs/${draftId}/publish`));
+
+    expect(published.status).toBe(200);
+
+    const live = await call("PUT", path, { realSpend: rowOf({ program }, milestone).realSpend });
+
+    expect(live.status).toBe(409);
+    expect(JSON.stringify(live.body)).toContain("borrador");
   });
 });

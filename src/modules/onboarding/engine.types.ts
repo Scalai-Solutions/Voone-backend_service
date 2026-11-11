@@ -212,9 +212,28 @@ export interface Estimates {
   }>;
 }
 
+/** A reward the admin chose that is not catalogue items: double points, a surprise, or free text. */
+export type SpecialRewardKind = "doble" | "sorpresa" | "libre";
+
+export interface SpecialReward {
+  kind: SpecialRewardKind;
+  /** The title a member sees, unless the centre wrote a `label`. For `libre`, the admin's text. */
+  name: string;
+  /** What it is, for the screens that describe it. Empty for `libre`. */
+  desc: string;
+  /** Only for `sorpresa`: what reception may give when it is redeemed. */
+  pool?: Candidate[];
+}
+
 export interface ChosenReward {
   m: Milestone;
+  /** For a `special` reward: no items, its value (0, or the free text's price) and its cost. */
   o: RewardOption;
+  /**
+   * Set when the admin turned this reward into double points, a surprise or a free text. It is then
+   * issued as that (see `programView`); absent, the reward is the catalogue items in `o`.
+   */
+  special?: SpecialReward;
   /** Up to two swaps the centre may make without breaking the ladder's ordering. */
   alts: RewardOption[];
   /**

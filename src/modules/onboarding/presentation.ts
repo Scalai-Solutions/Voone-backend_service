@@ -1,8 +1,9 @@
 import { benefitLinesFor, visibleBenefits, type PresentedBenefitLine } from "./benefit-lines";
 import { blockingReview, informationalNotes } from "./engine";
 import { MIN_TENURE, TIERS, TIER_BENEFITS, TIER_NAMES } from "./engine.config";
-import type { Program, TierCode } from "./engine.types";
+import type { ChosenReward, Program, TierCode } from "./engine.types";
 import { itemsTitle, rewardTitle } from "./reward-title";
+import { spendRange } from "./threshold";
 
 /**
  * A programme as a centre is allowed to see it.
@@ -30,6 +31,20 @@ export interface PresentedItem {
   name: string;
 }
 
+/**
+ * What a reward is, for the icon and the "Cambiar" panel: a catalogue treatment, a catalogue
+ * product (every item retail), double points, a surprise, or a free text the admin wrote.
+ */
+export type PresentedRewardKind = "tratamiento" | "producto" | "doble" | "sorpresa" | "libre";
+
+export const rewardKindOf = (chosen: Pick<ChosenReward, "o" | "special">): PresentedRewardKind => {
+  if (chosen.special) return chosen.special.kind;
+
+  return chosen.o.items.length > 0 && chosen.o.items.every((i) => i.cat === "COS")
+    ? "producto"
+    : "tratamiento";
+};
+
 export interface PresentedMilestone {
   n: number;
   /** Which tier band it sits in, 1 to 4 — the ladder is shown grouped by band. */
@@ -53,8 +68,16 @@ export interface PresentedMilestone {
    * centre's own presentation never carries it. Present only on reward milestones.
    */
   rewardValueEuro?: number;
+  /**
+   * ADMIN ONLY: the whole euros of spend this reward or perk may be moved to, both ends included,
+   * so the screen states the same limits the edit enforces. Absent on tier steps and with no room.
+   */
+  spendRange?: { min: number; max: number };
   reward?: {
     name: string;
+    kind: PresentedRewardKind;
+    /** What double points or a surprise is; absent for a catalogue reward or a free text. */
+    description?: string;
     items: PresentedItem[];
     /** What the centre may swap this for without breaking the ladder. */
     alternatives: Array<{ name: string; items: PresentedItem[] }>;
@@ -178,8 +201,12 @@ export const presentProgram = (
       const chosen = rewardAt.get(m.n);
 
       if (m.type === "premio" && chosen) {
+        const kind = rewardKindOf(chosen);
+
         base.reward = {
           name: rewardTitle(chosen),
+          kind,
+          ...(chosen.special?.desc ? { description: chosen.special.desc } : {}),
           items: itemsOf(chosen.o.items),
           alternatives: chosen.alts.map((a) => ({
             name: itemsTitle(a.items),
@@ -194,6 +221,11 @@ export const presentProgram = (
       if (m.type === "ventaja" && m.perk) {
         base.perk = { kind: m.perk.kind, name: m.perk.name, description: m.perk.desc };
       }
+
+      // Rewards and perks may be moved by the admin; tier steps never are (spendRange is null).
+      const range = options.forAdmin ? spendRange(program, m.n) : null;
+
+      if (range) base.spendRange = range;
 
       return base;
     }),

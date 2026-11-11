@@ -23,13 +23,20 @@ import {
   FREQ_BUCKETS,
   TICKET_BUCKETS
 } from "./engine.config";
-import { classify, estimate } from "./engine";
+import { classify, estimate, manualCandidates } from "./engine";
 import type { Answers, CatalogItem, EngineError, Program, TierCode } from "./engine.types";
 import { isEngineError } from "./engine.types";
 import { placeMembersOnProgram } from "./runtime/placement";
 import { parsePerkValues, PERK_VALUE_KEYS, type PerkValues } from "./runtime/savings";
 import { recalibrationAdvice, type RecalibrationAdvice } from "./runtime/rules";
-import { swapReward, swapRewardToItem } from "./swap";
+import {
+  swapReward,
+  swapRewardToItem,
+  swapRewardToSpecial,
+  type SpecialChoice,
+  type SwapResult
+} from "./swap";
+import { moveMilestone } from "./threshold";
 import { applyTexts, type TextEdits } from "./texts";
 
 /**
@@ -605,28 +612,72 @@ export class OnboardingService {
     clinicId: string,
     programId: string,
     milestone: number,
-    choice: { alternative: number } | { itemId: string }
+    choice: { alternative: number } | { itemId: string } | SpecialChoice
   ): Promise<OnboardingProgram> {
-    const row = await this.getProgram(clinicId, programId);
-
-    if (row.status !== OnboardingProgramStatus.BORRADOR) {
-      throw new OnboardingError(
-        "Solo se pueden cambiar los premios de un borrador. Genera un borrador nuevo para editar un programa activo.",
-        409
-      );
-    }
-
-    const program = row.output as unknown as Program;
-    const answers = row.answers as unknown as Answers;
-    const result =
-      "itemId" in choice
-        ? swapRewardToItem(
+    return this.editDraftProgram(
+      clinicId,
+      programId,
+      "Solo se pueden cambiar los premios de un borrador. Genera un borrador nuevo para editar un programa activo.",
+      async (program, answers) => {
+        if ("itemId" in choice) {
+          return swapRewardToItem(
             await this.withCurrentRow(clinicId, program, choice.itemId),
             answers,
             milestone,
             choice.itemId
-          )
-        : swapReward(program, answers, milestone, choice.alternative);
+          );
+        }
+
+        if ("kind" in choice) {
+          // A surprise may be anything the admin could hand-pick today (medical never), read from
+          // the catalogue as it is now rather than the draft's snapshot, as an item swap does.
+          const pool =
+            choice.kind === "sorpresa"
+              ? manualCandidates(
+                  classify(toEngineCatalog(await this.catalog.listForClinic(clinicId))),
+                  answers
+                )
+              : [];
+
+          return swapRewardToSpecial(program, answers, milestone, choice, pool);
+        }
+
+        return swapReward(program, answers, milestone, choice.alternative);
+      }
+    );
+  }
+
+  /** Moves the spend at which a reward or perk unlocks (whole euros paid). Drafts only. */
+  async setMilestoneThreshold(
+    clinicId: string,
+    programId: string,
+    milestone: number,
+    realSpend: number
+  ): Promise<OnboardingProgram> {
+    return this.editDraftProgram(
+      clinicId,
+      programId,
+      "Solo se puede cambiar el gasto de los premios y las ventajas de un borrador. Genera un borrador nuevo para editar un programa activo.",
+      async (program) => moveMilestone(program, milestone, realSpend)
+    );
+  }
+
+  /**
+   * One edit of a DRAFT's programme: refused on any other status, refused with the edit's own
+   * reason, and written optimistically on the row's updatedAt, so two operators editing the same
+   * draft cannot silently erase each other's change.
+   */
+  private async editDraftProgram(
+    clinicId: string,
+    programId: string,
+    notDraft: string,
+    edit: (program: Program, answers: Answers) => Promise<SwapResult>
+  ): Promise<OnboardingProgram> {
+    const row = await this.getProgram(clinicId, programId);
+
+    if (row.status !== OnboardingProgramStatus.BORRADOR) throw new OnboardingError(notDraft, 409);
+
+    const result = await edit(row.output as unknown as Program, row.answers as unknown as Answers);
 
     if (!result.ok) throw new OnboardingError(result.reason, 409);
 

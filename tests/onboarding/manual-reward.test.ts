@@ -233,13 +233,14 @@ describe("swapRewardToItem with the wider rule", () => {
     });
   });
 
-  it("names the milestones when a swap would repeat a gift in a row", () => {
+  it("gives the same gift as the next reward when asked: repeats are the centre's call", () => {
     const p = fresh();
     const neighbour = entry(p, 5).o.items[0].id;
-    const r = swap(p, 3, neighbour);
+    const next = ok(swap(p, 3, neighbour));
 
-    expect(reason(r)).toContain("repetiría un regalo en dos hitos seguidos");
-    expect(reason(r)).toContain("hitos 3 y 5");
+    expect(entry(next, 3).o.items.map((i) => i.id)).toEqual([neighbour]);
+    expect(entry(next, 5).o.items[0].id).toBe(neighbour);
+    expect(reason(swap(p, 3, neighbour))).toBe("");
   });
 });
 

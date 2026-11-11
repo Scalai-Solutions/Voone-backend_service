@@ -92,8 +92,25 @@ export const programView = (output: Program): ProgramView => {
 
     if (m.type === "premio") {
       const chosen = rewardAt.get(m.n);
+      const special = chosen?.special;
 
-      if (chosen) {
+      if (chosen && special && special.kind !== "libre") {
+        // Issued as the very perk the engine places on the ladder, so everything that already
+        // handles it holds: double points is spent by the next payment on its own and is never
+        // redeemed by hand; a surprise is redeemed by picking one gift from its pool.
+        base.issue = {
+          kind: "VENTAJA",
+          title: rewardTitle(chosen),
+          detail: {
+            perk: special.kind,
+            description: special.desc,
+            ...(special.kind === "sorpresa"
+              ? { pool: (special.pool ?? []).map((c) => ({ id: c.id, name: c.name })) }
+              : {})
+          }
+        };
+      } else if (chosen) {
+        // A catalogue reward, or a free text: a gift with no catalogue item, worth its price.
         base.issue = {
           kind: "PREMIO",
           title: rewardTitle(chosen),

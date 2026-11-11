@@ -27,6 +27,7 @@ import {
   redeemSchema,
   calculatorSchema,
   swapSchema,
+  thresholdSchema,
   textsSchema,
   benefitOverridesSchema,
   tierBenefitsSchema,
@@ -404,6 +405,31 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
       res.json(
         forAdmin(
           await deps.onboarding.swapMilestone(clinicId, req.params.programId, milestone, choice)
+        )
+      );
+    })
+  );
+
+  router.put(
+    "/admin/clinics/:clinicId/onboarding/programs/:programId/milestones/:milestone/threshold",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const clinicId = await clinicOr404(req.params.clinicId);
+      const { realSpend } = parse(thresholdSchema, req.body);
+      const milestone = Number(req.params.milestone);
+
+      if (!Number.isInteger(milestone) || milestone < 1) {
+        throw new MembershipValidationError("milestone: indica un número de hito válido");
+      }
+
+      res.json(
+        forAdmin(
+          await deps.onboarding.setMilestoneThreshold(
+            clinicId,
+            req.params.programId,
+            milestone,
+            realSpend
+          )
         )
       );
     })
