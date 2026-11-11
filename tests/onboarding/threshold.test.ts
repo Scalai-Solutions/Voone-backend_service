@@ -51,15 +51,18 @@ const moved = (p: Program, n: number, real: number): Program => {
 
 const rewardsIn = (p: Program, tramo: number) =>
   p.lad.ms.filter((m) => m.type === "premio" && m.tramo === tramo).map((m) => m.n);
+/** Every row the admin may move: rewards and perks, never a tier step. */
+const movableIn = (p: Program, tramo: number) =>
+  p.lad.ms.filter((m) => m.type !== "nivel" && m.tramo === tramo).map((m) => m.n);
 const shownSpend = (p: Program, n: number): number =>
   presentProgram(p).ladder.find((m) => m.n === n)!.realSpend;
 
 describe("moving a reward's spend", () => {
-  it("moves the reward to exactly the amount typed, in every tier band", () => {
+  it("moves a reward or a perk to exactly the amount typed, in every tier band", () => {
     const p = fresh();
 
     for (const tramo of [1, 2, 3, 4]) {
-      for (const n of rewardsIn(p, tramo)) {
+      for (const n of movableIn(p, tramo)) {
         const range = spendRange(p, n)!;
 
         expect(range, `milestone ${n}`).not.toBeNull();
@@ -141,12 +144,21 @@ describe("what a move refuses", () => {
     }
   });
 
-  it("refuses a perk, a tier step and a milestone that does not exist", () => {
+  it("moves a perk like a reward", () => {
     const p = fresh();
-    const perk = p.lad.ms.find((m) => m.type === "ventaja")!.n;
+    const perk = p.lad.ms.find((m) => m.type === "ventaja")!;
+    const range = spendRange(p, perk.n)!;
+    const next = moved(p, perk.n, range.min);
+
+    expect(shownSpend(next, perk.n)).toBe(range.min);
+    expect(next.lad.ms.find((m) => m.n === perk.n)!.perk).toEqual(perk.perk);
+  });
+
+  it("refuses a tier step and a milestone that does not exist", () => {
+    const p = fresh();
     const level = p.lad.ms.find((m) => m.type === "nivel")!.n;
 
-    for (const n of [perk, level, 999]) {
+    for (const n of [level, 999]) {
       expect(moveMilestone(p, n, 100)).toEqual({ ok: false, reason: THRESHOLD_REFUSALS.notReward });
       expect(spendRange(p, n)).toBeNull();
     }
@@ -163,12 +175,12 @@ describe("what a move refuses", () => {
 });
 
 describe("the range on the admin's screen", () => {
-  it("is the one the move enforces, on every reward, and only for the admin", () => {
+  it("is the one the move enforces, on every reward and perk, and only for the admin", () => {
     const p = fresh();
     const admin = presentProgram(p, { forAdmin: true }).ladder;
 
     for (const m of admin) {
-      if (m.type === "premio") expect(m.spendRange).toEqual(spendRange(p, m.n));
+      if (m.type !== "nivel") expect(m.spendRange).toEqual(spendRange(p, m.n));
       else expect(m).not.toHaveProperty("spendRange");
     }
 

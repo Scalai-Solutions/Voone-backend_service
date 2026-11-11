@@ -647,7 +647,7 @@ export class OnboardingService {
     );
   }
 
-  /** Moves the spend at which a reward milestone unlocks (whole euros paid). Drafts only. */
+  /** Moves the spend at which a reward or perk unlocks (whole euros paid). Drafts only. */
   async setMilestoneThreshold(
     clinicId: string,
     programId: string,
@@ -657,7 +657,7 @@ export class OnboardingService {
     return this.editDraftProgram(
       clinicId,
       programId,
-      "Solo se puede cambiar el gasto de los premios de un borrador. Genera un borrador nuevo para editar un programa activo.",
+      "Solo se puede cambiar el gasto de los premios y las ventajas de un borrador. Genera un borrador nuevo para editar un programa activo.",
       async (program) => moveMilestone(program, milestone, realSpend)
     );
   }

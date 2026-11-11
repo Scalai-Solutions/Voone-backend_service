@@ -4,15 +4,16 @@ import type { Program } from "./engine.types";
 import { retotal, type SwapResult } from "./swap";
 
 /**
- * Moving the spend at which a reward unlocks.
+ * Moving the spend at which a reward or a perk unlocks.
  *
  * The admin reads and types what a client has actually PAID (the screen's "El cliente ha gastado"),
  * whereas a milestone stores PROGRESS euros (`th`), which run faster than paid euros from Oro up.
  * So the typed amount is turned into progress with the multiplier of the reward's own tier band,
- * rounded to a whole euro as the ledger holds them. The reward must stay strictly between the
+ * rounded to a whole euro as the ledger holds them. The milestone must stay strictly between the
  * milestones either side of it, so tier bands, the order of the ladder and every other row's spend
- * are untouched: the step before and the step after a reward are earned in the same band, at the
- * same multiplier, so moving it only moves its own row.
+ * are untouched: the step before and the step after a reward or perk are earned in the same band,
+ * at the same multiplier, so moving it only moves its own row. A tier step never moves: it is
+ * where the tier itself begins.
  *
  * Pure: it takes a programme and returns a new one, never the same object.
  */
@@ -22,9 +23,9 @@ const fail = (reason: string): SwapResult => ({ ok: false, reason });
 const euros = (n: number): string => `${n.toLocaleString("es-ES")} €`;
 
 export const THRESHOLD_REFUSALS = {
-  notReward: "Solo se puede cambiar el gasto de un premio.",
+  notReward: "Solo se puede cambiar el gasto de un premio o de una ventaja.",
   notWhole: "El gasto tiene que ser un número entero de euros, mayor que 0.",
-  noRoom: "No hay margen para mover este premio: los hitos de al lado están demasiado cerca."
+  noRoom: "No hay margen para mover esta fila: los hitos de al lado están demasiado cerca."
 } as const;
 
 interface Geometry {
@@ -60,11 +61,14 @@ const geometryOf = (program: Program, at: number): Geometry => {
   return { thAt, range: max >= min ? { min, max } : null };
 };
 
-/** The whole euros of spend a reward milestone may be moved to, or null for any other row. */
+/** A reward or a perk may move; a tier step may not. */
+const movable = (type: string): boolean => type === "premio" || type === "ventaja";
+
+/** The whole euros of spend a reward or perk may be moved to, or null for any other row. */
 export const spendRange = (program: Program, n: number): { min: number; max: number } | null => {
   const at = program.lad.ms.findIndex((m) => m.n === n);
 
-  if (at < 0 || program.lad.ms[at].type !== "premio") return null;
+  if (at < 0 || !movable(program.lad.ms[at].type)) return null;
 
   return geometryOf(program, at).range;
 };
@@ -72,7 +76,7 @@ export const spendRange = (program: Program, n: number): { min: number; max: num
 export const moveMilestone = (program: Program, n: number, realSpend: number): SwapResult => {
   const at = program.lad.ms.findIndex((m) => m.n === n);
 
-  if (at < 0 || program.lad.ms[at].type !== "premio") return fail(THRESHOLD_REFUSALS.notReward);
+  if (at < 0 || !movable(program.lad.ms[at].type)) return fail(THRESHOLD_REFUSALS.notReward);
   if (!Number.isInteger(realSpend) || realSpend < 1) return fail(THRESHOLD_REFUSALS.notWhole);
 
   const { thAt, range } = geometryOf(program, at);
@@ -80,16 +84,14 @@ export const moveMilestone = (program: Program, n: number, realSpend: number): S
   if (!range) return fail(THRESHOLD_REFUSALS.noRoom);
 
   if (realSpend < range.min || realSpend > range.max) {
-    return fail(
-      `El gasto de este premio tiene que estar entre ${euros(range.min)} y ${euros(range.max)}.`
-    );
+    return fail(`El gasto tiene que estar entre ${euros(range.min)} y ${euros(range.max)}.`);
   }
 
   const th = thAt(realSpend);
   const next = structuredClone(program);
 
   next.lad.ms[at].th = th;
-  // The reward keeps its own copy of the milestone; the two must never disagree.
+  // A reward keeps its own copy of the milestone; the two must never disagree.
   for (const c of next.chosen) if (c.m.n === n) c.m.th = th;
 
   next.realTh = realThresholds(next.lad.ms);

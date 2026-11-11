@@ -69,8 +69,8 @@ export interface PresentedMilestone {
    */
   rewardValueEuro?: number;
   /**
-   * ADMIN ONLY: the whole euros of spend this reward may be moved to, both ends included, so the
-   * screen states the same limits the edit enforces. Present only on reward milestones with room.
+   * ADMIN ONLY: the whole euros of spend this reward or perk may be moved to, both ends included,
+   * so the screen states the same limits the edit enforces. Absent on tier steps and with no room.
    */
   spendRange?: { min: number; max: number };
   reward?: {
@@ -215,18 +215,17 @@ export const presentProgram = (
         };
 
         // The engine's own retail value for the reward (`o.value`, already the sum for a combo).
-        if (options.forAdmin) {
-          base.rewardValueEuro = euros(chosen.o.value);
-
-          const range = spendRange(program, m.n);
-
-          if (range) base.spendRange = range;
-        }
+        if (options.forAdmin) base.rewardValueEuro = euros(chosen.o.value);
       }
 
       if (m.type === "ventaja" && m.perk) {
         base.perk = { kind: m.perk.kind, name: m.perk.name, description: m.perk.desc };
       }
+
+      // Rewards and perks may be moved by the admin; tier steps never are (spendRange is null).
+      const range = options.forAdmin ? spendRange(program, m.n) : null;
+
+      if (range) base.spendRange = range;
 
       return base;
     }),

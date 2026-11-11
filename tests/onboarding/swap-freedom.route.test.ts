@@ -757,15 +757,26 @@ describe("moving a reward's spend, over HTTP", () => {
     expect(JSON.stringify(outside.body)).toContain("tiene que estar entre");
   });
 
-  it("refuses a perk, a body that is not whole euros, and a programme that is live", async () => {
-    const { draftId, milestone, program } = await plainDraft();
-    const perk = program.ladder.find((m: { type: string }) => m.type === "ventaja").n;
+  it("moves a perk too, within its own range", async () => {
+    const { draftId, program } = await plainDraft();
+    const perk = program.ladder.find((m: { type: string }) => m.type === "ventaja");
+    const r = await call("PUT", admin(`/programs/${draftId}/milestones/${perk.n}/threshold`), {
+      realSpend: perk.spendRange.max
+    });
 
-    const onPerk = await call("PUT", admin(`/programs/${draftId}/milestones/${perk}/threshold`), {
+    expect(r.status).toBe(200);
+    expect(rowOf(r.body, perk.n).realSpend).toBe(perk.spendRange.max);
+  });
+
+  it("refuses a tier step, a body that is not whole euros, and a programme that is live", async () => {
+    const { draftId, milestone, program } = await plainDraft();
+    const level = program.ladder.find((m: { type: string }) => m.type === "nivel").n;
+
+    const onLevel = await call("PUT", admin(`/programs/${draftId}/milestones/${level}/threshold`), {
       realSpend: 100
     });
 
-    expect(onPerk.status).toBe(409);
+    expect(onLevel.status).toBe(409);
 
     const path = admin(`/programs/${draftId}/milestones/${milestone}/threshold`);
 
