@@ -345,11 +345,94 @@ describe("switching between kinds", () => {
     }
   });
 
-  it("refuses a milestone that holds no reward", () => {
+  it("refuses a tier step and a milestone that does not exist", () => {
     const p = fresh();
-    const perk = p.lad.ms.find((m) => m.type === "ventaja")!.n;
+    const level = p.lad.ms.find((m) => m.type === "nivel")!.n;
 
-    expect(swapRewardToSpecial(p, ANSWERS, perk, { kind: "doble" })).toMatchObject({ ok: false });
+    for (const n of [level, 999]) {
+      expect(swapRewardToSpecial(p, ANSWERS, n, { kind: "doble" })).toMatchObject({ ok: false });
+      expect(swapRewardToItem(p, ANSWERS, n, p.chosen[0].o.items[0].id)).toMatchObject({
+        ok: false
+      });
+    }
+  });
+});
+
+describe("changing a perk row", () => {
+  const perkOf = (p: Program, kind: string) => p.lad.ms.find((m) => m.perk?.kind === kind)!;
+
+  it("turns it into a reward slot holding the choice, in ladder order", () => {
+    const p = fresh();
+    const perk = perkOf(p, "doble");
+    const itemId = p.chosen[0].o.items[0].id;
+    const result = swapRewardToItem(p, ANSWERS, perk.n, itemId);
+
+    if (!result.ok) throw new Error(result.reason);
+
+    const next = result.program;
+    const milestone = next.lad.ms.find((m) => m.n === perk.n)!;
+
+    expect(milestone.type).toBe("premio");
+    expect(milestone.perk).toBeUndefined();
+    expect(next.chosen).toHaveLength(p.chosen.length + 1);
+    expect(entry(next, perk.n).o.items.map((i) => i.id)).toEqual([itemId]);
+    expect(entry(next, perk.n).m.th).toBe(perk.th);
+
+    const order = next.chosen.map((c) => c.m.n);
+
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    // Issued as a gift now, at the same spend, and shown with "Cambiar" like any reward.
+    expect(issueAt(next, perk.n)).toMatchObject({ kind: "PREMIO" });
+    expect(presentedAt(next, perk.n)).toMatchObject({
+      type: "premio",
+      reward: { kind: "tratamiento" }
+    });
+    expect(presentedAt(next, perk.n).perk).toBeUndefined();
+  });
+
+  it("takes the perk's cost out of the total, and adds the new reward's", () => {
+    const p = fresh();
+    const perk = perkOf(p, "doble");
+    const next = special(p, perk.n, { kind: "libre", name: "Manicura", priceEuro: 30 });
+
+    expect(next.perkCost).toBeCloseTo(p.perkCost - perk.perk!.cost, 10);
+    expect(next.totalCost).toBeCloseTo(
+      next.chosen.reduce((s, c) => s + c.o.cost, 0) + next.perkCost,
+      10
+    );
+  });
+
+  it("still works like double points when double points is chosen for it", () => {
+    const p = fresh();
+    const perk = perkOf(p, "doble");
+    const issue = issueAt(special(p, perk.n, { kind: "doble" }), perk.n);
+
+    expect(isDoublePointsPerk(issue.kind, issue.detail)).toBe(true);
+    expect(issue.title).toBe(DOUBLE_PERK_TEXT.name);
+  });
+
+  it("leaves the programme it was given, and every other row, untouched", () => {
+    const p = fresh();
+    const perk = perkOf(p, "doble");
+    const snapshot = JSON.stringify(p);
+    const next = special(p, perk.n, { kind: "doble" });
+
+    expect(JSON.stringify(p)).toBe(snapshot);
+
+    for (const m of p.lad.ms.filter((x) => x.n !== perk.n)) {
+      expect(next.lad.ms.find((x) => x.n === m.n)).toEqual(m);
+    }
+  });
+
+  it("is not converted when the choice is refused", () => {
+    const p = fresh();
+    const perk = perkOf(p, "doble");
+
+    expect(swapRewardToSpecial(p, ANSWERS, perk.n, { kind: "sorpresa" }, [])).toEqual({
+      ok: false,
+      reason: EMPTY_SURPRISE_POOL
+    });
+    expect(p.lad.ms.find((m) => m.n === perk.n)!.type).toBe("ventaja");
   });
 });
 

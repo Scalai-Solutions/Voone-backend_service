@@ -10,7 +10,14 @@ import {
   type ManualRefusal
 } from "./engine";
 import { ids } from "./engine.math";
-import type { Answers, Candidate, Program, RewardOption, SpecialReward } from "./engine.types";
+import type {
+  Answers,
+  Candidate,
+  ChosenReward,
+  Program,
+  RewardOption,
+  SpecialReward
+} from "./engine.types";
 
 /**
  * Replacing one reward with an alternative the engine proposed.
@@ -47,6 +54,53 @@ export const swapReward = (
   return replaceReward(program, answers, at, replacement, alternative);
 };
 
+const NO_SLOT = "Ese hito no tiene un premio que se pueda cambiar.";
+
+/**
+ * The reward slot at a milestone, for a choice made on the "Cambiar" panel.
+ *
+ * Every row but a tier step can be changed there. A perk milestone has no reward slot, so it is
+ * given one, empty, which the swap fills at once: from then on it is a reward like the others, and
+ * what it becomes is issued like any reward's (double points and a surprise still as their perks,
+ * see `programView`). The perk's cost leaves the total with it. Returns a copy when it converts;
+ * null for a tier step or a milestone that does not exist.
+ */
+const rewardSlot = (
+  program: Program,
+  milestone: number
+): { program: Program; at: number } | null => {
+  const at = program.chosen.findIndex((c) => c.m.n === milestone);
+
+  if (at >= 0) return { program, at };
+
+  const i = program.lad.ms.findIndex((m) => m.n === milestone);
+
+  if (i < 0 || program.lad.ms[i].type !== "ventaja") return null;
+
+  const next = structuredClone(program);
+  const slot = next.lad.ms[i];
+
+  slot.type = "premio";
+  delete slot.perk;
+  next.perkCost = next.lad.ms.reduce(
+    (sum, m) => sum + (m.type === "ventaja" ? (m.perk?.cost ?? 0) : 0),
+    0
+  );
+
+  const entry: ChosenReward = {
+    m: structuredClone(slot),
+    o: { items: [], value: 0, cost: 0 },
+    alts: []
+  };
+  // `chosen` is in ladder order, which the rest of the programme relies on.
+  const after = next.chosen.findIndex((c) => c.m.n > milestone);
+  const insertAt = after < 0 ? next.chosen.length : after;
+
+  next.chosen.splice(insertAt, 0, entry);
+
+  return { program: next, at: insertAt };
+};
+
 export const MANUAL_REFUSALS: Record<ManualRefusal, string> = {
   price: "Ese artículo no tiene precio, así que no puede ser un premio.",
   prize: "El centro no ha marcado este artículo como premio (Y) en su catálogo.",
@@ -68,9 +122,9 @@ export const swapRewardToItem = (
   milestone: number,
   itemId: string
 ): SwapResult => {
-  const at = program.chosen.findIndex((c) => c.m.n === milestone);
+  const slot = rewardSlot(program, milestone);
 
-  if (at < 0) return fail("Ese hito no tiene un premio que se pueda cambiar.");
+  if (!slot) return fail(NO_SLOT);
 
   const row = program.catalog.find((candidate) => candidate.id === itemId);
 
@@ -85,9 +139,9 @@ export const swapRewardToItem = (
   const [item] = manualCandidates([row], answers);
 
   return replaceReward(
-    program,
+    slot.program,
     answers,
-    at,
+    slot.at,
     { items: [item], value: item.value, cost: item.cost },
     -1
   );
@@ -137,9 +191,14 @@ export const swapRewardToSpecial = (
   choice: SpecialChoice,
   pool: readonly Candidate[] = []
 ): SwapResult => {
-  const at = program.chosen.findIndex((c) => c.m.n === milestone);
+  const slot = rewardSlot(program, milestone);
 
-  if (at < 0) return fail("Ese hito no tiene un premio que se pueda cambiar.");
+  if (!slot) return fail(NO_SLOT);
+
+  const at = slot.at;
+
+  // From here on `program` is the one holding the slot (a copy when a perk was converted).
+  program = slot.program;
 
   if (choice.kind === "doble") {
     return replaceReward(
