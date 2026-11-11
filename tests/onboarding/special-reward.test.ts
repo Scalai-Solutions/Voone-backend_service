@@ -383,9 +383,12 @@ describe("changing a perk row", () => {
     expect(order).toEqual([...order].sort((a, b) => a - b));
     // Issued as a gift now, at the same spend, and shown with "Cambiar" like any reward.
     expect(issueAt(next, perk.n)).toMatchObject({ kind: "PREMIO" });
+    // A treatment or a product, whichever the chosen item is.
+    const item = p.chosen[0].o.items[0];
+
     expect(presentedAt(next, perk.n)).toMatchObject({
       type: "premio",
-      reward: { kind: "tratamiento" }
+      reward: { kind: item.cat === "COS" ? "producto" : "tratamiento" }
     });
     expect(presentedAt(next, perk.n).perk).toBeUndefined();
   });

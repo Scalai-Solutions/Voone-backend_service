@@ -135,6 +135,14 @@ const proposeReward = (
   if (!row) return refused("That item is not in the clinic's catalogue.");
   if (!isGiftable(row)) return refused("That item cannot be given as a reward.", "unavailable");
 
+  // An owner's request changes a reward only. The admin's "Cambiar" may turn a perk row into a
+  // reward (swapRewardToItem does), but a change request never does.
+  if (!output.chosen.some((c) => c.m.n === milestone)) {
+    const reason = "Ese hito no tiene un premio que se pueda cambiar.";
+
+    return refused(englishRefusal(reason), blockedBy(reason));
+  }
+
   const copy = structuredClone(output);
 
   withCurrentRow(copy, structuredClone(row));
