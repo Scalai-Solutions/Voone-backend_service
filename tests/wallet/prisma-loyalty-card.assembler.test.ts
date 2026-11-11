@@ -864,7 +864,15 @@ describe("PrismaLoyaltyCardAssembler: the pending boost (x2)", () => {
     ).assemble(member.id);
 
     expect(findUnique).toHaveBeenCalledTimes(1);
-    expect(JSON.stringify(findUnique.mock.calls[0])).not.toMatch(/referredBy|paidVisits/);
+    const query = (findUnique.mock.calls[0] as unknown[])[0] as {
+      include: Record<string, unknown>;
+    };
+
+    expect(JSON.stringify(query)).not.toMatch(/referredBy/);
+    // The only visits read are the history's zero-point ones, never a first-visit check.
+    expect(query.include.paidVisits).toEqual(
+      expect.objectContaining({ where: { progressAwarded: 0 } })
+    );
 
     await build(programmeMember({ referredBy: { id: "r1" } }));
 

@@ -23,7 +23,7 @@ const LABELS: Record<Entry["kind"], string> = {
 };
 
 const signed = (points: number): string =>
-  `${points > 0 ? "+" : "−"}${Math.abs(points).toLocaleString("es-ES")}`;
+  `${points >= 0 ? "+" : "−"}${Math.abs(points).toLocaleString("es-ES")}`;
 
 /**
  * The member's latest movements, newest first, one line each: `12 nov · Visita · +450 puntos`.
