@@ -36,6 +36,7 @@ import {
   type SpecialChoice,
   type SwapResult
 } from "./swap";
+import { insertMilestone, removeMilestone } from "./ladder-edit";
 import { moveMilestone } from "./threshold";
 import { applyTexts, type TextEdits } from "./texts";
 
@@ -618,33 +619,77 @@ export class OnboardingService {
       clinicId,
       programId,
       "Solo se pueden cambiar los premios de un borrador. Genera un borrador nuevo para editar un programa activo.",
+      async (program, answers) =>
+        "alternative" in choice
+          ? swapReward(program, answers, milestone, choice.alternative)
+          : this.applyChoice(clinicId, program, answers, milestone, choice)
+    );
+  }
+
+  /** Adds a reward to tier band `band` (1 to 4) at `realSpend` whole euros paid. Drafts only. */
+  async addMilestone(
+    clinicId: string,
+    programId: string,
+    band: number,
+    realSpend: number,
+    choice: { itemId: string } | SpecialChoice
+  ): Promise<OnboardingProgram> {
+    return this.editDraftProgram(
+      clinicId,
+      programId,
+      "Solo se pueden añadir premios a un borrador. Genera un borrador nuevo para editar un programa activo.",
       async (program, answers) => {
-        if ("itemId" in choice) {
-          return swapRewardToItem(
-            await this.withCurrentRow(clinicId, program, choice.itemId),
-            answers,
-            milestone,
-            choice.itemId
-          );
-        }
+        const slot = insertMilestone(program, band, realSpend);
 
-        if ("kind" in choice) {
-          // A surprise may be anything the admin could hand-pick today (medical never), read from
-          // the catalogue as it is now rather than the draft's snapshot, as an item swap does.
-          const pool =
-            choice.kind === "sorpresa"
-              ? manualCandidates(
-                  classify(toEngineCatalog(await this.catalog.listForClinic(clinicId))),
-                  answers
-                )
-              : [];
+        if (!slot.ok) return slot;
 
-          return swapRewardToSpecial(program, answers, milestone, choice, pool);
-        }
-
-        return swapReward(program, answers, milestone, choice.alternative);
+        return this.applyChoice(clinicId, slot.program, answers, slot.n, choice);
       }
     );
+  }
+
+  /** Removes a reward or perk from the ladder. Drafts only. */
+  async removeMilestone(
+    clinicId: string,
+    programId: string,
+    milestone: number
+  ): Promise<OnboardingProgram> {
+    return this.editDraftProgram(
+      clinicId,
+      programId,
+      "Solo se pueden quitar premios de un borrador. Genera un borrador nuevo para editar un programa activo.",
+      async (program) => removeMilestone(program, milestone)
+    );
+  }
+
+  /** Puts one of the "Cambiar" panel's choices in a milestone's reward slot. */
+  private async applyChoice(
+    clinicId: string,
+    program: Program,
+    answers: Answers,
+    milestone: number,
+    choice: { itemId: string } | SpecialChoice
+  ): Promise<SwapResult> {
+    if ("itemId" in choice) {
+      return swapRewardToItem(
+        await this.withCurrentRow(clinicId, program, choice.itemId),
+        answers,
+        milestone,
+        choice.itemId
+      );
+    }
+
+    // A surprise may be anything the admin could hand-pick today (medical never), read from the
+    // catalogue as it is now rather than the draft's snapshot, as an item swap does.
+    const pool =
+      choice.kind === "sorpresa"
+        ? manualCandidates(
+            classify(toEngineCatalog(await this.catalog.listForClinic(clinicId))),
+            answers
+          )
+        : [];
+
+    return swapRewardToSpecial(program, answers, milestone, choice, pool);
   }
 
   /** Moves the spend at which a reward or perk unlocks (whole euros paid). Drafts only. */

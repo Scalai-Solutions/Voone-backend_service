@@ -240,34 +240,49 @@ export const MAX_FREE_REWARD_EURO = 10_000;
  * its id (a treatment or a product: which one it is follows from the item), double points, a
  * surprise, or a free text with its price.
  */
+const itemChoice = z.object({ itemId: z.string().trim().min(1).max(64) });
+
+const specialChoice = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("doble") }),
+  z.object({ kind: z.literal("sorpresa") }),
+  z.object({
+    kind: z.literal("libre"),
+    name: text(120, "El premio"),
+    priceEuro: z
+      .number({ message: "El precio del premio: tiene que ser un número" })
+      .positive("El precio del premio: tiene que ser mayor que 0")
+      .max(MAX_FREE_REWARD_EURO, `El precio del premio: máximo ${MAX_FREE_REWARD_EURO} €`)
+      .refine(
+        (euro) => Math.abs(Math.round(euro * 100) - euro * 100) < 1e-6,
+        "El precio del premio: como mucho dos decimales"
+      )
+  })
+]);
+
 export const swapSchema = z.union([
   z.object({ alternative: z.number().int().min(0).max(1) }),
-  z.object({ itemId: z.string().trim().min(1).max(64) }),
-  z.discriminatedUnion("kind", [
-    z.object({ kind: z.literal("doble") }),
-    z.object({ kind: z.literal("sorpresa") }),
-    z.object({
-      kind: z.literal("libre"),
-      name: text(120, "El premio"),
-      priceEuro: z
-        .number({ message: "El precio del premio: tiene que ser un número" })
-        .positive("El precio del premio: tiene que ser mayor que 0")
-        .max(MAX_FREE_REWARD_EURO, `El precio del premio: máximo ${MAX_FREE_REWARD_EURO} €`)
-        .refine(
-          (euro) => Math.abs(Math.round(euro * 100) - euro * 100) < 1e-6,
-          "El precio del premio: como mucho dos decimales"
-        )
-    })
-  ])
+  itemChoice,
+  specialChoice
 ]);
 
 /** The spend, in whole euros paid, at which a reward unlocks. The programme sets the real limits. */
-export const thresholdSchema = z.object({
-  realSpend: z
-    .number({ message: "El gasto: tiene que ser un número" })
-    .int("El gasto: tiene que ser un número entero de euros")
-    .min(1, "El gasto: tiene que ser mayor que 0")
-    .max(1_000_000, "El gasto: demasiado alto")
+const realSpend = z
+  .number({ message: "El gasto: tiene que ser un número" })
+  .int("El gasto: tiene que ser un número entero de euros")
+  .min(1, "El gasto: tiene que ser mayor que 0")
+  .max(1_000_000, "El gasto: demasiado alto");
+
+export const thresholdSchema = z.object({ realSpend });
+
+/** A reward added to a tier band (1 Bronce to 4 Platino), at a spend, as one of the panel's choices. */
+export const addMilestoneSchema = z.object({
+  band: z
+    .number({ message: "band: indica un nivel válido" })
+    .int("band: indica un nivel válido")
+    .min(1, "band: indica un nivel válido")
+    .max(4, "band: indica un nivel válido"),
+  realSpend,
+  choice: z.union([itemChoice, specialChoice])
 });
 
 /** Texts editable on a draft. Anything omitted is left as it is. */

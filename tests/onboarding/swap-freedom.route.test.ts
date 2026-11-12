@@ -803,3 +803,73 @@ describe("moving a reward's spend, over HTTP", () => {
     expect(JSON.stringify(live.body)).toContain("borrador");
   });
 });
+
+describe("adding and removing milestones, over HTTP", () => {
+  it("adds a reward to a band at a spend inside the band's range", async () => {
+    const { draftId, program } = await plainDraft();
+    const range = program.tiers[0].addRange as { min: number; max: number };
+    const taken = new Set(program.ladder.map((m: { realSpend: number }) => m.realSpend));
+    let realSpend = range.min;
+
+    while (taken.has(realSpend)) realSpend += 1;
+
+    const r = await call("POST", admin(`/programs/${draftId}/milestones`), {
+      band: 1,
+      realSpend,
+      choice: { kind: "libre", name: "Manicura de regalo", priceEuro: 20 }
+    });
+
+    expect(r.status).toBe(200);
+
+    const row = r.body.program.ladder.find(
+      (m: { reward?: { name: string } }) => m.reward?.name === "Manicura de regalo"
+    );
+
+    expect(row).toMatchObject({ band: 1, type: "premio", realSpend, reward: { kind: "libre" } });
+  });
+
+  it("refuses a spend outside the band, a band that does not exist, and a bad choice", async () => {
+    const { draftId, program } = await plainDraft();
+    const range = program.tiers[0].addRange as { min: number; max: number };
+    const path = admin(`/programs/${draftId}/milestones`);
+
+    const outside = await call("POST", path, {
+      band: 1,
+      realSpend: range.max + 1,
+      choice: { kind: "doble" }
+    });
+
+    expect(outside.status).toBe(409);
+    expect(JSON.stringify(outside.body)).toContain("tiene que estar entre");
+
+    for (const body of [
+      { band: 5, realSpend: range.min, choice: { kind: "doble" } },
+      { band: 1, realSpend: range.min, choice: { alternative: 0 } },
+      { band: 1, realSpend: range.min }
+    ]) {
+      expect((await call("POST", path, body)).status, JSON.stringify(body)).toBe(422);
+    }
+
+    // Nothing was added by any refusal.
+    const after = await call("GET", admin(`/programs/${draftId}`));
+
+    expect(after.body.program.ladder).toHaveLength(program.ladder.length);
+  });
+
+  it("removes a reward and a perk, and refuses a tier step", async () => {
+    const { draftId, milestone, program } = await plainDraft();
+    const perk = program.ladder.find((m: { type: string }) => m.type === "ventaja").n;
+    const level = program.ladder.find((m: { type: string }) => m.type === "nivel").n;
+
+    for (const n of [milestone, perk]) {
+      const r = await call("DELETE", admin(`/programs/${draftId}/milestones/${n}`));
+
+      expect(r.status).toBe(200);
+      expect(rowOf(r.body, n)).toBeUndefined();
+    }
+
+    const onLevel = await call("DELETE", admin(`/programs/${draftId}/milestones/${level}`));
+
+    expect(onLevel.status).toBe(409);
+  });
+});

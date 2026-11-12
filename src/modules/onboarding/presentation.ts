@@ -3,6 +3,7 @@ import { blockingReview, informationalNotes } from "./engine";
 import { MIN_TENURE, TIERS, TIER_BENEFITS, TIER_NAMES } from "./engine.config";
 import type { ChosenReward, Program, TierCode } from "./engine.types";
 import { itemsTitle, rewardTitle } from "./reward-title";
+import { bandRange } from "./ladder-edit";
 import { spendRange } from "./threshold";
 
 /**
@@ -104,6 +105,11 @@ export interface PresentedTier {
    * screen can edit, hide, show and restore any of them. `benefits` is its visible texts.
    */
   benefitLines: PresentedBenefitLine[];
+  /**
+   * ADMIN ONLY: the whole euros of spend a reward added to the band this tier holds may sit at,
+   * both ends included. Absent for Diamante, which holds no band, and for the centre.
+   */
+  addRange?: { min: number; max: number };
 }
 
 export interface PresentedProgram {
@@ -173,6 +179,8 @@ export const presentProgram = (
 
     tiers: TIERS.map((key, i) => {
       const benefitLines = benefitLinesFor(key, program);
+      // The band a client climbs while in this tier is band i + 1.
+      const addRange = options.forAdmin ? bandRange(program, i + 1) : null;
 
       return {
         key,
@@ -181,7 +189,8 @@ export const presentProgram = (
         minTenureMonths: MIN_TENURE[key],
         benefits: visibleBenefits(benefitLines),
         customBenefits: program.customBenefits?.[key] ?? [],
-        benefitLines
+        benefitLines,
+        ...(addRange ? { addRange } : {})
       };
     }),
 

@@ -1,6 +1,6 @@
 import { realThresholds } from "./engine";
 import { TIER_BENEFITS, TIERS } from "./engine.config";
-import type { Program } from "./engine.types";
+import type { Milestone, Program } from "./engine.types";
 import { retotal, type SwapResult } from "./swap";
 
 /**
@@ -28,22 +28,26 @@ export const THRESHOLD_REFUSALS = {
   noRoom: "No hay margen para mover esta fila: los hitos de al lado están demasiado cerca."
 } as const;
 
-interface Geometry {
+export interface Geometry {
   /** The progress threshold the typed amount `real` would store. */
   thAt: (real: number) => number;
   /** The whole euros the admin may type, both ends included; null when there is no room. */
   range: { min: number; max: number } | null;
 }
 
-const geometryOf = (program: Program, at: number): Geometry => {
-  const ms = program.lad.ms;
-  const m = ms[at];
-  const prev = ms[at - 1];
-  // The ladder always ends at Diamante's tier step, so a reward always has one after it.
-  const next = ms[at + 1];
+/**
+ * The spends a milestone in band `tramo` may sit at, strictly between `prev` and `next` (either
+ * may be absent: the ladder's start, or no step after). Also how an insert into a band is priced.
+ */
+export const geometryBetween = (
+  program: Program,
+  prev: Milestone | undefined,
+  next: Milestone | undefined,
+  tramo: number
+): Geometry => {
   const prevTh = prev?.th ?? 0;
   const prevReal = prev ? program.realTh[prev.n] : 0;
-  const mult = TIER_BENEFITS[TIERS[m.tramo - 1]].mult;
+  const mult = TIER_BENEFITS[TIERS[tramo - 1]].mult;
   const thAt = (real: number): number => Math.round(prevTh + (real - prevReal) * mult);
 
   if (!next) return { thAt, range: null };
@@ -60,6 +64,15 @@ const geometryOf = (program: Program, at: number): Geometry => {
 
   return { thAt, range: max >= min ? { min, max } : null };
 };
+
+// The ladder always ends at Diamante's tier step, so a reward or perk always has one after it.
+const geometryOf = (program: Program, at: number): Geometry =>
+  geometryBetween(
+    program,
+    program.lad.ms[at - 1],
+    program.lad.ms[at + 1],
+    program.lad.ms[at].tramo
+  );
 
 /** A reward or a perk may move; a tier step may not. */
 const movable = (type: string): boolean => type === "premio" || type === "ventaja";
