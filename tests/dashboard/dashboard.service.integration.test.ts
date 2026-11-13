@@ -242,6 +242,18 @@ describe("clinicOverview: money", () => {
     expect(overview.revenueThisMonthCents).toBe(1000);
     expect(overview.moneySpentTotalCents).toBe(1000);
   });
+
+  it("counts what was paid, so medicine (earns nothing) is included", async () => {
+    const ana = await makeMember(programme.id, "Ana");
+
+    await visit(programme.id, ana.id, 8000, "2026-10-10T10:00:00Z");
+    await visit(programme.id, ana.id, 0, "2026-10-11T10:00:00Z", 29000);
+
+    const overview = await serviceAt("2026-10-15T10:00:00Z").clinicOverview(programme.id);
+
+    expect(overview.revenueThisMonthCents).toBe(37000);
+    expect(overview.revenueAllTimeCents).toBe(8000);
+  });
 });
 
 describe("clinicOverview: top clients", () => {

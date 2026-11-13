@@ -30,11 +30,9 @@ export interface DashboardOverview {
    */
   pointsIssuedThisMonth: number;
   /**
-   * Euros that earned progress this month, in cents (Europe/Madrid calendar month). It is the
-   * sum of PaidVisit.amountCents, which holds what EARNS progress rather than the till total:
-   * pharmacological medicine and medical acts earn nothing and are NOT included; retail
-   * cosmetics are; a bono session counts its price divided by its sessions. No split is
-   * invented for money that was never recorded.
+   * What clients paid through visits this month, in cents (Europe/Madrid calendar month): the
+   * sum of PaidVisit.paidCents, medicine and medical acts included even though they earn no
+   * progress; a bono session counts its price divided by its sessions.
    */
   revenueThisMonthCents: number;
   /** The old `pointsIssuedThisMonth` figure, honestly named: all time, same source, in cents. */
@@ -170,7 +168,7 @@ export class DashboardService {
       () =>
         this.prisma.paidVisit.aggregate({
           where: { clinicId, occurredAt: inMonth },
-          _sum: { amountCents: true }
+          _sum: { paidCents: true }
         }),
 
       // Cards that reached the provider. PENDING is issued-but-unconfirmed and counting
@@ -256,7 +254,7 @@ export class DashboardService {
       activeMembers,
       // The ledger holds euro progress at a programme centre; every screen shows it x10.
       pointsIssuedThisMonth: programme ? toPoints(creditedProgress) : creditedProgress,
-      revenueThisMonthCents: revenueMonth._sum.amountCents ?? 0,
+      revenueThisMonthCents: revenueMonth._sum.paidCents ?? 0,
       revenueAllTimeCents: allTimeCents,
       moneySpentTotalCents: revenueAllTime._sum.paidCents ?? 0,
       rewardsRedeemedThisMonth: programmeRedeemed + ledgerRedeemed,
