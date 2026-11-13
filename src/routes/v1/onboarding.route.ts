@@ -496,9 +496,7 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
       const { realSpend } = parse(thresholdSchema, req.body);
 
       res.json(
-        forAdmin(
-          await deps.onboarding.setRecurringEvery(clinicId, req.params.programId, realSpend)
-        )
+        forAdmin(await deps.onboarding.setRecurringEvery(clinicId, req.params.programId, realSpend))
       );
     })
   );
