@@ -394,7 +394,7 @@ const listAdminClinics = (query: AdminClinicsQuery = { limit: 10, offset: 0 }) =
         select: { id: true, status: true },
         take: 1
       },
-      _count: { select: { members: true } }
+      _count: { select: { members: { where: { erasedAt: null } } } }
     },
     orderBy: { createdAt: "desc" }
   });
@@ -421,7 +421,7 @@ const getAdminClinic = (clinicId: string) =>
         select: { id: true, status: true },
         take: 1
       },
-      _count: { select: { members: true } }
+      _count: { select: { members: { where: { erasedAt: null } } } }
     }
   });
 
@@ -440,7 +440,7 @@ const listAdminClinicsWithoutSetupTokens = (query: AdminClinicsQuery = { limit: 
         select: { id: true, status: true },
         take: 1
       },
-      _count: { select: { members: true } }
+      _count: { select: { members: { where: { erasedAt: null } } } }
     },
     orderBy: { createdAt: "desc" }
   });
@@ -458,7 +458,7 @@ const getAdminClinicWithoutSetupTokens = (clinicId: string) =>
         select: { id: true, status: true },
         take: 1
       },
-      _count: { select: { members: true } }
+      _count: { select: { members: { where: { erasedAt: null } } } }
     }
   });
 
