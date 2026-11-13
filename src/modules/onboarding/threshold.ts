@@ -171,3 +171,19 @@ export const moveMilestone = (program: Program, n: number, realSpend: number): S
 
   return { ok: true, program: retotal(next) };
 };
+
+/**
+ * Sets how often the reward after Diamante comes round, as whole euros PAID (what the admin reads:
+ * "Por cada X € que gasta el cliente"). `rec.every` stores PROGRESS, which runs at Diamante's
+ * multiplier, so the typed amount is stored ×mult; presentation divides it back, and for a whole
+ * number of euros the round trip returns exactly what was typed.
+ */
+export const setRecurringEvery = (program: Program, realSpend: number): SwapResult => {
+  if (!Number.isInteger(realSpend) || realSpend < 1) return fail(THRESHOLD_REFUSALS.notWhole);
+
+  const next = structuredClone(program);
+
+  next.rec.every = Math.round(realSpend * TIER_BENEFITS.diamante.mult);
+
+  return { ok: true, program: retotal(next) };
+};

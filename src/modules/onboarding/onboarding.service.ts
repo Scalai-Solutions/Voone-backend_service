@@ -39,7 +39,7 @@ import {
   type SwapResult
 } from "./swap";
 import { insertMilestone, removeMilestone } from "./ladder-edit";
-import { moveMilestone } from "./threshold";
+import { moveMilestone, setRecurringEvery } from "./threshold";
 import { applyTexts, type TextEdits } from "./texts";
 
 /**
@@ -735,6 +735,20 @@ export class OnboardingService {
       programId,
       "Solo se puede cambiar el gasto de un borrador. Genera un borrador nuevo para editar un programa activo.",
       async (program) => moveMilestone(program, milestone, realSpend)
+    );
+  }
+
+  /** How often the reward after Diamante comes round, in whole euros paid. Drafts only. */
+  async setRecurringEvery(
+    clinicId: string,
+    programId: string,
+    realSpend: number
+  ): Promise<OnboardingProgram> {
+    return this.editDraftProgram(
+      clinicId,
+      programId,
+      "Solo se puede cambiar el gasto de un borrador. Genera un borrador nuevo para editar un programa activo.",
+      async (program) => setRecurringEvery(program, realSpend)
     );
   }
 

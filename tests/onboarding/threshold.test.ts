@@ -15,6 +15,7 @@ import { presentProgram } from "../../src/modules/onboarding/presentation";
 import { programView } from "../../src/modules/onboarding/runtime/program-view";
 import {
   moveMilestone,
+  setRecurringEvery,
   spendRange,
   THRESHOLD_REFUSALS
 } from "../../src/modules/onboarding/threshold";
@@ -313,6 +314,30 @@ describe("the range on the admin's screen", () => {
         expect(m.realSpend).toBeGreaterThanOrEqual(m.spendRange.min);
         expect(m.realSpend).toBeLessThanOrEqual(m.spendRange.max);
       }
+    }
+  });
+});
+
+describe("how often the reward after Diamante comes round", () => {
+  it("shows exactly the euros typed, and leaves the reward and the ladder alone", () => {
+    const program = fresh();
+
+    for (const typed of [1, 137, 300, 999]) {
+      const result = setRecurringEvery(program, typed);
+
+      if (!result.ok) throw new Error(result.reason);
+      expect(presentProgram(result.program).recurring.every).toBe(typed);
+      expect(result.program.rec.o).toEqual(program.rec.o);
+      expect(result.program.lad).toEqual(program.lad);
+    }
+  });
+
+  it("refuses an amount that is not a whole number of euros above 0", () => {
+    for (const bad of [0, -5, 12.5]) {
+      expect(setRecurringEvery(fresh(), bad)).toEqual({
+        ok: false,
+        reason: THRESHOLD_REFUSALS.notWhole
+      });
     }
   });
 });

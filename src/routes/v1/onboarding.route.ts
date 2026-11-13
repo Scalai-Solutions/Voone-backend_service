@@ -489,6 +489,21 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
   );
 
   router.put(
+    "/admin/clinics/:clinicId/onboarding/programs/:programId/recurring/every",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const clinicId = await clinicOr404(req.params.clinicId);
+      const { realSpend } = parse(thresholdSchema, req.body);
+
+      res.json(
+        forAdmin(
+          await deps.onboarding.setRecurringEvery(clinicId, req.params.programId, realSpend)
+        )
+      );
+    })
+  );
+
+  router.put(
     "/admin/clinics/:clinicId/onboarding/programs/:programId/tiers/:tier/benefits",
     requireStaff,
     asyncHandler(async (req, res) => {
