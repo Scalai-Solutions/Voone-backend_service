@@ -178,7 +178,8 @@ export const visitSchema = z.discriminatedUnion("kind", [
 ]);
 
 export const redeemSchema = z.object({
-  visitId: z.string().min(1, "Indica la visita en la que se canjea"),
+  // Optional: a reward can be redeemed with or without a visit (see checkRedemption).
+  visitId: z.string().min(1).optional(),
   surpriseItem: z.string().min(1).max(64).optional()
 });
 

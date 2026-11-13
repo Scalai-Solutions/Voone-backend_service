@@ -3,17 +3,21 @@ import { MemberRewardKind, type MemberReward, type PrismaClient } from "@prisma/
 import { POST_CHANGE_SYNC_DELAY_MS } from "../../../wallet/engine/wallet-sync.queue";
 import { OnboardingError } from "../onboarding.service";
 import { publicDouble, pendingDouble, type DoublePoints } from "./double-points";
-import { checkRedemption, isDoublePointsPerk, isInSurprisePool } from "./rules";
+import {
+  checkRedemption,
+  isDoublePointsPerk,
+  isInSurprisePool,
+  REDEMPTION_REFUSALS,
+  sameClinicDay
+} from "./rules";
 import { giftSaving, parsePerkValues, recordSaving } from "./savings";
 
 /**
  * Listing and redeeming the rewards a member has been issued.
  *
- * Redemption is the rule the guide is most insistent about: it needs "a visit that includes a
- * payment or the consumption of a prepaid session", and "the backend must validate this; it is
- * not a staff convention". So a redemption is made AGAINST a PaidVisit, and the question of
- * whether that is allowed is answered by checkRedemption from rows the database holds — never
- * by a flag the caller asserts.
+ * A reward can be redeemed at any time before it expires; a paid visit is no longer required
+ * (checkRedemption explains why). When reception redeems during a visit recorded today, the
+ * redemption is linked to it (`redeemedVisitId`); otherwise it stands on its own.
  */
 
 export interface RedeemInput {
@@ -21,7 +25,7 @@ export interface RedeemInput {
   /** When given, the reward must belong to this member: the URL says whose it is. */
   memberId?: string;
   rewardId: string;
-  /** The payment or package session this redemption happens in. */
+  /** The payment or package session this redemption happens in, if any. Optional. */
   visitId?: string;
   redeemedBy?: string;
   /** For a surprise: the pool item the centre chose. */
@@ -174,6 +178,12 @@ export class RewardService {
         })
       : null;
 
+    // A visit named but not found at this centre is not this client's: refuse rather than
+    // quietly redeem without it.
+    if (input.visitId && !visit) {
+      throw new OnboardingError(REDEMPTION_REFUSALS.visita_ajena, 409);
+    }
+
     const verdict = checkRedemption({
       reward: {
         clinicId: reward.clinicId,
@@ -200,7 +210,9 @@ export class RewardService {
         where: { id: reward.id, redeemedAt: null },
         data: {
           redeemedAt: now,
-          redeemedVisitId: visit!.id,
+          // Linked only to a visit from today: a visit id kept by an old browser tab must not
+          // make a redemption look as if it happened on another day.
+          redeemedVisitId: visit && sameClinicDay(visit.occurredAt, now) ? visit.id : null,
           redeemedBy: input.redeemedBy,
           surpriseItem: isSurprise ? input.surpriseItem : null
         }
