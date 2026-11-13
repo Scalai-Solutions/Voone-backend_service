@@ -257,7 +257,11 @@ describe("asking for the card to catch up after a redemption", () => {
   it("does not ask when the redemption is refused", async () => {
     const { reward } = await earned();
 
-    await expect(rewards.redeem({ clinicId: clinic.id, rewardId: reward.id })).rejects.toThrow();
+    // A visit that is not this centre's: refused before anything is written. (No visit at all is
+    // no longer a refusal; a reward can be redeemed without one.)
+    await expect(
+      rewards.redeem({ clinicId: clinic.id, rewardId: reward.id, visitId: "no-such-visit" })
+    ).rejects.toThrow();
 
     expect(calls).toHaveLength(0);
   });

@@ -14,6 +14,7 @@ import type {
   Answers,
   Candidate,
   ChosenReward,
+  Milestone,
   Program,
   RewardOption,
   SpecialReward
@@ -56,6 +57,10 @@ export const swapReward = (
 
 const NO_SLOT = "Ese hito no tiene un premio que se pueda cambiar.";
 
+/** What the ladder's perks cost the centre, as the engine sums it. */
+export const perkCostOf = (ms: readonly Milestone[]): number =>
+  ms.reduce((sum, m) => sum + (m.type === "ventaja" ? (m.perk?.cost ?? 0) : 0), 0);
+
 /**
  * The reward slot at a milestone, for a choice made on the "Cambiar" panel.
  *
@@ -82,18 +87,16 @@ const rewardSlot = (
 
   slot.type = "premio";
   delete slot.perk;
-  next.perkCost = next.lad.ms.reduce(
-    (sum, m) => sum + (m.type === "ventaja" ? (m.perk?.cost ?? 0) : 0),
-    0
-  );
+  next.perkCost = perkCostOf(next.lad.ms);
 
   const entry: ChosenReward = {
     m: structuredClone(slot),
     o: { items: [], value: 0, cost: 0 },
     alts: []
   };
-  // `chosen` is in ladder order, which the rest of the programme relies on.
-  const after = next.chosen.findIndex((c) => c.m.n > milestone);
+  // `chosen` is in ladder order, which the rest of the programme relies on. By spend, not by `n`:
+  // a milestone the admin added has a new, higher `n` wherever it sits.
+  const after = next.chosen.findIndex((c) => c.m.th > slot.th);
   const insertAt = after < 0 ? next.chosen.length : after;
 
   next.chosen.splice(insertAt, 0, entry);

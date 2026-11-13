@@ -28,6 +28,7 @@ import {
   calculatorSchema,
   swapSchema,
   thresholdSchema,
+  addMilestoneSchema,
   textsSchema,
   benefitOverridesSchema,
   tierBenefitsSchema,
@@ -406,6 +407,44 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
         forAdmin(
           await deps.onboarding.swapMilestone(clinicId, req.params.programId, milestone, choice)
         )
+      );
+    })
+  );
+
+  router.post(
+    "/admin/clinics/:clinicId/onboarding/programs/:programId/milestones",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const clinicId = await clinicOr404(req.params.clinicId);
+      const { band, realSpend, choice } = parse(addMilestoneSchema, req.body);
+
+      res.json(
+        forAdmin(
+          await deps.onboarding.addMilestone(
+            clinicId,
+            req.params.programId,
+            band,
+            realSpend,
+            choice
+          )
+        )
+      );
+    })
+  );
+
+  router.delete(
+    "/admin/clinics/:clinicId/onboarding/programs/:programId/milestones/:milestone",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const clinicId = await clinicOr404(req.params.clinicId);
+      const milestone = Number(req.params.milestone);
+
+      if (!Number.isInteger(milestone) || milestone < 1) {
+        throw new MembershipValidationError("milestone: indica un número de hito válido");
+      }
+
+      res.json(
+        forAdmin(await deps.onboarding.removeMilestone(clinicId, req.params.programId, milestone))
       );
     })
   );

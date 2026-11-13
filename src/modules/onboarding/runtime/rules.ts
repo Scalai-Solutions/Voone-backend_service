@@ -355,25 +355,21 @@ export const sameIdentity = (a: Identity, b: Identity): boolean => {
 
 /* ---------------------------------------------------------------------- redemption */
 
-export type RedemptionRefusal =
-  "ya_canjeado" | "caducado" | "sin_visita_de_pago" | "visita_ajena" | "visita_de_otro_dia";
+export type RedemptionRefusal = "ya_canjeado" | "caducado" | "visita_ajena";
 
 export type RedemptionVerdict =
   { ok: true } | { ok: false; reason: RedemptionRefusal; message: string };
 
-const REFUSALS: Record<RedemptionRefusal, string> = {
+export const REDEMPTION_REFUSALS: Record<RedemptionRefusal, string> = {
   ya_canjeado: "Este premio ya se canjeó.",
   caducado: "Este premio ha caducado: se puede usar durante 60 días desde que se consigue.",
-  sin_visita_de_pago:
-    "Solo se puede canjear en una visita con un pago o con una sesión de un bono ya pagado.",
-  visita_ajena: "Esa visita no corresponde a este cliente.",
-  visita_de_otro_dia: "Esa visita no es de hoy. Registra el pago de esta visita para canjear."
+  visita_ajena: "Esa visita no corresponde a este cliente."
 };
 
 const refuse = (reason: RedemptionRefusal): RedemptionVerdict => ({
   ok: false,
   reason,
-  message: REFUSALS[reason]
+  message: REDEMPTION_REFUSALS[reason]
 });
 
 export interface RedemptionInput {
@@ -383,39 +379,37 @@ export interface RedemptionInput {
     redeemedAt: Date | null;
     expiresAt: Date;
   };
-  /** The visit the redemption is claimed against, or null when none was given or found. */
+  /** The visit the redemption is made in, when reception named one; null when none. */
   visit: { clinicId: string; memberId: string; occurredAt: Date } | null;
   now: Date;
 }
 
 /**
- * May this reward be redeemed against this visit, now?
+ * May this reward be redeemed now?
  *
- * The guide's rule is that a redemption needs "a visit that includes a payment or the
- * consumption of a prepaid session", enforced by the backend and not left as a staff
- * convention. So the question is answered from rows, not from a flag the caller asserts: a
- * redemption with no PaidVisit, a visit belonging to another member or centre, or one from
- * another day is refused.
+ * A reward can be redeemed at any time before it expires, with or without a paid visit: the
+ * centre decided reception must be able to hand a gift over whenever the client comes in. (The
+ * guide first asked for "a visit that includes a payment or the consumption of a prepaid
+ * session"; that requirement was dropped on purpose.) A visit, when reception names one, must
+ * still be this member's at this centre.
  *
- * Checked in an order that reports the most useful reason first — already used, then expired,
- * then the visit problems — because a receptionist told "no visit" about an expired reward
- * would go looking for the wrong fix.
+ * Checked in an order that reports the most useful reason first: already used, then expired,
+ * then the visit.
  */
 export const checkRedemption = ({ reward, visit, now }: RedemptionInput): RedemptionVerdict => {
   if (reward.redeemedAt) return refuse("ya_canjeado");
   if (now.getTime() >= reward.expiresAt.getTime()) return refuse("caducado");
-  if (!visit) return refuse("sin_visita_de_pago");
 
-  if (visit.clinicId !== reward.clinicId || visit.memberId !== reward.memberId) {
+  if (visit && (visit.clinicId !== reward.clinicId || visit.memberId !== reward.memberId)) {
     return refuse("visita_ajena");
-  }
-
-  if (dayKeyIn(CLINIC_TIME_ZONE, visit.occurredAt) !== dayKeyIn(CLINIC_TIME_ZONE, now)) {
-    return refuse("visita_de_otro_dia");
   }
 
   return { ok: true };
 };
+
+/** Whether two instants fall on the same day at the clinic (Madrid), not in UTC. */
+export const sameClinicDay = (a: Date, b: Date): boolean =>
+  dayKeyIn(CLINIC_TIME_ZONE, a) === dayKeyIn(CLINIC_TIME_ZONE, b);
 
 /** A surprise must be redeemed against something from its own pool. */
 export const isInSurprisePool = (

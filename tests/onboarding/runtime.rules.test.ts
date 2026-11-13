@@ -28,6 +28,7 @@ import {
   referralRewardAt,
   resolveTier,
   rewardExpiry,
+  sameClinicDay,
   sameIdentity,
   tenureMonths,
   tierKeyOf
@@ -443,12 +444,9 @@ describe("checkRedemption", () => {
     expect(checkRedemption({ reward, visit, now })).toEqual({ ok: true });
   });
 
-  it("refuses with no visit at all", () => {
-    // The guide's rule, and the reason PaidVisit exists. It is enforced by what the
-    // database can show, not by a flag the caller asserts.
-    const verdict = checkRedemption({ reward, visit: null, now });
-
-    expect(verdict).toMatchObject({ ok: false, reason: "sin_visita_de_pago" });
+  it("allows a redemption with no visit at all", () => {
+    // Reception can hand a gift over whenever the client comes in; a paid visit is not required.
+    expect(checkRedemption({ reward, visit: null, now })).toEqual({ ok: true });
   });
 
   it("refuses a reward already redeemed", () => {
@@ -472,9 +470,7 @@ describe("checkRedemption", () => {
     ).toMatchObject({ ok: false, reason: "caducado" });
   });
 
-  it("reports an expired reward as expired even when there is also no visit", () => {
-    // The more useful reason first: telling a receptionist "no visit" about a lapsed
-    // reward would send them looking for the wrong fix.
+  it("refuses an expired reward with no visit too", () => {
     expect(checkRedemption({ reward, visit: null, now: at("2027-01-01T10:00:00Z") })).toMatchObject(
       { ok: false, reason: "caducado" }
     );
@@ -491,31 +487,28 @@ describe("checkRedemption", () => {
     });
   });
 
-  it("refuses a visit from another day", () => {
+  it("does not refuse this member's visit from another day (the redemption is just not linked to it)", () => {
     expect(
       checkRedemption({ reward, visit: { ...visit, occurredAt: at("2026-10-12T10:00:00Z") }, now })
-    ).toMatchObject({ ok: false, reason: "visita_de_otro_dia" });
+    ).toEqual({ ok: true });
   });
 
+  it("gives a refusal a Spanish sentence a receptionist can act on", () => {
+    const verdict = checkRedemption({ reward, visit: null, now: reward.expiresAt });
+
+    expect(verdict.ok).toBe(false);
+    expect((verdict as { message: string }).message).toMatch(/caducado/);
+  });
+});
+
+describe("sameClinicDay", () => {
   it("reads 'the same day' in Madrid, not UTC", () => {
     // 21:30 UTC is 23:30 in Madrid in October; an hour later it is already tomorrow there,
     // though both instants are the same UTC day. The clinic would call these different days.
-    const late = { ...visit, occurredAt: at("2026-10-13T21:30:00Z") };
+    const late = at("2026-10-13T21:30:00Z");
 
-    expect(checkRedemption({ reward, visit: late, now: at("2026-10-13T21:50:00Z") }).ok).toBe(true);
-    expect(checkRedemption({ reward, visit: late, now: at("2026-10-13T22:30:00Z") })).toMatchObject(
-      {
-        ok: false,
-        reason: "visita_de_otro_dia"
-      }
-    );
-  });
-
-  it("gives every refusal a Spanish sentence a receptionist can act on", () => {
-    const verdict = checkRedemption({ reward, visit: null, now });
-
-    expect(verdict.ok).toBe(false);
-    expect((verdict as { message: string }).message).toMatch(/pago|bono/);
+    expect(sameClinicDay(late, at("2026-10-13T21:50:00Z"))).toBe(true);
+    expect(sameClinicDay(late, at("2026-10-13T22:30:00Z"))).toBe(false);
   });
 });
 

@@ -873,10 +873,11 @@ describe("a centre's own staff", () => {
     expect(r.status).toBe(422);
   });
 
-  it("refuses a redemption with no visit named, and a repeat, with the reason", async () => {
+  it("redeems with no visit named, and refuses a repeat with the reason", async () => {
     await goLive();
     const m = await newMember();
-    const visit = await call("POST", `/clinics/${SLUG}/members/${m.id}/visits`, {
+
+    await call("POST", `/clinics/${SLUG}/members/${m.id}/visits`, {
       kind: "PAYMENT",
       lines: [{ amountEuro: 65 }],
       idempotencyKey: "route-redeem-2"
@@ -887,10 +888,10 @@ describe("a centre's own staff", () => {
 
     const noVisit = await call("POST", path, {});
 
-    expect(noVisit.status).toBe(422);
+    expect(noVisit.status, JSON.stringify(noVisit.body)).toBe(200);
+    expect(noVisit.body.status).toBe("canjeado");
 
-    await call("POST", path, { visitId: visit.body.visitId });
-    const again = await call("POST", path, { visitId: visit.body.visitId });
+    const again = await call("POST", path, {});
 
     expect(again.status).toBe(409);
     expect(again.body.message).toBe("Este premio ya se canjeó.");

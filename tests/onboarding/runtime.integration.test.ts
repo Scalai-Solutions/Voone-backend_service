@@ -803,12 +803,26 @@ describe("redeeming", () => {
     expect(publicDetail({ every: 3 })).toEqual({ every: 3 });
   });
 
-  it("refuses with no visit at all, because it is enforced and not a convention", async () => {
+  it("redeems with no visit at all, and links no visit", async () => {
+    const { reward } = await setup();
+
+    const redeemed = await rewards.redeem({ clinicId: clinic.id, rewardId: reward.id });
+    const row = await db.memberReward.findUniqueOrThrow({ where: { id: reward.id } });
+
+    expect(redeemed.status).toBe("canjeado");
+    expect(row.redeemedAt).not.toBeNull();
+    expect(row.redeemedVisitId).toBeNull();
+  });
+
+  it("refuses a visit id that is not this centre's", async () => {
     const { reward } = await setup();
 
     await expect(
-      rewards.redeem({ clinicId: clinic.id, rewardId: reward.id })
-    ).rejects.toMatchObject({ statusCode: 409, message: expect.stringMatching(/pago|bono/) });
+      rewards.redeem({ clinicId: clinic.id, rewardId: reward.id, visitId: "no-such-visit" })
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      message: "Esa visita no corresponde a este cliente."
+    });
   });
 
   it("refuses a visit that belongs to someone else", async () => {
@@ -851,13 +865,25 @@ describe("redeeming", () => {
     ).rejects.toMatchObject({ statusCode: 409, message: expect.stringMatching(/caducado/) });
   });
 
-  it("refuses a visit from another day", async () => {
-    const { reward, v } = await setup();
+  it("links today's visit, and redeems without linking a visit from another day", async () => {
+    const today = await setup();
+
+    await rewards.redeem({
+      clinicId: clinic.id,
+      rewardId: today.reward.id,
+      visitId: today.v.visitId
+    });
+    expect(
+      (await db.memberReward.findUniqueOrThrow({ where: { id: today.reward.id } })).redeemedVisitId
+    ).toBe(today.v.visitId);
+
+    const old = await setup();
     setClock("2026-10-14T10:00:00Z");
 
-    await expect(
-      rewards.redeem({ clinicId: clinic.id, rewardId: reward.id, visitId: v.visitId })
-    ).rejects.toMatchObject({ statusCode: 409, message: expect.stringMatching(/no es de hoy/) });
+    await rewards.redeem({ clinicId: clinic.id, rewardId: old.reward.id, visitId: old.v.visitId });
+    expect(
+      (await db.memberReward.findUniqueOrThrow({ where: { id: old.reward.id } })).redeemedVisitId
+    ).toBeNull();
   });
 
   it("answers the same for a reward that belongs to another centre", async () => {
