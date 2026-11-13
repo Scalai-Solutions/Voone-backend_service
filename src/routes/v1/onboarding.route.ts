@@ -27,6 +27,7 @@ import {
   redeemSchema,
   calculatorSchema,
   swapSchema,
+  recurringSchema,
   thresholdSchema,
   addMilestoneSchema,
   textsSchema,
@@ -407,6 +408,19 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
         forAdmin(
           await deps.onboarding.swapMilestone(clinicId, req.params.programId, milestone, choice)
         )
+      );
+    })
+  );
+
+  router.patch(
+    "/admin/clinics/:clinicId/onboarding/programs/:programId/recurring",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const clinicId = await clinicOr404(req.params.clinicId);
+      const choice = parse(recurringSchema, req.body);
+
+      res.json(
+        forAdmin(await deps.onboarding.swapRecurringReward(clinicId, req.params.programId, choice))
       );
     })
   );

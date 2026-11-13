@@ -768,15 +768,30 @@ describe("moving a reward's spend, over HTTP", () => {
     expect(rowOf(r.body, perk.n).realSpend).toBe(perk.spendRange.max);
   });
 
-  it("refuses a tier step, a body that is not whole euros, and a programme that is live", async () => {
+  it("moves a tier step within its range, and the tier with it", async () => {
+    const { draftId, program } = await plainDraft();
+    const level = program.ladder.filter((m: { type: string }) => m.type === "nivel")[1];
+    const others = program.ladder.filter((m: { n: number }) => m.n !== level.n);
+    const path = admin(`/programs/${draftId}/milestones/${level.n}/threshold`);
+
+    const r = await call("PUT", path, { realSpend: level.spendRange.max });
+
+    expect(r.status).toBe(200);
+    expect(rowOf(r.body, level.n).realSpend).toBe(level.spendRange.max);
+    expect(r.body.program.tiers.find((t: { key: string }) => t.key === "oro").threshold).toBe(
+      level.spendRange.max
+    );
+
+    // Every other row keeps the spend it shows, to within a rounding.
+    for (const m of others) {
+      expect(Math.abs(rowOf(r.body, m.n).realSpend - m.realSpend)).toBeLessThanOrEqual(1);
+    }
+
+    expect((await call("PUT", path, { realSpend: level.spendRange.max + 1000 })).status).toBe(409);
+  });
+
+  it("refuses a body that is not whole euros, and a programme that is live", async () => {
     const { draftId, milestone, program } = await plainDraft();
-    const level = program.ladder.find((m: { type: string }) => m.type === "nivel").n;
-
-    const onLevel = await call("PUT", admin(`/programs/${draftId}/milestones/${level}/threshold`), {
-      realSpend: 100
-    });
-
-    expect(onLevel.status).toBe(409);
 
     const path = admin(`/programs/${draftId}/milestones/${milestone}/threshold`);
 
@@ -871,5 +886,55 @@ describe("adding and removing milestones, over HTTP", () => {
     const onLevel = await call("DELETE", admin(`/programs/${draftId}/milestones/${level}`));
 
     expect(onLevel.status).toBe(409);
+  });
+});
+
+describe("changing the reward after Diamante, over HTTP", () => {
+  const path = (draftId: string) => admin(`/programs/${draftId}/recurring`);
+
+  it("takes each of the panel's choices and shows what it became", async () => {
+    const { draftId } = await plainDraft();
+    const stored = await db.onboardingProgram.findUniqueOrThrow({ where: { id: draftId } });
+    const itemId = (stored.output as unknown as Program).chosen[0].o.items[0].id;
+
+    for (const [choice, kind] of [
+      [{ itemId }, undefined],
+      [{ kind: "doble" }, "doble"],
+      [{ kind: "sorpresa" }, "sorpresa"],
+      [{ kind: "libre", name: "Masaje de regalo", priceEuro: 35 }, "libre"]
+    ] as const) {
+      const r = await call("PATCH", path(draftId), choice);
+
+      expect(r.status, JSON.stringify(choice)).toBe(200);
+      if (kind) expect(r.body.program.recurring.kind).toBe(kind);
+    }
+
+    const after = await call("GET", admin(`/programs/${draftId}`));
+
+    expect(after.body.program.recurring).toMatchObject({ name: "Masaje de regalo", kind: "libre" });
+  });
+
+  it("refuses a bad body, and a programme that is live", async () => {
+    const { draftId } = await plainDraft();
+
+    for (const body of [{}, { alternative: 0 }, { kind: "otra-cosa" }]) {
+      expect((await call("PATCH", path(draftId), body)).status, JSON.stringify(body)).toBe(422);
+    }
+
+    const stored = await db.onboardingProgram.findUniqueOrThrow({ where: { id: draftId } });
+
+    await db.onboardingProgram.update({
+      where: { id: draftId },
+      data: {
+        output: { ...(stored.output as unknown as Program), review: [] } as unknown as object
+      }
+    });
+
+    expect((await call("POST", admin(`/programs/${draftId}/publish`))).status).toBe(200);
+
+    const live = await call("PATCH", path(draftId), { kind: "doble" });
+
+    expect(live.status).toBe(409);
+    expect(JSON.stringify(live.body)).toContain("borrador");
   });
 });

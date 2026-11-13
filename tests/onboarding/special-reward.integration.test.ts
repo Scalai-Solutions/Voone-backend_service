@@ -64,6 +64,8 @@ let at: {
   sorpresa: { n: number; th: number };
   libre: { n: number; th: number };
 };
+/** Where the reward after Diamante, made double points here, first repeats: progress euros. */
+let firstRepeat = 0;
 let seq = 0;
 
 /** Never runs with an unknown clinic: an undefined id would match every row of the table. */
@@ -148,6 +150,7 @@ beforeAll(async () => {
     name: "Manicura de regalo",
     priceEuro: 24.5
   });
+  await onboarding.swapRecurringReward(clinicId(), draft.id, { kind: "doble" });
 
   // Whatever notes the fixture raises, this suite is about what the special rewards issue.
   const edited = await db.onboardingProgram.findUniqueOrThrow({ where: { id: draft.id } });
@@ -162,6 +165,7 @@ beforeAll(async () => {
   const th = (n: number): number => view.milestones.find((m) => m.n === n)!.th;
 
   version = live.version;
+  firstRepeat = view.recurring.startsAt + view.recurring.every;
   at = {
     doble: { n: first, th: th(first) },
     sorpresa: { n: second, th: th(second) },
@@ -261,5 +265,26 @@ describe("a free text on a reward milestone", () => {
     const after = (await db.member.findUniqueOrThrow({ where: { id: m.id } })).savingsCents;
 
     expect(after - before).toBe(2450);
+  });
+});
+
+describe("double points as the reward after Diamante", () => {
+  it("is issued as the double-points perk on its repeat, and cannot be redeemed by hand", async () => {
+    const m = await makeMember();
+
+    // One payment straight past the first repeat, earned at Bronce's ×1.
+    const v = await pay(m.id, firstRepeat, "past-diamante");
+    const repeat = await db.memberReward.findFirstOrThrow({
+      where: { memberId: m.id, sourceKey: `v${version}:rec:1` }
+    });
+
+    expect(repeat.kind).toBe(MemberRewardKind.VENTAJA);
+    expect(repeat.title).toBe(DOUBLE_PERK_TEXT.name);
+    expect(repeat.detail).toMatchObject({ perk: "doble" });
+    expect(await rewards.doublePoints(clinicId(), m.id)).toMatchObject({ applies: true });
+
+    await expect(
+      rewards.redeem({ clinicId: clinicId(), rewardId: repeat.id, visitId: v.visitId })
+    ).rejects.toMatchObject({ statusCode: 409 });
   });
 });

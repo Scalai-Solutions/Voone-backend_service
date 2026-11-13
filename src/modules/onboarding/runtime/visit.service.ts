@@ -765,13 +765,21 @@ export class VisitService {
       })),
       ...recurringCrossed(view, before, after).map((k) => ({
         ...base,
-        kind: MemberRewardKind.RECURRENTE,
         sourceKey: `v${version}:rec:${k}`,
         title: view.recurring.title,
-        detail: {
-          every: view.recurring.every,
-          ...(view.recurring.value ? { value: view.recurring.value } : {})
-        } as Prisma.InputJsonValue
+        // Double points or a surprise is issued as its perk, so it is spent or redeemed as one.
+        ...(view.recurring.perk
+          ? {
+              kind: MemberRewardKind.VENTAJA,
+              detail: view.recurring.perk as unknown as Prisma.InputJsonValue
+            }
+          : {
+              kind: MemberRewardKind.RECURRENTE,
+              detail: {
+                every: view.recurring.every,
+                ...(view.recurring.value ? { value: view.recurring.value } : {})
+              } as Prisma.InputJsonValue
+            })
       }))
     ];
 

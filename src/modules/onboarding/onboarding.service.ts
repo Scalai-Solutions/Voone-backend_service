@@ -30,9 +30,11 @@ import { placeMembersOnProgram } from "./runtime/placement";
 import { parsePerkValues, PERK_VALUE_KEYS, type PerkValues } from "./runtime/savings";
 import { recalibrationAdvice, type RecalibrationAdvice } from "./runtime/rules";
 import {
+  swapRecurring,
   swapReward,
   swapRewardToItem,
   swapRewardToSpecial,
+  type PanelChoice,
   type SpecialChoice,
   type SwapResult
 } from "./swap";
@@ -662,25 +664,54 @@ export class OnboardingService {
     );
   }
 
+  /** Sets the reward that repeats after Diamante to one of the "Cambiar" panel's choices. Drafts only. */
+  async swapRecurringReward(
+    clinicId: string,
+    programId: string,
+    choice: PanelChoice
+  ): Promise<OnboardingProgram> {
+    return this.editDraftProgram(
+      clinicId,
+      programId,
+      "Solo se puede cambiar el premio de después de Diamante en un borrador. Genera un borrador nuevo para editar un programa activo.",
+      async (program, answers) => {
+        const ready = await this.forChoice(clinicId, program, answers, choice);
+
+        return swapRecurring(ready.program, answers, choice, ready.pool);
+      }
+    );
+  }
+
   /** Puts one of the "Cambiar" panel's choices in a milestone's reward slot. */
   private async applyChoice(
     clinicId: string,
     program: Program,
     answers: Answers,
     milestone: number,
-    choice: { itemId: string } | SpecialChoice
+    choice: PanelChoice
   ): Promise<SwapResult> {
+    const ready = await this.forChoice(clinicId, program, answers, choice);
+
+    return "itemId" in choice
+      ? swapRewardToItem(ready.program, answers, milestone, choice.itemId)
+      : swapRewardToSpecial(ready.program, answers, milestone, choice, ready.pool);
+  }
+
+  /**
+   * What a panel choice is priced from. An item is read from the catalogue as it is today (see
+   * `withCurrentRow`). A surprise may be anything the admin could hand-pick today (medical never),
+   * read from the catalogue as it is now rather than the draft's snapshot, as an item swap does.
+   */
+  private async forChoice(
+    clinicId: string,
+    program: Program,
+    answers: Answers,
+    choice: PanelChoice
+  ): Promise<{ program: Program; pool: ReturnType<typeof manualCandidates> }> {
     if ("itemId" in choice) {
-      return swapRewardToItem(
-        await this.withCurrentRow(clinicId, program, choice.itemId),
-        answers,
-        milestone,
-        choice.itemId
-      );
+      return { program: await this.withCurrentRow(clinicId, program, choice.itemId), pool: [] };
     }
 
-    // A surprise may be anything the admin could hand-pick today (medical never), read from the
-    // catalogue as it is now rather than the draft's snapshot, as an item swap does.
     const pool =
       choice.kind === "sorpresa"
         ? manualCandidates(
@@ -689,10 +720,10 @@ export class OnboardingService {
           )
         : [];
 
-    return swapRewardToSpecial(program, answers, milestone, choice, pool);
+    return { program, pool };
   }
 
-  /** Moves the spend at which a reward or perk unlocks (whole euros paid). Drafts only. */
+  /** Moves the spend at which a reward, a perk or a tier step is reached (whole euros paid). Drafts only. */
   async setMilestoneThreshold(
     clinicId: string,
     programId: string,
@@ -702,7 +733,7 @@ export class OnboardingService {
     return this.editDraftProgram(
       clinicId,
       programId,
-      "Solo se puede cambiar el gasto de los premios y las ventajas de un borrador. Genera un borrador nuevo para editar un programa activo.",
+      "Solo se puede cambiar el gasto de un borrador. Genera un borrador nuevo para editar un programa activo.",
       async (program) => moveMilestone(program, milestone, realSpend)
     );
   }

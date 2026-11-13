@@ -30,7 +30,8 @@ import {
   isDoublePointsPerk,
   isInSurprisePool,
   milestonesCrossed,
-  nextRewardFor
+  nextRewardFor,
+  recurringCrossed
 } from "../../src/modules/onboarding/runtime/rules";
 import { giftSaving } from "../../src/modules/onboarding/runtime/savings";
 import {
@@ -38,8 +39,10 @@ import {
   FREE_REWARD_COST_RATIO,
   FREE_REWARD_REFUSALS,
   SURPRISE_TEXT,
+  swapRecurring,
   swapRewardToItem,
   swapRewardToSpecial,
+  type PanelChoice,
   type SpecialChoice
 } from "../../src/modules/onboarding/swap";
 import { applyTexts } from "../../src/modules/onboarding/texts";
@@ -485,5 +488,110 @@ describe("the note that rewards cannot rise from one milestone to the next", () 
       notes: [ORDER_REVIEW_NOTE]
     });
     expect(presentProgram(p)).toMatchObject({ review: [], notes: [] });
+  });
+});
+
+describe("the reward after Diamante, on the same panel", () => {
+  const recurring = (p: Program, choice: PanelChoice, from = pool()): Program => {
+    const result = swapRecurring(p, ANSWERS, choice, from);
+
+    if (!result.ok) throw new Error(result.reason);
+
+    return result.program;
+  };
+
+  it("reads exactly as before until the admin changes it: no perk, a catalogue kind", () => {
+    const p = fresh();
+
+    expect(programView(p).recurring).not.toHaveProperty("perk");
+    expect(["tratamiento", "producto"]).toContain(presentProgram(p).recurring.kind);
+    expect(presentProgram(p).recurring).not.toHaveProperty("description");
+  });
+
+  it("becomes a catalogue item priced as a hand-picked one, keeps how often it repeats, drops the old label", () => {
+    const labelled = applyTexts(fresh(), { recurring: { label: "Mi recurrente" } });
+
+    if (!labelled.ok) throw new Error(labelled.reason);
+
+    const p = labelled.program;
+    const item = pool()[0];
+    const next = recurring(p, { itemId: item.id });
+
+    expect(next.rec).toEqual({
+      every: p.rec.every,
+      o: { items: [expect.objectContaining({ id: item.id })], value: item.value, cost: item.cost },
+      picked: true
+    });
+    expect(programView(next).recurring).toMatchObject({ title: item.name, value: item.value });
+    expect(programView(next).recurring).not.toHaveProperty("perk");
+  });
+
+  it("as double points, is issued as the double-points perk on every repeat", () => {
+    const p = fresh();
+    const next = recurring(p, { kind: "doble" });
+    const view = programView(next);
+
+    expect(next.rec.special).toEqual({ kind: "doble", ...DOUBLE_PERK_TEXT });
+    expect(next.rec.o.cost).toBeCloseTo(
+      entry(special(p, middle(p), { kind: "doble" }), middle(p)).o.cost,
+      10
+    );
+    expect(view.recurring.title).toBe(DOUBLE_PERK_TEXT.name);
+    expect(view.recurring.perk).toEqual({ perk: "doble", description: DOUBLE_PERK_TEXT.desc });
+    // What the visit credit, the card's boost and the reception screen test for.
+    expect(isDoublePointsPerk("VENTAJA", view.recurring.perk)).toBe(true);
+    // Repeats are still counted the same way.
+    const { startsAt, every } = view.recurring;
+
+    expect(recurringCrossed(view, startsAt, startsAt + every)).toEqual([1]);
+    expect(presentProgram(next).recurring).toMatchObject({
+      name: DOUBLE_PERK_TEXT.name,
+      kind: "doble",
+      description: DOUBLE_PERK_TEXT.desc
+    });
+  });
+
+  it("as a surprise, carries its pool by id and name, redeemed by picking one", () => {
+    const from = pool();
+    const next = recurring(fresh(), { kind: "sorpresa" }, from);
+    const perk = programView(next).recurring.perk!;
+
+    expect(perk.perk).toBe("sorpresa");
+    expect(perk.pool!.map((c) => c.id).sort()).toEqual(from.map((c) => c.id).sort());
+    expect(Object.keys(perk.pool![0]).sort()).toEqual(["id", "name"]);
+    expect(isInSurprisePool(perk.pool, perk.pool![0].id)).toBe(true);
+    expect(giftSaving(MemberRewardKind.VENTAJA, perk, { sorpresa: 1500 })).toEqual({
+      kind: "PERK",
+      cents: 1500
+    });
+  });
+
+  it("as a free text, stays a recurring gift worth its price", () => {
+    const next = recurring(fresh(), { kind: "libre", name: " Masaje ", priceEuro: 40 });
+    const view = programView(next);
+
+    expect(next.rec.o).toEqual({ items: [], value: 40, cost: 40 * FREE_REWARD_COST_RATIO });
+    expect(view.recurring).toMatchObject({ title: "Masaje", value: 40 });
+    expect(view.recurring).not.toHaveProperty("perk");
+    expect(presentProgram(next).recurring).toMatchObject({ name: "Masaje", kind: "libre" });
+  });
+
+  it("refuses what a ladder reward refuses, and leaves the programme it was given untouched", () => {
+    const p = fresh();
+    const snapshot = JSON.stringify(p);
+
+    expect(swapRecurring(p, ANSWERS, { kind: "sorpresa" }, [])).toEqual({
+      ok: false,
+      reason: EMPTY_SURPRISE_POOL
+    });
+    expect(swapRecurring(p, ANSWERS, { kind: "libre", name: "  ", priceEuro: 10 })).toEqual({
+      ok: false,
+      reason: FREE_REWARD_REFUSALS.name
+    });
+    expect(swapRecurring(p, ANSWERS, { itemId: "no-such-item" })).toMatchObject({ ok: false });
+
+    recurring(p, { kind: "doble" });
+
+    expect(JSON.stringify(p)).toBe(snapshot);
   });
 });
