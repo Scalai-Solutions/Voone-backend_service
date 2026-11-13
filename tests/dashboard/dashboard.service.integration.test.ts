@@ -61,7 +61,13 @@ const makeMember = (clinicId: string, name: string, erased = false): Promise<Mem
   });
 };
 
-const visit = (clinicId: string, memberId: string, amountCents: number, at: string) => {
+const visit = (
+  clinicId: string,
+  memberId: string,
+  amountCents: number,
+  at: string,
+  paidCents = amountCents
+) => {
   seq += 1;
 
   return db.paidVisit.create({
@@ -70,7 +76,7 @@ const visit = (clinicId: string, memberId: string, amountCents: number, at: stri
       memberId,
       kind: VisitKind.PAYMENT,
       amountCents,
-      paidCents: amountCents,
+      paidCents,
       idempotencyKey: `dash-visit-${seq}`,
       occurredAt: new Date(at)
     }
@@ -264,6 +270,21 @@ describe("clinicOverview: top clients", () => {
       { memberId: members[0].id, name: "Ana", amountCents: 6500 },
       { memberId: members[2].id, name: "Carla", amountCents: 5000 },
       { memberId: members[4].id, name: "Elena", amountCents: 4000 }
+    ]);
+  });
+
+  it("ranks by what was paid, so a medicine-only client (earns nothing) still ranks", async () => {
+    const treatment = await makeMember(programme.id, "Ana");
+    const medicine = await makeMember(programme.id, "Pilar");
+
+    await visit(programme.id, treatment.id, 8000, "2026-10-10T10:00:00Z");
+    await visit(programme.id, medicine.id, 0, "2026-10-11T10:00:00Z", 29000);
+
+    const overview = await serviceAt("2026-10-15T10:00:00Z").clinicOverview(programme.id);
+
+    expect(overview.topClientsThisMonth).toEqual([
+      { memberId: medicine.id, name: "Pilar", amountCents: 29000 },
+      { memberId: treatment.id, name: "Ana", amountCents: 8000 }
     ]);
   });
 });

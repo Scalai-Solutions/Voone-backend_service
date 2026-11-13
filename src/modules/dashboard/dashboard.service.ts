@@ -48,7 +48,10 @@ export interface DashboardOverview {
    * cannot double count.
    */
   rewardsRedeemedThisMonth: number;
-  /** The five clients who paid the most this month, biggest first. Erased members are left out. */
+  /**
+   * The five clients who paid the most this month (PaidVisit.paidCents, medicine and medical acts
+   * included even though they earn no points), biggest first. Erased members are left out.
+   */
   topClientsThisMonth: TopClient[];
   walletAdds: number;
   recentActivity: Array<{ id: string; label: string; date: string }>;
@@ -224,9 +227,10 @@ export class DashboardService {
         this.prisma.paidVisit.groupBy({
           by: ["memberId"],
           where: { clinicId, occurredAt: inMonth, member: { erasedAt: null } },
-          _sum: { amountCents: true },
-          having: { amountCents: { _sum: { gt: 0 } } },
-          orderBy: [{ _sum: { amountCents: "desc" } }, { memberId: "asc" }],
+          // paidCents, not amountCents: a client who only bought medicine earns nothing but still paid.
+          _sum: { paidCents: true },
+          having: { paidCents: { _sum: { gt: 0 } } },
+          orderBy: [{ _sum: { paidCents: "desc" } }, { memberId: "asc" }],
           take: TOP_CLIENTS
         }),
 
@@ -259,7 +263,7 @@ export class DashboardService {
       topClientsThisMonth: topSpenders.map((row) => ({
         memberId: row.memberId,
         name: names.get(row.memberId) ?? "",
-        amountCents: row._sum?.amountCents ?? 0
+        amountCents: row._sum?.paidCents ?? 0
       })),
       walletAdds,
       recentActivity: recent.map((row) => ({
