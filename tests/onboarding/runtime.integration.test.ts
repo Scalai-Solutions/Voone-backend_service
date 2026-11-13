@@ -868,7 +868,11 @@ describe("redeeming", () => {
   it("links today's visit, and redeems without linking a visit from another day", async () => {
     const today = await setup();
 
-    await rewards.redeem({ clinicId: clinic.id, rewardId: today.reward.id, visitId: today.v.visitId });
+    await rewards.redeem({
+      clinicId: clinic.id,
+      rewardId: today.reward.id,
+      visitId: today.v.visitId
+    });
     expect(
       (await db.memberReward.findUniqueOrThrow({ where: { id: today.reward.id } })).redeemedVisitId
     ).toBe(today.v.visitId);
