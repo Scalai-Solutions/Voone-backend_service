@@ -266,7 +266,10 @@ export const swapSchema = z.union([
   specialChoice
 ]);
 
-/** The spend, in whole euros paid, at which a reward unlocks. The programme sets the real limits. */
+/** What the reward after Diamante becomes: the panel's choices (it has no engine alternatives). */
+export const recurringSchema = z.union([itemChoice, specialChoice]);
+
+/** The spend, in whole euros paid, at which a row is reached. The programme sets the real limits. */
 const realSpend = z
   .number({ message: "El gasto: tiene que ser un número" })
   .int("El gasto: tiene que ser un número entero de euros")

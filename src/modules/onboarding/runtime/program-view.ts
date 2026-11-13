@@ -54,11 +54,27 @@ export interface MilestoneView {
   issue?: MilestoneIssue;
 }
 
+export interface RecurringPerk {
+  perk: "doble" | "sorpresa";
+  description: string;
+  pool?: Array<{ id: string; name: string }>;
+}
+
 export interface ProgramView {
   tiers: TierView[];
   milestones: MilestoneView[];
-  /** `value`: the reward's retail value in euros, kept on what is issued so a saving can count it. */
-  recurring: { every: number; startsAt: number; title: string; value?: number };
+  /**
+   * `value`: the reward's retail value in euros, kept on what is issued so a saving can count it.
+   * `perk`: present only when the admin made it double points or a surprise; it is then issued as
+   * that perk, with this detail, exactly as a milestone's would be.
+   */
+  recurring: {
+    every: number;
+    startsAt: number;
+    title: string;
+    value?: number;
+    perk?: RecurringPerk;
+  };
   referral: Array<{
     n: number;
     title: string;
@@ -138,6 +154,17 @@ export const programView = (output: Program): ProgramView => {
   });
 
   const diamond = tiers[tiers.length - 1].floor;
+  const recSpecial = output.rec.special;
+  const recPerk: RecurringPerk | null =
+    recSpecial && recSpecial.kind !== "libre"
+      ? {
+          perk: recSpecial.kind,
+          description: recSpecial.desc,
+          ...(recSpecial.kind === "sorpresa"
+            ? { pool: (recSpecial.pool ?? []).map((c) => ({ id: c.id, name: c.name })) }
+            : {})
+        }
+      : null;
 
   return {
     tiers,
@@ -146,7 +173,8 @@ export const programView = (output: Program): ProgramView => {
       every: output.rec.every,
       startsAt: diamond,
       title: rewardTitle(output.rec),
-      value: output.rec.o.value
+      value: output.rec.o.value,
+      ...(recPerk ? { perk: recPerk } : {})
     },
     referral: output.refLad.map((r) => ({
       n: r.n,

@@ -129,25 +129,11 @@ export const swapRewardToItem = (
 
   if (!slot) return fail(NO_SLOT);
 
-  const row = program.catalog.find((candidate) => candidate.id === itemId);
+  const reward = rewardFor(program, answers, { itemId });
 
-  if (!row) return fail("Ese artículo no está en el catálogo.");
+  if (!reward.ok) return reward;
 
-  const refusal = manualRefusal(row);
-
-  if (refusal) return fail(MANUAL_REFUSALS[refusal]);
-
-  // Priced exactly as the engine prices a candidate, through the same function the catalogue's
-  // `giftable` flag is derived from.
-  const [item] = manualCandidates([row], answers);
-
-  return replaceReward(
-    slot.program,
-    answers,
-    slot.at,
-    { items: [item], value: item.value, cost: item.cost },
-    -1
-  );
+  return replaceReward(slot.program, answers, slot.at, reward.o, -1);
 };
 
 /** A reward that is not a catalogue item, as the admin picks it on "Cambiar". */
@@ -198,53 +184,115 @@ export const swapRewardToSpecial = (
 
   if (!slot) return fail(NO_SLOT);
 
-  const at = slot.at;
+  // Priced on the programme holding the slot (a copy when a perk was converted).
+  const reward = rewardFor(slot.program, answers, choice, pool);
 
-  // From here on `program` is the one holding the slot (a copy when a perk was converted).
-  program = slot.program;
+  if (!reward.ok) return reward;
+
+  return replaceReward(slot.program, answers, slot.at, reward.o, -1, reward.special);
+};
+
+/** One of the "Cambiar" panel's choices other than an engine alternative. */
+export type PanelChoice = { itemId: string } | SpecialChoice;
+
+type Priced =
+  { ok: true; o: RewardOption; special?: SpecialReward } | { ok: false; reason: string };
+
+const refuse = (reason: string): { ok: false; reason: string } => ({ ok: false, reason });
+
+/**
+ * What a panel choice gives and costs, for a ladder reward and the reward after Diamante alike.
+ *
+ * A catalogue item is any the admin may hand-pick (medical never), priced exactly as the engine
+ * prices a candidate, through the same function the catalogue's `giftable` flag is derived from.
+ * Double points is the very perk the engine places on the ladder; a surprise carries `pool` (every
+ * item of today's catalogue the admin could hand-pick) as what reception may give; a free text is a
+ * gift worth its price.
+ */
+const rewardFor = (
+  program: Program,
+  answers: Answers,
+  choice: PanelChoice,
+  pool: readonly Candidate[] = []
+): Priced => {
+  if ("itemId" in choice) {
+    const row = program.catalog.find((candidate) => candidate.id === choice.itemId);
+
+    if (!row) return refuse("Ese artículo no está en el catálogo.");
+
+    const refusal = manualRefusal(row);
+
+    if (refusal) return refuse(MANUAL_REFUSALS[refusal]);
+
+    const [item] = manualCandidates([row], answers);
+
+    return { ok: true, o: { items: [item], value: item.value, cost: item.cost } };
+  }
 
   if (choice.kind === "doble") {
-    return replaceReward(
-      program,
-      answers,
-      at,
-      { items: [], value: 0, cost: doublePerkCost(program.lad.inv, program.est.ticket) },
-      -1,
-      { kind: "doble", ...DOUBLE_PERK_TEXT }
-    );
+    return {
+      ok: true,
+      o: { items: [], value: 0, cost: doublePerkCost(program.lad.inv, program.est.ticket) },
+      special: { kind: "doble", ...DOUBLE_PERK_TEXT }
+    };
   }
 
   if (choice.kind === "sorpresa") {
-    if (pool.length === 0) return fail(EMPTY_SURPRISE_POOL);
+    if (pool.length === 0) return refuse(EMPTY_SURPRISE_POOL);
 
     // Sorted so the same catalogue always stores the same pool, in the order reception reads it.
     const sorted = pool.map((c) => ({ ...c })).sort(byNameThenId);
     const cost = sorted.reduce((sum, c) => sum + c.cost, 0) / sorted.length;
 
-    return replaceReward(program, answers, at, { items: [], value: 0, cost }, -1, {
-      kind: "sorpresa",
-      ...SURPRISE_TEXT,
-      pool: sorted
-    });
+    return {
+      ok: true,
+      o: { items: [], value: 0, cost },
+      special: { kind: "sorpresa", ...SURPRISE_TEXT, pool: sorted }
+    };
   }
 
   const name = choice.name.trim();
 
-  if (!name) return fail(FREE_REWARD_REFUSALS.name);
+  if (!name) return refuse(FREE_REWARD_REFUSALS.name);
   if (!(Number.isFinite(choice.priceEuro) && choice.priceEuro > 0)) {
-    return fail(FREE_REWARD_REFUSALS.price);
+    return refuse(FREE_REWARD_REFUSALS.price);
   }
 
   const value = Math.round(choice.priceEuro * 100) / 100;
 
-  return replaceReward(
-    program,
-    answers,
-    at,
-    { items: [], value, cost: value * FREE_REWARD_COST_RATIO },
-    -1,
-    { kind: "libre", name, desc: "" }
-  );
+  return {
+    ok: true,
+    o: { items: [], value, cost: value * FREE_REWARD_COST_RATIO },
+    special: { kind: "libre", name, desc: "" }
+  };
+};
+
+/**
+ * Sets the reward that repeats after Diamante to one of the panel's choices. It is the admin's from
+ * then on (`picked`): a swap of the last ladder reward no longer re-picks it. How often it repeats
+ * is kept, and a label written for the reward that is leaving goes with it. It is issued as what it
+ * is (see `programView`): double points and a surprise as their perks.
+ */
+export const swapRecurring = (
+  program: Program,
+  answers: Answers,
+  choice: PanelChoice,
+  pool: readonly Candidate[] = []
+): SwapResult => {
+  const reward = rewardFor(program, answers, choice, pool);
+
+  if (!reward.ok) return reward;
+
+  const next = structuredClone(program);
+
+  next.rec = {
+    every: next.rec.every,
+    o: reward.o,
+    ...(reward.special ? { special: reward.special } : {}),
+    picked: true
+  };
+
+  return { ok: true, program: next };
 };
 
 /**
@@ -289,7 +337,8 @@ export const replaceReward = (
   // The recurring reward must be worth at least the last ladder reward, so a swap that
   // raises the last one has to re-pick it. A last reward with no retail value (double points,
   // a surprise) says nothing about that, and must not cheapen the reward after Diamante.
-  if (at === next.chosen.length - 1 && replacement.value > 0) {
+  // One the admin chose herself is hers, whatever the ladder does.
+  if (at === next.chosen.length - 1 && replacement.value > 0 && !next.rec.picked) {
     const cands = candidates(next.catalog, answers);
     const rec = chooseRecurring(next.est.A, replacement.value, next.lad.inv, cands);
 

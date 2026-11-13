@@ -270,8 +270,18 @@ export interface Program {
   est: Estimates;
   lad: Ladder;
   chosen: ChosenReward[];
-  /** `label`: as on ChosenReward. Cleared whenever the recurring reward is re-picked. */
-  rec: { every: number; o: RewardOption; label?: string };
+  /**
+   * The reward that repeats after Diamante. `label` and `special` as on ChosenReward; the label is
+   * cleared whenever the reward is re-picked. `picked`: the admin chose it on "Cambiar", so a swap
+   * of the last ladder reward never re-picks it.
+   */
+  rec: {
+    every: number;
+    o: RewardOption;
+    label?: string;
+    special?: SpecialReward;
+    picked?: true;
+  };
   gifts: Record<TierCode, TierGift>;
   /**
    * Benefits the centre wrote itself, per tier (founders' E2E item 27). Shown after the ones the

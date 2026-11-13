@@ -8,6 +8,7 @@ vi.mock("../../src/modules/onboarding/engine.config", async (importOriginal) => 
 });
 
 import { realThresholds, run } from "../../src/modules/onboarding/engine";
+import { P } from "../../src/modules/onboarding/engine.config";
 import type { Answers, CatalogItem, Program } from "../../src/modules/onboarding/engine.types";
 import { isEngineError } from "../../src/modules/onboarding/engine.types";
 import { presentProgram } from "../../src/modules/onboarding/presentation";
@@ -20,9 +21,9 @@ import {
 import catalog from "./reference/sapphira.catalogo.json";
 
 /**
- * Moving the spend at which a reward unlocks. The admin types euros PAID; the ladder stores
- * progress, which runs faster from Oro up. What she types must be what the screen then shows, the
- * reward must stay between its neighbours, and nothing else on the ladder may move.
+ * Moving the spend at which a reward unlocks, or a tier begins. The admin types euros PAID; the
+ * ladder stores progress, which runs faster from Oro up. What she types must be what the screen
+ * then shows, the row must stay between its neighbours, and no other row's spend may move.
  */
 const ANSWERS: Answers = {
   ticket: null,
@@ -51,7 +52,7 @@ const moved = (p: Program, n: number, real: number): Program => {
 
 const rewardsIn = (p: Program, tramo: number) =>
   p.lad.ms.filter((m) => m.type === "premio" && m.tramo === tramo).map((m) => m.n);
-/** Every row the admin may move: rewards and perks, never a tier step. */
+/** The rewards and perks of a band (its tier step has its own tests). */
 const movableIn = (p: Program, tramo: number) =>
   p.lad.ms.filter((m) => m.type !== "nivel" && m.tramo === tramo).map((m) => m.n);
 const shownSpend = (p: Program, n: number): number =>
@@ -154,14 +155,11 @@ describe("what a move refuses", () => {
     expect(next.lad.ms.find((m) => m.n === perk.n)!.perk).toEqual(perk.perk);
   });
 
-  it("refuses a tier step and a milestone that does not exist", () => {
+  it("refuses a milestone that does not exist", () => {
     const p = fresh();
-    const level = p.lad.ms.find((m) => m.type === "nivel")!.n;
 
-    for (const n of [level, 999]) {
-      expect(moveMilestone(p, n, 100)).toEqual({ ok: false, reason: THRESHOLD_REFUSALS.notReward });
-      expect(spendRange(p, n)).toBeNull();
-    }
+    expect(moveMilestone(p, 999, 100)).toEqual({ ok: false, reason: THRESHOLD_REFUSALS.notReward });
+    expect(spendRange(p, 999)).toBeNull();
   });
 
   it("refuses an amount that is not a whole number of euros above zero", () => {
@@ -174,20 +172,140 @@ describe("what a move refuses", () => {
   });
 });
 
+describe("moving a tier step", () => {
+  const stepsOf = (p: Program) => p.lad.ms.filter((m) => m.type === "nivel");
+  /** The range's ends and a few amounts between them: every amount would be thousands of runs. */
+  const amountsIn = ({ min, max }: { min: number; max: number }): number[] => [
+    ...new Set([min, max, ...[0.25, 0.5, 0.75].map((f) => Math.round(min + (max - min) * f))])
+  ];
+
+  it("moves each of the four to exactly the amount typed, and no other row's spend moves", () => {
+    const p = fresh();
+
+    expect(stepsOf(p)).toHaveLength(4);
+
+    for (const step of stepsOf(p)) {
+      const range = spendRange(p, step.n)!;
+
+      expect(range, `tier step ${step.n}`).not.toBeNull();
+
+      for (const real of amountsIn(range)) {
+        const next = moved(p, step.n, real);
+
+        expect(shownSpend(next, step.n), `step ${step.n} at ${real}`).toBe(real);
+
+        for (const m of p.lad.ms.filter((x) => x.n !== step.n)) {
+          // Whole progress euros: what a row shows may move by a rounding, never more.
+          expect(
+            Math.abs(shownSpend(next, m.n) - shownSpend(p, m.n)),
+            `row ${m.n} after step ${step.n} at ${real}`
+          ).toBeLessThanOrEqual(1);
+        }
+      }
+    }
+  });
+
+  it("keeps the ladder in order, the tiers in their bands, and every copy of a threshold in step", () => {
+    const p = fresh();
+
+    for (const step of stepsOf(p)) {
+      const range = spendRange(p, step.n)!;
+
+      for (const real of [range.min, range.max]) {
+        const next = moved(p, step.n, real);
+        const ths = next.lad.ms.map((m) => m.th);
+
+        expect(ths.every((th, i) => i === 0 || th > ths[i - 1])).toBe(true);
+        expect(next.lad.ms.map((m) => [m.n, m.type, m.tramo])).toEqual(
+          p.lad.ms.map((m) => [m.n, m.type, m.tramo])
+        );
+
+        for (const c of next.chosen) {
+          expect(c.m.th).toBe(next.lad.ms.find((m) => m.n === c.m.n)!.th);
+        }
+
+        expect(next.lad.last.th).toBe(next.lad.ms[next.lad.ms.length - 1].th);
+        expect(next.realTh).toEqual(realThresholds(next.lad.ms));
+        expect(next.diamondReal).toBe(next.realTh[next.lad.last.n]);
+        expect(next.costPct).toBeCloseTo(next.totalCost / next.diamondReal, 10);
+      }
+    }
+  });
+
+  it("moves the tier itself: where the runtime starts it and what the admin reads", () => {
+    const p = fresh();
+    const oro = stepsOf(p)[1];
+    const range = spendRange(p, oro.n)!;
+    const next = moved(p, oro.n, range.max);
+    const th = next.lad.ms.find((m) => m.n === oro.n)!.th;
+
+    expect(programView(next).tiers.find((t) => t.key === "oro")!.floor).toBe(th);
+    expect(presentProgram(next).tiers.find((t) => t.key === "oro")!.threshold).toBe(range.max);
+  });
+
+  it("moves no other threshold for Plata, where Bronce and Plata earn alike", () => {
+    const p = fresh();
+    const plata = stepsOf(p)[0];
+    const range = spendRange(p, plata.n)!;
+
+    for (const real of [range.min, range.max]) {
+      const next = moved(p, plata.n, real);
+
+      for (const m of p.lad.ms.filter((x) => x.n !== plata.n)) {
+        expect(next.lad.ms.find((x) => x.n === m.n)!.th).toBe(m.th);
+      }
+    }
+  });
+
+  it("lets Diamante go up to its typo guard, never below where it is", () => {
+    const p = fresh();
+    const diamante = stepsOf(p)[3];
+    const range = spendRange(p, diamante.n)!;
+
+    expect(range.max).toBe(
+      Math.max(Math.floor(2 * P.maxYears * p.est.A), Math.round(p.realTh[diamante.n]))
+    );
+    expect(shownSpend(moved(p, diamante.n, range.max), diamante.n)).toBe(range.max);
+  });
+
+  it("refuses one euro past either end, naming the limits", () => {
+    const p = fresh();
+
+    for (const step of stepsOf(p)) {
+      const range = spendRange(p, step.n)!;
+
+      for (const real of [range.min - 1, range.max + 1]) {
+        const result = moveMilestone(p, step.n, real);
+
+        expect(result.ok, `step ${step.n} at ${real}`).toBe(false);
+        expect(result.ok ? "" : result.reason).toContain("tiene que estar entre");
+      }
+    }
+  });
+
+  it("does not touch the programme it was given", () => {
+    const p = fresh();
+    const step = stepsOf(p)[2];
+    const snapshot = JSON.stringify(p);
+
+    moved(p, step.n, spendRange(p, step.n)!.min);
+
+    expect(JSON.stringify(p)).toBe(snapshot);
+  });
+});
+
 describe("the range on the admin's screen", () => {
-  it("is the one the move enforces, on every reward and perk, and only for the admin", () => {
+  it("is the one the move enforces, on every row tier steps included, and only for the admin", () => {
     const p = fresh();
     const admin = presentProgram(p, { forAdmin: true }).ladder;
 
-    for (const m of admin) {
-      if (m.type !== "nivel") expect(m.spendRange).toEqual(spendRange(p, m.n));
-      else expect(m).not.toHaveProperty("spendRange");
-    }
+    for (const m of admin) expect(m.spendRange).toEqual(spendRange(p, m.n) ?? undefined);
 
+    expect(admin.filter((m) => m.type === "nivel").every((m) => m.spendRange)).toBe(true);
     expect(presentProgram(p).ladder.some((m) => "spendRange" in m)).toBe(false);
   });
 
-  it("contains the reward's current spend", () => {
+  it("contains the row's current spend", () => {
     const p = fresh();
 
     for (const m of presentProgram(p, { forAdmin: true }).ladder) {

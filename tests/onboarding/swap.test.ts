@@ -16,7 +16,7 @@ import type {
   RewardOption
 } from "../../src/modules/onboarding/engine.types";
 import { isEngineError } from "../../src/modules/onboarding/engine.types";
-import { swapReward } from "../../src/modules/onboarding/swap";
+import { swapRecurring, swapReward } from "../../src/modules/onboarding/swap";
 import catalog from "./reference/sapphira.catalogo.json";
 
 /**
@@ -117,6 +117,21 @@ describe("swapReward, with the alternatives the engine proposes", () => {
 
     expect(entry(next, 22).o.value).toBe(90);
     expect(next.rec.o.value).toBeGreaterThanOrEqual(90);
+  });
+
+  it("does not re-pick a recurring reward the admin chose, even when the last reward overtakes it", () => {
+    const chosen = swapRecurring(fresh(), ANSWERS, {
+      kind: "libre",
+      name: "Masaje",
+      priceEuro: 40
+    });
+
+    if (!chosen.ok) throw new Error(chosen.reason);
+
+    const next = (swapReward(chosen.program, ANSWERS, 22, 0) as { program: Program }).program;
+
+    expect(entry(next, 22).o.value).toBe(90);
+    expect(next.rec).toEqual(chosen.program.rec);
   });
 
   it("leaves the recurring reward alone when a middle reward is swapped", () => {

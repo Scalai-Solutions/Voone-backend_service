@@ -70,8 +70,8 @@ export interface PresentedMilestone {
    */
   rewardValueEuro?: number;
   /**
-   * ADMIN ONLY: the whole euros of spend this reward or perk may be moved to, both ends included,
-   * so the screen states the same limits the edit enforces. Absent on tier steps and with no room.
+   * ADMIN ONLY: the whole euros of spend this row (a reward, a perk or a tier step) may be moved to,
+   * both ends included, so the screen states the same limits the edit enforces. Absent with no room.
    */
   spendRange?: { min: number; max: number };
   reward?: {
@@ -116,8 +116,11 @@ export interface PresentedProgram {
   estimates: { segment: string; ticket: number; visitsPerYear: number; annualSpend: number };
   tiers: PresentedTier[];
   ladder: PresentedMilestone[];
-  /** After Diamante: one reward for every `every` euros a client pays. */
-  recurring: { every: number; name: string };
+  /**
+   * After Diamante: one reward for every `every` euros a client pays. `kind` and `description` as
+   * on a ladder reward, for the icon and the "Cambiar" panel.
+   */
+  recurring: { every: number; name: string; kind: PresentedRewardKind; description?: string };
   /**
    * `minRevenue` is what the centre has earned at least from the people referred when the referrer
    * reaches this step: each one paid for a treatment, so each spent at least one average ticket.
@@ -231,7 +234,7 @@ export const presentProgram = (
         base.perk = { kind: m.perk.kind, name: m.perk.name, description: m.perk.desc };
       }
 
-      // Rewards and perks may be moved by the admin; tier steps never are (spendRange is null).
+      // Every row may be moved by the admin, tier steps included (see `moveMilestone`).
       const range = options.forAdmin ? spendRange(program, m.n) : null;
 
       if (range) base.spendRange = range;
@@ -243,7 +246,9 @@ export const presentProgram = (
       // Progress runs ×1.3 in Diamante, so a reward every `every` of progress is one every
       // `every / 1.3` euros actually paid, and the euros paid are what a centre reads.
       every: Math.round(program.rec.every / TIER_BENEFITS.diamante.mult),
-      name: rewardTitle(program.rec)
+      name: rewardTitle(program.rec),
+      kind: rewardKindOf(program.rec),
+      ...(program.rec.special?.desc ? { description: program.rec.special.desc } : {})
     },
 
     referrals: program.refLad.map((r) => ({
