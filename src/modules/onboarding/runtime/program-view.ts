@@ -1,4 +1,4 @@
-import { MIN_TENURE, TIERS, TIER_BENEFITS, TIER_NAMES } from "../engine.config";
+import { MIN_TENURE, TIERS, TIER_NAMES, tierBenefitOf } from "../engine.config";
 import type { PerkKind, Program, TierCode } from "../engine.types";
 import { rewardTitle } from "../reward-title";
 
@@ -97,8 +97,8 @@ export const programView = (output: Program): ProgramView => {
     label: TIER_NAMES[key],
     floor: floors[i] ?? Number.POSITIVE_INFINITY,
     minTenureMonths: MIN_TENURE[key],
-    multiplier: TIER_BENEFITS[key].mult,
-    discount: TIER_BENEFITS[key].discount
+    multiplier: tierBenefitOf(key, output.tierRules).mult,
+    discount: tierBenefitOf(key, output.tierRules).discount
   }));
 
   const rewardAt = new Map(output.chosen.map((c) => [c.m.n, c]));

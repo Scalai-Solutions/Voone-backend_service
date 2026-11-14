@@ -195,7 +195,7 @@ export const swapRewardToSpecial = (
 /** One of the "Cambiar" panel's choices other than an engine alternative. */
 export type PanelChoice = { itemId: string } | SpecialChoice;
 
-type Priced =
+export type Priced =
   { ok: true; o: RewardOption; special?: SpecialReward } | { ok: false; reason: string };
 
 const refuse = (reason: string): { ok: false; reason: string } => ({ ok: false, reason });
@@ -209,7 +209,7 @@ const refuse = (reason: string): { ok: false; reason: string } => ({ ok: false, 
  * item of today's catalogue the admin could hand-pick) as what reception may give; a free text is a
  * gift worth its price.
  */
-const rewardFor = (
+export const rewardFor = (
   program: Program,
   answers: Answers,
   choice: PanelChoice,

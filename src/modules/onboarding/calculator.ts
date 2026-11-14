@@ -1,5 +1,5 @@
 import { CALC, MEMBER_BUCKETS } from "./calculator.config";
-import { TIERS, TIER_BENEFITS } from "./engine.config";
+import { TIERS, tierBenefitOf } from "./engine.config";
 import type { Program, TierCode } from "./engine.types";
 
 /**
@@ -72,7 +72,7 @@ export const calcDefaults = (program: Program, members: string | undefined): Cal
 
 /** What a tier gives a client over a year, apart from rewards. */
 const tierYearCost = (program: Program, tier: TierCode, annualSpend: number): number => {
-  const b = TIER_BENEFITS[tier];
+  const b = tierBenefitOf(tier, program.tierRules);
   const birthday = program.gifts[tier]?.birthday?.cost ?? 0;
   const events = b.events * CALC.eventCost * CALC.eventAttendance;
   const tests = b.tests ? CALC.testCost : 0;
@@ -159,7 +159,7 @@ export const simulate5y = (
   }));
   const levels = ladder.filter((l) => l.tier);
   const diamondReal = program.realTh[program.lad.last.n];
-  const diamondMult = TIER_BENEFITS.diamante.mult;
+  const diamondMult = tierBenefitOf("diamante", program.tierRules).mult;
 
   const tierAt = (spend: number): TierCode => {
     let tier: TierCode = "bronce";

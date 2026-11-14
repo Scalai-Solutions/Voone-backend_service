@@ -1,7 +1,7 @@
 import { OnboardingProgramStatus, type PrismaClient } from "@prisma/client";
 
 import type { Program } from "../../onboarding/engine.types";
-import { itemsTitle } from "../../onboarding/reward-title";
+import { birthdayTitle } from "../../onboarding/reward-title";
 import { programView, type ProgramView } from "../../onboarding/runtime/program-view";
 import { referralRewardAt, tierKeyOf } from "../../onboarding/runtime/rules";
 
@@ -52,7 +52,7 @@ export const nextReferralReward = (program: Program, countedReferrals: number): 
 
 /** The birthday gift the programme assigns to the member's tier; a member with no tier is Bronce. */
 export const birthdayGiftFor = (program: Program | null, tier: string | null): string => {
-  const gift = program?.gifts[tierKeyOf(tier) ?? "bronce"]?.birthday;
+  const gift = program?.gifts[tierKeyOf(tier) ?? "bronce"];
 
-  return gift ? itemsTitle(gift.items) : GENERIC_BIRTHDAY_GIFT;
+  return (gift && birthdayTitle(gift)) || GENERIC_BIRTHDAY_GIFT;
 };

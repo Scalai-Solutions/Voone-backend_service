@@ -14,7 +14,8 @@ import {
   TICKET_BUCKETS,
   TIERS,
   TIER_BENEFITS,
-  TIME_CATS
+  TIME_CATS,
+  tierBenefitOf
 } from "./engine.config";
 import { buildOptions, byDistanceTo, floorTo, ids, median, r1, rha, roundTo } from "./engine.math";
 import type {
@@ -918,13 +919,16 @@ export const orderBronce = (
  * the tier it is earned in (the milestone's own segment). Shared by the engine and by an edit of a
  * threshold, so both compute the same number.
  */
-export const realThresholds = (ms: readonly Milestone[]): Record<number, number> => {
+export const realThresholds = (
+  ms: readonly Milestone[],
+  rules?: Program["tierRules"]
+): Record<number, number> => {
   const realTh: Record<number, number> = {};
   let real = 0;
   let prevProgress = 0;
 
   for (const m of ms) {
-    const mult = TIER_BENEFITS[TIERS[m.tramo - 1]].mult;
+    const mult = tierBenefitOf(TIERS[m.tramo - 1], rules).mult;
     real += (m.th - prevProgress) / mult;
     prevProgress = m.th;
     realTh[m.n] = real;

@@ -15,3 +15,10 @@ export const rewardTitle = (reward: {
   label?: string;
   special?: { name: string };
 }): string => reward.label ?? reward.special?.name ?? itemsTitle(reward.o.items);
+
+/** A tier's birthday gift as a member reads it: the centre's free text, else the item names. */
+export const birthdayTitle = (gift: {
+  birthday?: { items: Array<{ name: string }> };
+  birthdayName?: string;
+}): string | undefined =>
+  gift.birthday ? (gift.birthdayName ?? itemsTitle(gift.birthday.items)) : undefined;
