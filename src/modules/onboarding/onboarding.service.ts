@@ -30,6 +30,7 @@ import { placeMembersOnProgram } from "./runtime/placement";
 import { parsePerkValues, PERK_VALUE_KEYS, type PerkValues } from "./runtime/savings";
 import { recalibrationAdvice, type RecalibrationAdvice } from "./runtime/rules";
 import {
+  rewardFor,
   swapRecurring,
   swapReward,
   swapRewardToItem,
@@ -40,6 +41,7 @@ import {
 } from "./swap";
 import { insertMilestone, removeMilestone } from "./ladder-edit";
 import { moveMilestone, setRecurringEvery } from "./threshold";
+import { applyTierRules, type TierRulesChange } from "./tier-rules";
 import { applyTexts, type TextEdits } from "./texts";
 
 /**
@@ -499,6 +501,50 @@ export class OnboardingService {
     }
 
     return this.getProgram(clinicId, programId);
+  }
+
+  /**
+   * Sets a tier's REAL rules on a draft: its multiplier, its cosmetics discount (in whole percent)
+   * and its birthday gift (a catalogue item, a free text with its price, or null for none). What
+   * is left out stays as it is. A gift is priced exactly as a ladder reward on "Cambiar" is.
+   */
+  async setTierRules(
+    clinicId: string,
+    programId: string,
+    tier: TierCode,
+    input: {
+      multiplier?: number;
+      discountPercent?: number;
+      birthday?: { itemId: string } | { kind: "libre"; name: string; priceEuro: number } | null;
+      freeText?: string[];
+    }
+  ): Promise<OnboardingProgram> {
+    return this.editDraftProgram(
+      clinicId,
+      programId,
+      "Solo se pueden editar los beneficios de un borrador. Genera un borrador nuevo para editar un programa activo.",
+      async (program, answers) => {
+        let base = program;
+        let birthday: TierRulesChange["birthday"] = input.birthday === null ? null : undefined;
+
+        if (input.birthday) {
+          const ready = await this.forChoice(clinicId, program, answers, input.birthday);
+          const priced = rewardFor(ready.program, answers, input.birthday, ready.pool);
+
+          if (!priced.ok) return priced;
+
+          base = ready.program;
+          birthday = { o: priced.o, ...(priced.special ? { name: priced.special.name } : {}) };
+        }
+
+        return applyTierRules(base, tier, {
+          mult: input.multiplier,
+          discount: input.discountPercent === undefined ? undefined : input.discountPercent / 100,
+          birthday,
+          freeText: input.freeText
+        });
+      }
+    );
   }
 
   /**

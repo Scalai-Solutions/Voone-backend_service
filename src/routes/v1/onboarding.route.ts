@@ -32,6 +32,7 @@ import {
   addMilestoneSchema,
   textsSchema,
   benefitOverridesSchema,
+  tierRulesSchema,
   tierBenefitsSchema,
   visitSchema
 } from "../../modules/onboarding/onboarding.schema";
@@ -517,6 +518,30 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
         forAdmin(
           await deps.onboarding.setTierBenefits(clinicId, req.params.programId, tier, benefits)
         )
+      );
+    })
+  );
+
+  /**
+   * Sets a tier's REAL rules on a DRAFT: `{ multiplier?, discountPercent?, birthday? }` (see
+   * tierRulesSchema). Unlike benefit-overrides, these change what visits apply and what the pass and
+   * the birthday message say. Answers 200 with the same body as `GET /programs/:programId`; 409 when
+   * the programme is not a draft, changed under the editor, or the change is refused.
+   */
+  router.put(
+    "/admin/clinics/:clinicId/onboarding/programs/:programId/tiers/:tier/rules",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const clinicId = await clinicOr404(req.params.clinicId);
+      const rules = parse(tierRulesSchema, req.body);
+      const tier = req.params.tier as TierCode;
+
+      if (!TIERS.includes(tier)) {
+        throw new MembershipValidationError("tier: indica un nivel válido");
+      }
+
+      res.json(
+        forAdmin(await deps.onboarding.setTierRules(clinicId, req.params.programId, tier, rules))
       );
     })
   );

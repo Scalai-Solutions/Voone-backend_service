@@ -1,5 +1,5 @@
 import { realThresholds } from "./engine";
-import { P, TIER_BENEFITS, TIERS } from "./engine.config";
+import { P, TIERS, tierBenefitOf } from "./engine.config";
 import type { Milestone, Program } from "./engine.types";
 import { retotal, type SwapResult } from "./swap";
 
@@ -47,7 +47,7 @@ export const geometryBetween = (
 ): Geometry => {
   const prevTh = prev?.th ?? 0;
   const prevReal = prev ? program.realTh[prev.n] : 0;
-  const mult = TIER_BENEFITS[TIERS[tramo - 1]].mult;
+  const mult = tierBenefitOf(TIERS[tramo - 1], program.tierRules).mult;
   const thAt = (real: number): number => Math.round(prevTh + (real - prevReal) * mult);
 
   if (!next) return { thAt, range: null };
@@ -65,7 +65,8 @@ export const geometryBetween = (
   return { thAt, range: max >= min ? { min, max } : null };
 };
 
-const multOf = (tramo: number): number => TIER_BENEFITS[TIERS[tramo - 1]].mult;
+const multOf = (program: Program, tramo: number): number =>
+  tierBenefitOf(TIERS[tramo - 1], program.tierRules).mult;
 
 // A reward or perk always sits before a tier step: the ladder ends at Diamante's.
 const geometryOf = (program: Program, at: number): Geometry =>
@@ -96,8 +97,9 @@ const placeStep = (
   if (!next) return { th, shift: 0 };
 
   // What `th` really stands for once rounded to whole progress euros.
-  const reached = prevReal + (th - prevTh) / multOf(ms[at].tramo);
-  const shift = Math.round(th + (program.realTh[next.n] - reached) * multOf(next.tramo)) - next.th;
+  const reached = prevReal + (th - prevTh) / multOf(program, ms[at].tramo);
+  const shift =
+    Math.round(th + (program.realTh[next.n] - reached) * multOf(program, next.tramo)) - next.th;
 
   return next.th + shift > th ? { th, shift } : null;
 };
@@ -166,7 +168,7 @@ export const moveMilestone = (program: Program, n: number, realSpend: number): S
   for (const c of next.chosen) c.m.th = thOf.get(c.m.n) ?? c.m.th;
   next.lad.last.th = thOf.get(next.lad.last.n) ?? next.lad.last.th;
 
-  next.realTh = realThresholds(next.lad.ms);
+  next.realTh = realThresholds(next.lad.ms, next.tierRules);
   next.diamondReal = next.realTh[next.lad.last.n];
 
   return { ok: true, program: retotal(next) };
@@ -183,7 +185,7 @@ export const setRecurringEvery = (program: Program, realSpend: number): SwapResu
 
   const next = structuredClone(program);
 
-  next.rec.every = Math.round(realSpend * TIER_BENEFITS.diamante.mult);
+  next.rec.every = Math.round(realSpend * tierBenefitOf("diamante", next.tierRules).mult);
 
   return { ok: true, program: retotal(next) };
 };

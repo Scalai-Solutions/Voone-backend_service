@@ -1159,10 +1159,10 @@ describe("benefits the centre writes for a tier (founders' E2E item 27)", () => 
 
     expect((await call("PUT", benefitsPath(id, "oro"), { benefits: [" "] })).status).toBe(422);
     expect(
-      (await call("PUT", benefitsPath(id, "oro"), { benefits: ["x".repeat(81)] })).status
+      (await call("PUT", benefitsPath(id, "oro"), { benefits: ["x".repeat(121)] })).status
     ).toBe(422);
     expect(
-      (await call("PUT", benefitsPath(id, "oro"), { benefits: Array(7).fill("a") })).status
+      (await call("PUT", benefitsPath(id, "oro"), { benefits: Array(11).fill("a") })).status
     ).toBe(422);
     expect((await call("PUT", benefitsPath(id, "mitico"), { benefits: ["a"] })).status).toBe(422);
   });

@@ -204,14 +204,6 @@ export const perkValuesSchema = z
   .object({ diag: perkValueEuro, mejora: perkValueEuro, sorpresa: perkValueEuro })
   .strict();
 
-export const tierBenefitsSchema = z.object({
-  benefits: z
-    .array(
-      z.string().trim().min(1, "Un beneficio no puede estar vacío").max(80, "Máximo 80 caracteres")
-    )
-    .max(6, "Máximo 6 beneficios por nivel")
-});
-
 /**
  * A text the centre writes for a reward. Trimmed, never empty, no control characters (a pasted
  * newline or NUL would break the single-line pass and wallet fields that carry it), and capped at
@@ -228,6 +220,32 @@ const text = (max: number, what: string) =>
     .max(max, `${what}: máximo ${max} caracteres`)
     .regex(NO_CONTROL, `${what}: contiene caracteres no permitidos`);
 
+/**
+ * Characters that show nothing or change how the text around them reads: zero-width and
+ * direction marks (U+200B-200F), bidi embeddings and overrides (U+202A-202E, U+2066-2069), the
+ * word joiner (U+2060) and the byte-order mark (U+FEFF). A line a member reads on her pass could
+ * otherwise say one thing and display another, or look blank.
+ */
+const INVISIBLE = /[\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/;
+
+/** The most lines and characters a tier's free text may have: what a pass line holds (120). */
+export const MAX_TIER_BENEFITS = 10;
+export const MAX_TIER_BENEFIT_TEXT = 120;
+
+/**
+ * The free-text lines of a tier, written by the centre. Same character rules as any text a member
+ * reads on her pass: trimmed, never empty, no control or invisible characters.
+ */
+export const tierBenefitsSchema = z.object({
+  benefits: z
+    .array(
+      text(MAX_TIER_BENEFIT_TEXT, "El beneficio").refine((value) => !INVISIBLE.test(value), {
+        message: "El beneficio: contiene caracteres no permitidos"
+      })
+    )
+    .max(MAX_TIER_BENEFITS, `Máximo ${MAX_TIER_BENEFITS} beneficios por nivel`)
+});
+
 const milestoneNumber = z
   .number({ message: "milestone: indica un número de hito válido" })
   .int("milestone: indica un número de hito válido")
@@ -243,21 +261,23 @@ export const MAX_FREE_REWARD_EURO = 10_000;
  */
 const itemChoice = z.object({ itemId: z.string().trim().min(1).max(64) });
 
+const freeChoice = z.object({
+  kind: z.literal("libre"),
+  name: text(120, "El premio"),
+  priceEuro: z
+    .number({ message: "El precio del premio: tiene que ser un número" })
+    .positive("El precio del premio: tiene que ser mayor que 0")
+    .max(MAX_FREE_REWARD_EURO, `El precio del premio: máximo ${MAX_FREE_REWARD_EURO} €`)
+    .refine(
+      (euro) => Math.abs(Math.round(euro * 100) - euro * 100) < 1e-6,
+      "El precio del premio: como mucho dos decimales"
+    )
+});
+
 const specialChoice = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("doble") }),
   z.object({ kind: z.literal("sorpresa") }),
-  z.object({
-    kind: z.literal("libre"),
-    name: text(120, "El premio"),
-    priceEuro: z
-      .number({ message: "El precio del premio: tiene que ser un número" })
-      .positive("El precio del premio: tiene que ser mayor que 0")
-      .max(MAX_FREE_REWARD_EURO, `El precio del premio: máximo ${MAX_FREE_REWARD_EURO} €`)
-      .refine(
-        (euro) => Math.abs(Math.round(euro * 100) - euro * 100) < 1e-6,
-        "El precio del premio: como mucho dos decimales"
-      )
-  })
+  freeChoice
 ]);
 
 export const swapSchema = z.union([
@@ -265,6 +285,41 @@ export const swapSchema = z.union([
   itemChoice,
   specialChoice
 ]);
+
+/**
+ * A tier's real rules (see tier-rules.ts). Anything left out stays as it is. The multiplier runs
+ * from ×1 to ×3 in tenths, the discount from 0 to 50 whole percent, and the birthday gift is a
+ * catalogue item, a free text with its price, or null for no gift.
+ */
+export const tierRulesSchema = z
+  .object({
+    multiplier: z
+      .number({ message: "El multiplicador: tiene que ser un número" })
+      .min(1, "El multiplicador: como mínimo ×1")
+      .max(3, "El multiplicador: como mucho ×3")
+      .refine(
+        (mult) => Math.abs(Math.round(mult * 10) - mult * 10) < 1e-6,
+        "El multiplicador: como mucho un decimal"
+      )
+      .optional(),
+    discountPercent: z
+      .number({ message: "El descuento: tiene que ser un número" })
+      .int("El descuento: tiene que ser un porcentaje entero")
+      .min(0, "El descuento: como mínimo 0%")
+      .max(50, "El descuento: como mucho 50%")
+      .optional(),
+    birthday: z.union([itemChoice, freeChoice]).nullable().optional(),
+    /** The tier's whole free-text list; when sent, it replaces every text-only line (tier-rules.ts). */
+    freeText: tierBenefitsSchema.shape.benefits.optional()
+  })
+  .refine(
+    (body) =>
+      body.multiplier !== undefined ||
+      body.discountPercent !== undefined ||
+      body.birthday !== undefined ||
+      body.freeText !== undefined,
+    "No hay nada que cambiar"
+  );
 
 /** What the reward after Diamante becomes: the panel's choices (it has no engine alternatives). */
 export const recurringSchema = z.union([itemChoice, specialChoice]);
@@ -334,14 +389,6 @@ export const textsSchema = z
       body.recurring !== undefined,
     { message: "No hay nada que cambiar" }
   );
-
-/**
- * Characters that show nothing or change how the text around them reads: zero-width and
- * direction marks (U+200B-200F), bidi embeddings and overrides (U+202A-202E, U+2066-2069), the
- * word joiner (U+2060) and the byte-order mark (U+FEFF). A line a member reads on her pass could
- * otherwise say one thing and display another, or look blank.
- */
-const INVISIBLE = /[\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/;
 
 /** The longest an overridden line may be: the longest line a card carries (TIER_BENEFIT_LINE_MAX). */
 export const MAX_OVERRIDE_TEXT = 120;

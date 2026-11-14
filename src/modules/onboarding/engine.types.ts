@@ -254,6 +254,14 @@ export interface ReferralStep {
 
 export interface TierGift {
   birthday?: RewardOption;
+  /** Set only when the centre typed the gift: `birthday` then has no items and its price as value. */
+  birthdayName?: string;
+}
+
+/** A tier's multiplier and discount when the centre changed them; an absent field is the config's. */
+export interface TierRule {
+  mult?: number;
+  discount?: number;
 }
 
 /** Everything the engine produces. Persist it whole, with the catalogue and answers. */
@@ -295,6 +303,12 @@ export interface Program {
    * client reads changes. Absent until the centre edits one; the engine never writes it.
    */
   benefitOverrides?: Partial<Record<TierCode, Record<string, BenefitOverride>>>;
+  /**
+   * The multiplier and discount the centre set for a tier, over `TIER_BENEFITS` (see
+   * `tierBenefitOf`). Unlike the two fields above these are REAL: visits apply them. Absent until
+   * the centre changes one, so every programme made before it runs exactly as generated.
+   */
+  tierRules?: Partial<Record<TierCode, TierRule>>;
   perks: { kinds: string[]; pool: Candidate[]; dias: ClassifiedItem[] };
   refLad: ReferralStep[];
   /** Progress granted to a referred client when they join. */

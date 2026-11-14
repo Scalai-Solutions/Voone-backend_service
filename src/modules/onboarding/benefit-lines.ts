@@ -1,6 +1,6 @@
-import { P, TIERS, TIER_BENEFITS } from "./engine.config";
+import { P, TIERS, tierBenefitOf } from "./engine.config";
 import type { BenefitOverride, Program, TierCode } from "./engine.types";
-import { itemsTitle } from "./reward-title";
+import { birthdayTitle } from "./reward-title";
 
 /**
  * The benefit lines of a tier, and the display-only overrides a centre may put on them.
@@ -42,7 +42,7 @@ export const customKey = (index: number): string => `custom:${index}`;
 
 /** What the engine generates for a tier, in the order a client would care about it. */
 export const generatedLines = (key: TierCode, program: Program): GeneratedLine[] => {
-  const b = TIER_BENEFITS[key];
+  const b = tierBenefitOf(key, program.tierRules);
   const out: GeneratedLine[] = [];
 
   if (b.mult > 1) {
@@ -59,9 +59,9 @@ export const generatedLines = (key: TierCode, program: Program): GeneratedLine[]
     });
   }
 
-  const gift = program.gifts[key]?.birthday;
+  const gift = birthdayTitle(program.gifts[key] ?? {});
 
-  if (gift) out.push({ key: "birthday", text: `Regalo de cumpleaños: ${itemsTitle(gift.items)}` });
+  if (gift) out.push({ key: "birthday", text: `Regalo de cumpleaños: ${gift}` });
 
   if (b.events > 0) {
     out.push({

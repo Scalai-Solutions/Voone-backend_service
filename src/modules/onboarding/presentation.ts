@@ -1,8 +1,8 @@
 import { benefitLinesFor, visibleBenefits, type PresentedBenefitLine } from "./benefit-lines";
 import { blockingReview, informationalNotes } from "./engine";
-import { MIN_TENURE, TIERS, TIER_BENEFITS, TIER_NAMES } from "./engine.config";
+import { MIN_TENURE, TIERS, TIER_NAMES, tierBenefitOf } from "./engine.config";
 import type { ChosenReward, Program, TierCode } from "./engine.types";
-import { itemsTitle, rewardTitle } from "./reward-title";
+import { birthdayTitle, itemsTitle, rewardTitle } from "./reward-title";
 import { bandRange } from "./ladder-edit";
 import { spendRange } from "./threshold";
 
@@ -110,6 +110,15 @@ export interface PresentedTier {
    * both ends included. Absent for Diamante, which holds no band, and for the centre.
    */
   addRange?: { min: number; max: number };
+  /**
+   * ADMIN ONLY: the tier's real rules as the editor prefills them. `birthday.itemId` only for a
+   * one-item catalogue gift, `priceEuro` only for a typed one; null when the tier has no gift.
+   */
+  rules?: {
+    multiplier: number;
+    discountPercent: number;
+    birthday: { name: string; itemId?: string; priceEuro?: number } | null;
+  };
 }
 
 export interface PresentedProgram {
@@ -160,6 +169,27 @@ export interface PresentOptions {
   forAdmin?: boolean;
 }
 
+/** A tier's real rules, for the admin editor's prefill. */
+const tierRulesOf = (program: Program, key: TierCode): NonNullable<PresentedTier["rules"]> => {
+  const b = tierBenefitOf(key, program.tierRules);
+  const gift = program.gifts[key] ?? {};
+  const name = birthdayTitle(gift);
+  const items = gift.birthday?.items ?? [];
+
+  return {
+    multiplier: b.mult,
+    discountPercent: Math.round(b.discount * 100),
+    birthday:
+      name === undefined
+        ? null
+        : {
+            name,
+            ...(items.length === 1 ? { itemId: items[0].id } : {}),
+            ...(gift.birthdayName ? { priceEuro: gift.birthday?.value ?? 0 } : {})
+          }
+  };
+};
+
 export const presentProgram = (
   program: Program,
   options: PresentOptions = {}
@@ -193,7 +223,8 @@ export const presentProgram = (
         benefits: visibleBenefits(benefitLines),
         customBenefits: program.customBenefits?.[key] ?? [],
         benefitLines,
-        ...(addRange ? { addRange } : {})
+        ...(addRange ? { addRange } : {}),
+        ...(options.forAdmin ? { rules: tierRulesOf(program, key) } : {})
       };
     }),
 
@@ -245,7 +276,7 @@ export const presentProgram = (
     recurring: {
       // Progress runs ×1.3 in Diamante, so a reward every `every` of progress is one every
       // `every / 1.3` euros actually paid, and the euros paid are what a centre reads.
-      every: Math.round(program.rec.every / TIER_BENEFITS.diamante.mult),
+      every: Math.round(program.rec.every / tierBenefitOf("diamante", program.tierRules).mult),
       name: rewardTitle(program.rec),
       kind: rewardKindOf(program.rec),
       ...(program.rec.special?.desc ? { description: program.rec.special.desc } : {})

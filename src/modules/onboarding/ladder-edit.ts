@@ -88,7 +88,7 @@ export const insertMilestone = (
 
   next.lad.ms.splice(at < 0 ? next.lad.ms.length : at, 0, milestone);
   next.chosen.splice(slot < 0 ? next.chosen.length : slot, 0, entry);
-  next.realTh = realThresholds(next.lad.ms);
+  next.realTh = realThresholds(next.lad.ms, next.tierRules);
   next.diamondReal = next.realTh[next.lad.last.n];
 
   return { ok: true, program: next, n };
@@ -105,7 +105,7 @@ export const removeMilestone = (program: Program, n: number): SwapResult => {
   next.lad.ms.splice(at, 1);
   next.chosen = next.chosen.filter((c) => c.m.n !== n);
   next.perkCost = perkCostOf(next.lad.ms);
-  next.realTh = realThresholds(next.lad.ms);
+  next.realTh = realThresholds(next.lad.ms, next.tierRules);
   next.diamondReal = next.realTh[next.lad.last.n];
 
   return { ok: true, program: retotal(next) };

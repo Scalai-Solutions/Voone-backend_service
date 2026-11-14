@@ -4,7 +4,8 @@ import type {
   Objective,
   OccupancyLevel,
   Segment,
-  TierCode
+  TierCode,
+  TierRule
 } from "./engine.types";
 
 /**
@@ -433,6 +434,16 @@ export const TIER_BENEFITS: Record<TierCode, TierBenefit> = {
     ]
   }
 };
+
+/**
+ * A tier's benefits in a given programme: the config, with the multiplier and discount the centre
+ * set in `Program.tierRules` on top. Every live read goes through this; the engine's generation
+ * keeps reading the config, since it designs the ladder before any centre has changed anything.
+ */
+export const tierBenefitOf = (
+  key: TierCode,
+  rules?: Partial<Record<TierCode, TierRule>>
+): TierBenefit => ({ ...TIER_BENEFITS[key], ...rules?.[key] });
 
 /**
  * Scalar parameters. Named as in the reference so the two can be read side by side.
