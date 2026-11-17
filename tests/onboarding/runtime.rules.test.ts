@@ -16,6 +16,7 @@ import {
   bonoSessionCents,
   checkRedemption,
   discountAllowance,
+  discountWindowEnd,
   discountWindowStart,
   earningCents,
   includesTreatment,
@@ -368,13 +369,26 @@ describe("discountAllowance", () => {
     expect(discountAllowance({ tier: tier("plata"), usedThisWindow: 7 })).toBe(0);
   });
 
-  it("resets on 1 January in Madrid, not in UTC", () => {
-    // Midnight on 1 January in Madrid is 23:00 UTC on the 31st. A purchase in that hour
-    // belongs to the new year for the clinic and the old one for a UTC reading.
-    expect(discountWindowStart(at("2026-06-15T12:00:00Z")).toISOString()).toBe(
-      "2025-12-31T23:00:00.000Z"
+  it("resets at midnight on the 1st in Madrid, not in UTC", () => {
+    // Midnight on 1 November in Madrid (CET after the clocks go back) is 23:00 UTC on 31 October,
+    // and on 1 July (CEST) it is 22:00 UTC on 30 June. A purchase in that hour belongs to the new
+    // month for the clinic and the old one for a UTC reading.
+    expect(discountWindowStart(at("2026-11-17T12:00:00Z")).toISOString()).toBe(
+      "2026-10-31T23:00:00.000Z"
     );
-    expect(discountWindowStart(at("2027-01-01T00:30:00Z")).toISOString()).toBe(
+    expect(discountWindowStart(at("2026-07-15T12:00:00Z")).toISOString()).toBe(
+      "2026-06-30T22:00:00.000Z"
+    );
+    expect(discountWindowStart(at("2026-11-01T00:30:00Z")).toISOString()).toBe(
+      "2026-10-31T23:00:00.000Z"
+    );
+  });
+
+  it("ends where the next month begins, so a visit is counted only against its own month", () => {
+    expect(discountWindowEnd(at("2026-11-17T12:00:00Z")).toISOString()).toBe(
+      "2026-11-30T23:00:00.000Z"
+    );
+    expect(discountWindowEnd(at("2026-12-20T12:00:00Z")).toISOString()).toBe(
       "2026-12-31T23:00:00.000Z"
     );
   });
@@ -565,7 +579,7 @@ describe("the decisions the guide left open", () => {
   it("records each provisional answer where it can be found and changed", () => {
     expect(RUNTIME_DECISIONS).toMatchObject({
       tenureStartsAt: "signup",
-      discountWindow: "calendar_year",
+      discountWindow: "calendar_month",
       progressScope: "per_centre",
       surpriseChosenBy: "staff_from_pool",
       reviewsEarnProgress: false

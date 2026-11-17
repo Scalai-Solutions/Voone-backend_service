@@ -23,14 +23,14 @@ export const RUNTIME_DECISIONS = {
   tenureStartsAt: "signup" as const,
 
   /**
-   * The window the "3 products a year" cosmetics allowance resets over. The guide assumes a
-   * calendar year; the open question is whether it should be 12 months from tier entry.
+   * The window the "3 products a month" cosmetics allowance resets over. The founders' guide said
+   * "a year"; Sergio confirmed (2026-11-17) that the club promises 3 products per month, in every
+   * tier that has a discount, and the club page and card say so.
    *
-   * Calendar year in Madrid. It is the reading the guide's own section 6 assumes, it is the one
-   * a receptionist can apply without a calculator, and a rolling window needs a per-member
-   * anniversary that does not exist yet.
+   * Calendar month in Madrid. It is the reading a receptionist can apply without a calculator, and
+   * a rolling window needs a per-member anniversary that does not exist yet.
    */
-  discountWindow: "calendar_year" as const,
+  discountWindow: "calendar_month" as const,
 
   /**
    * How long an issued reward or perk lasts. Not an open question — the guide states it — but

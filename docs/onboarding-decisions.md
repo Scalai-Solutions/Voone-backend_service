@@ -160,16 +160,26 @@ whole months by Madrid calendar date.
 
 **To change.** Replace what `PrismaProgramTierPort` passes as the tenure start date.
 
-### B4. Is the "3 products per year" limit calendar-year or rolling?
+### B4. Is the cosmetics limit 3 products per year, or per month?
 
-**Approach implemented.** Calendar year in Madrid: it is the reading the guide's section 6
-assumes, and a receptionist can apply it without a calculator. A rolling 12 months from tier
-entry would need a per-member anniversary that does not exist yet. The allowance is counted
-from recorded visits (`PaidVisit.discountedProducts`), resets at midnight on 1 January **in
-Madrid, not UTC**, and is zero in tiers with no discount.
+**Decided (Sergio, 2026-11-17): 3 products per calendar month, in every tier that has a
+discount.** The founders' guide said "3 products a year", and the club page of the first clinic
+mixed "al año" and "al mes"; Sergio confirmed per month.
 
-**Where.** `runtime/rules.ts` (`discountAllowance`, `discountWindowStart`);
-`src/common/utils/zoned-month.ts` (`startOfYearIn`).
+**Approach implemented.** Calendar month in Madrid: a receptionist can apply it without a
+calculator, and a rolling window needs a per-member anniversary that does not exist yet. The
+allowance is counted from recorded visits (`PaidVisit.discountedProducts`), resets at midnight on
+the 1st **in Madrid, not UTC**, and is zero in tiers with no discount. A visit is counted against
+the month it happened in (`discountWindowStart` to `discountWindowEnd`), so a visit entered late
+on the 1st for the 31st does not eat the new month's allowance.
+
+**Effect on money.** Members can now take up to 12 times as many discounted products. The
+calculator is unchanged: it prices the discount as a share of cosmetics spend, not from this cap.
+The benefit line ("hasta 3 productos al mes") is generated when read, so every programme shows
+the new wording at once; only a centre that reworded that line itself keeps its own text.
+
+**Where.** `runtime/rules.ts` (`discountAllowance`, `discountWindowStart`, `discountWindowEnd`);
+`benefit-lines.ts` (the line's wording).
 
 ### B5. Is progress shared across a group of centres?
 

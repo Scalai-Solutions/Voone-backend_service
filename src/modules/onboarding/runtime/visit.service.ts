@@ -20,7 +20,7 @@ import { toPoints } from "./points-unit";
 import type { PointsService } from "../../points/points.service";
 import { toCents } from "../catalog.repository";
 import type { CategoryCode } from "../engine.types";
-import { CATEGORIES } from "../engine.config";
+import { CATEGORIES, P } from "../engine.config";
 import { OnboardingError } from "../onboarding.service";
 import { activeProgramView } from "./program-tier.port";
 import type { ProgramView } from "./program-view";
@@ -29,6 +29,7 @@ import { BONO_REASON_PREFIX, PAYMENT_REASON_PREFIX } from "./visit-reason";
 import {
   bonoSessionCents,
   discountAllowance,
+  discountWindowEnd,
   discountWindowStart,
   earnsProgress,
   earningCents,
@@ -299,9 +300,12 @@ export class VisitService {
       );
     }
 
-    const window = discountWindowStart(this.now());
+    const now = this.now();
     const used = await this.prisma.paidVisit.aggregate({
-      where: { memberId: input.memberId, occurredAt: { gte: window } },
+      where: {
+        memberId: input.memberId,
+        occurredAt: { gte: discountWindowStart(now), lt: discountWindowEnd(now) }
+      },
       _sum: { discountedProducts: true }
     });
     const tierView = active.view.tiers.find((t) => t.key === tierKeyOf(tier)) ?? null;
@@ -440,7 +444,10 @@ export class VisitService {
           const used = await tx.paidVisit.aggregate({
             where: {
               memberId: input.memberId,
-              occurredAt: { gte: discountWindowStart(occurredAt) }
+              occurredAt: {
+                gte: discountWindowStart(occurredAt),
+                lt: discountWindowEnd(occurredAt)
+              }
             },
             _sum: { discountedProducts: true }
           });
@@ -452,8 +459,8 @@ export class VisitService {
           if (discounted > allowed) {
             throw new OnboardingError(
               allowed === 0
-                ? "Su nivel no tiene descuento en cosmética, o ya usó los 3 productos de este año."
-                : `Solo puede comprar ${allowed} ${allowed === 1 ? "producto" : "productos"} más con descuento este año.`,
+                ? `Su nivel no tiene descuento en cosmética, o ya usó los ${P.discountMaxProducts} productos de este mes.`
+                : `Solo puede comprar ${allowed} ${allowed === 1 ? "producto" : "productos"} más con descuento este mes.`,
               409
             );
           }
