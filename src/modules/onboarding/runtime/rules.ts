@@ -1,4 +1,9 @@
-import { CLINIC_TIME_ZONE, dayKeyIn, startOfYearIn } from "../../../common/utils/zoned-month";
+import {
+  CLINIC_TIME_ZONE,
+  dayKeyIn,
+  startOfMonthIn,
+  startOfNextMonthIn
+} from "../../../common/utils/zoned-month";
 import { CATEGORIES, P, TIERS } from "../engine.config";
 import { rha } from "../engine.math";
 import type { CategoryCode, TierCode } from "../engine.types";
@@ -284,8 +289,8 @@ export interface DiscountInput {
 /**
  * How many more products can be bought at the tier's cosmetics discount.
  *
- * Zero for a tier with no discount (Bronce), otherwise the yearly limit minus what has been
- * used. The window is the calendar year in Madrid — see RUNTIME_DECISIONS.discountWindow.
+ * Zero for a tier with no discount (Bronce), otherwise the monthly limit minus what has been
+ * used. The window is the calendar month in Madrid — see RUNTIME_DECISIONS.discountWindow.
  */
 export const discountAllowance = ({ tier, usedThisWindow }: DiscountInput): number => {
   if (!tier || tier.discount <= 0) return 0;
@@ -293,8 +298,11 @@ export const discountAllowance = ({ tier, usedThisWindow }: DiscountInput): numb
   return Math.max(0, P.discountMaxProducts - usedThisWindow);
 };
 
-/** Where the current discount window began. */
-export const discountWindowStart = (now: Date): Date => startOfYearIn(CLINIC_TIME_ZONE, now);
+/** Where the discount window that contains `now` began: midnight on the 1st, in Madrid. */
+export const discountWindowStart = (now: Date): Date => startOfMonthIn(CLINIC_TIME_ZONE, now);
+
+/** Where the next window begins, so a visit is only ever counted against its own month. */
+export const discountWindowEnd = (now: Date): Date => startOfNextMonthIn(CLINIC_TIME_ZONE, now);
 
 /* ------------------------------------------------------------------------ referral */
 

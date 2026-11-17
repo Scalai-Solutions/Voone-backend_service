@@ -61,22 +61,6 @@ export const startOfNextMonthIn = (timeZone: string, now: Date = new Date()): Da
   startOfMonthIn(timeZone, new Date(startOfMonthIn(timeZone, now).getTime() + 32 * 86_400_000));
 
 /**
- * The start of the current calendar year in a given time zone, as a UTC instant.
- *
- * Needed for "3 products per year": a clinic in Madrid thinks of the year as starting at
- * midnight on 1 January there, and UTC would put every purchase made in the first hour of
- * the year (two in summer) into the year before. Same technique as startOfMonthIn, and for
- * the same reason it measures the offset at the candidate instant rather than at `now`.
- */
-export const startOfYearIn = (timeZone: string, now: Date = new Date()): Date => {
-  const parts = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric" }).formatToParts(now);
-  const year = Number(parts.find((p) => p.type === "year")?.value ?? 0);
-  const naive = Date.UTC(year, 0, 1, 0, 0, 0);
-
-  return new Date(naive - offsetMs(new Date(naive), timeZone));
-};
-
-/**
  * The calendar day an instant falls on in a zone, as YYYY-MM-DD.
  *
  * What "the same visit" means for redemption: a reward can be redeemed against a payment

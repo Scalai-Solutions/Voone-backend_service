@@ -593,7 +593,7 @@ describe("the discount allowance", () => {
     ).rejects.toMatchObject({ statusCode: 409 });
   });
 
-  it("allows three products a year in Plata and counts them down", async () => {
+  it("allows three products a month in Plata and counts them down", async () => {
     const m = await makeMember({ createdAt: "2026-06-01T10:00:00Z" });
     await seed(m.id, 200);
     expect((await memberRow(m.id)).tier).toBe("Plata");
@@ -613,30 +613,53 @@ describe("the discount allowance", () => {
     expect((await buy(1, "c")).discountRemaining).toBe(0);
   });
 
-  it("resets with the calendar year", async () => {
+  it("resets with the calendar month, not before", async () => {
     const m = await makeMember({ createdAt: "2025-01-01T10:00:00Z" });
     await seed(m.id, 200);
 
-    await visits.record({
-      clinicId: clinic.id,
-      memberId: m.id,
-      kind: "PAYMENT",
-      lines: [{ category: "COS", amountEuro: 30 }],
-      discountedProducts: 3,
-      idempotencyKey: "year-1"
-    });
+    const buy = (key: string) =>
+      visits.record({
+        clinicId: clinic.id,
+        memberId: m.id,
+        kind: "PAYMENT",
+        lines: [{ category: "COS", amountEuro: 30 }],
+        discountedProducts: 3,
+        idempotencyKey: key
+      });
 
-    setClock("2027-01-05T10:00:00Z");
-    const again = await visits.record({
-      clinicId: clinic.id,
-      memberId: m.id,
-      kind: "PAYMENT",
-      lines: [{ category: "COS", amountEuro: 30 }],
-      discountedProducts: 3,
-      idempotencyKey: "year-2"
-    });
+    await buy("month-1");
 
-    expect(again.discountRemaining).toBe(0);
+    // Later in the same month: nothing left.
+    setClock("2026-10-30T10:00:00Z");
+    await expect(buy("month-1b")).rejects.toMatchObject({ statusCode: 409 });
+
+    // The next month starts again at three.
+    setClock("2026-11-05T10:00:00Z");
+    expect((await buy("month-2")).discountRemaining).toBe(0);
+  });
+
+  it("counts a visit entered late against the month it happened in", async () => {
+    const m = await makeMember({ createdAt: "2025-01-01T10:00:00Z" });
+    await seed(m.id, 200);
+
+    const buy = (key: string, occurredAt?: string) =>
+      visits.record({
+        clinicId: clinic.id,
+        memberId: m.id,
+        kind: "PAYMENT",
+        lines: [{ category: "COS", amountEuro: 30 }],
+        discountedProducts: 3,
+        idempotencyKey: key,
+        ...(occurredAt ? { occurredAt: new Date(occurredAt) } : {})
+      });
+
+    // Three bought on 2 November...
+    setClock("2026-11-02T10:00:00Z");
+    await buy("nov");
+
+    // ...must not eat the allowance of a visit that happened on 31 October and is entered on the 3rd.
+    setClock("2026-11-03T10:00:00Z");
+    expect((await buy("late-oct", "2026-10-31T10:00:00Z")).discountRemaining).toBe(0);
   });
 });
 

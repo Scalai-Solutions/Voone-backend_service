@@ -55,7 +55,7 @@ export const generatedLines = (key: TierCode, program: Program): GeneratedLine[]
   if (b.discount > 0) {
     out.push({
       key: "discount",
-      text: `Descuento del ${pct(b.discount)} en cosmética, hasta ${P.discountMaxProducts} productos al año`
+      text: `Descuento del ${pct(b.discount)} en cosmética, hasta ${P.discountMaxProducts} productos al mes`
     });
   }
 
