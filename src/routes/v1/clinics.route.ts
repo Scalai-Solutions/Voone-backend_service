@@ -4,6 +4,7 @@ import { ClinicNotFoundError } from "../../common/errors/membership.errors";
 import { asyncHandler } from "../../common/middleware/async-handler";
 import { prisma } from "../../infrastructure/database/prisma-client";
 import { findClinicBySlug, toPublicClinic } from "../../modules/clinics/clinic.service";
+import { findClubPage } from "../../modules/clinics/club.service";
 
 export const clinicsRouter = Router();
 
@@ -26,5 +27,17 @@ clinicsRouter.get(
     }
 
     res.json({ clinic: toPublicClinic(clinic, clinic.template) });
+  })
+);
+
+/**
+ * The club page's data: the clinic's branding plus what its live programme gives a client, read
+ * from the same programme the wallet card reads. Public and read-only. A clinic with no live
+ * programme is a 404, like an unknown one.
+ */
+clinicsRouter.get(
+  "/clinics/:slug/club",
+  asyncHandler(async (req, res) => {
+    res.json(await findClubPage(prisma, req.params.slug));
   })
 );
