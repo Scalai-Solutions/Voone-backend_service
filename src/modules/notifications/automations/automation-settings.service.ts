@@ -1,5 +1,6 @@
 import {
   AutomationEvent,
+  Prisma,
   type ClinicAutomation,
   type ClinicNotificationSettings,
   type PrismaClient
@@ -8,13 +9,22 @@ import {
 import { NotificationValidationError } from "../notification.errors";
 import type { NotificationSettingsPatch } from "../notifications.schema";
 import { unknownVariables } from "../template";
-import { AUTOMATION_CATALOG, automationDefinition } from "./catalog";
+import {
+  AUTOMATION_CATALOG,
+  automationDefinition,
+  isValidTiming,
+  resolveTiming,
+  type AutomationDefinition,
+  type AutomationTiming
+} from "./catalog";
 
 export interface AutomationSetting {
   enabled: boolean;
   header: string;
   body: string;
   notify: boolean;
+  /** Resolved thresholds: every field the catalog declares for the event, never missing. */
+  timing: AutomationTiming;
 }
 
 export type AutomationSettingsMap = Record<AutomationEvent, AutomationSetting>;
@@ -38,19 +48,29 @@ export interface ClinicNotificationSettingsView {
 
 /** Stored rows over the catalog defaults: a clinic that never edited an event reads its defaults. */
 export const resolveAutomations = (
-  rows: ReadonlyArray<Pick<ClinicAutomation, "event" | "enabled" | "header" | "body" | "notify">>
+  /** `timing` may be left out of a select that only needs the switch and copy. */
+  rows: ReadonlyArray<
+    Pick<ClinicAutomation, "event" | "enabled" | "header" | "body" | "notify"> &
+      Partial<Pick<ClinicAutomation, "timing">>
+  >
 ): AutomationSettingsMap => {
   const stored = new Map(rows.map((row) => [row.event, row]));
 
   return Object.fromEntries(
-    AUTOMATION_CATALOG.map(({ event, defaults }) => {
-      const row = stored.get(event);
+    AUTOMATION_CATALOG.map((definition) => {
+      const row = stored.get(definition.event);
 
       return [
-        event,
+        definition.event,
         row
-          ? { enabled: row.enabled, header: row.header, body: row.body, notify: row.notify }
-          : { ...defaults }
+          ? {
+              enabled: row.enabled,
+              header: row.header,
+              body: row.body,
+              notify: row.notify,
+              timing: resolveTiming(definition, row.timing)
+            }
+          : { ...definition.defaults, timing: resolveTiming(definition, null) }
       ];
     })
   ) as AutomationSettingsMap;
@@ -106,7 +126,13 @@ export class AutomationSettingsService {
 
     for (const [event, change] of Object.entries(automations ?? {})) {
       const definition = automationDefinition(event as AutomationEvent);
-      const next = { ...current.automations[definition.event], ...stripUndefined(change ?? {}) };
+      const { timing, ...copy } = change ?? {};
+      const previous = current.automations[definition.event];
+      const next = {
+        ...previous,
+        ...stripUndefined(copy),
+        timing: { ...previous.timing, ...checkedTiming(definition, timing ?? {}) }
+      };
 
       for (const field of ["header", "body"] as const) {
         const unknown = unknownVariables(next[field], definition.variables);
@@ -143,10 +169,18 @@ export class AutomationSettingsService {
       ...Object.keys(automations ?? {}).map((event) => {
         const value = merged.automations[event as AutomationEvent];
 
+        const row = {
+          ...value,
+          timing:
+            Object.keys(value.timing).length > 0
+              ? (value.timing as Prisma.InputJsonObject)
+              : Prisma.DbNull
+        };
+
         return this.prisma.clinicAutomation.upsert({
           where: { clinicId_event: { clinicId, event: event as AutomationEvent } },
-          create: { clinicId, event: event as AutomationEvent, ...value },
-          update: value
+          create: { clinicId, event: event as AutomationEvent, ...row },
+          update: row
         });
       })
     ]);
@@ -162,6 +196,33 @@ export class AutomationSettingsService {
     });
   }
 }
+
+/** The sent thresholds, refused if the event does not have the field or the value is out of range. */
+const checkedTiming = (
+  definition: AutomationDefinition,
+  timing: Partial<Record<string, number>>
+): AutomationTiming => {
+  const checked: AutomationTiming = {};
+
+  for (const [key, value] of Object.entries(timing)) {
+    if (value === undefined) continue;
+
+    const field = definition.timing?.find((candidate) => candidate.key === key);
+
+    if (!field) {
+      throw new NotificationValidationError(`${definition.label}: no admite el plazo ${key}`);
+    }
+    if (!isValidTiming(field, value)) {
+      throw new NotificationValidationError(
+        `${definition.label}: «${field.label}» debe ser un número entero entre ${field.min} y ${field.max}`
+      );
+    }
+
+    checked[field.key] = value;
+  }
+
+  return checked;
+};
 
 const stripUndefined = <T extends object>(value: T): Partial<T> =>
   Object.fromEntries(

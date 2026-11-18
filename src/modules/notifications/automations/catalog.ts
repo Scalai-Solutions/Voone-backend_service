@@ -12,6 +12,22 @@ export type TemplateVariable =
   | "new_tier"
   | "benefits_summary";
 
+/** A timing threshold a clinic can tune per automation. */
+export type TimingKey = "inactiveDays" | "minVisits" | "activeDays";
+
+export interface TimingField {
+  key: TimingKey;
+  /** Shown to clinic staff next to the input. */
+  label: string;
+  /** Shown after the number ("días", "visitas"). */
+  unit: string;
+  min: number;
+  max: number;
+  default: number;
+}
+
+export type AutomationTiming = Partial<Record<TimingKey, number>>;
+
 export interface AutomationDefinition {
   event: AutomationEvent;
   /** The Notification.type rows of this automation are stored under. */
@@ -25,6 +41,8 @@ export interface AutomationDefinition {
   marketing: boolean;
   /** Clinic settings that must be filled in before the automation can be switched on. */
   requires?: ClinicVariableKey;
+  /** Thresholds the clinic may change; the trigger reads the resolved values. */
+  timing?: readonly TimingField[];
   /** Default copy and switch for a clinic that has never edited this automation. */
   defaults: { enabled: boolean; header: string; body: string; notify: boolean };
 }
@@ -53,9 +71,19 @@ export const AUTOMATION_CATALOG: readonly AutomationDefinition[] = [
     event: AutomationEvent.BONO_INACTIVE,
     notificationType: NotificationType.BONO_REMINDER,
     label: "Recordatorio de bonos",
-    description: "Avisa a quien lleva 30 días sin usar las sesiones de su bono.",
+    description: "Avisa a quien lleva un tiempo sin usar las sesiones de su bono.",
     variables: ["first_name", "clinic_name"],
     marketing: false,
+    timing: [
+      {
+        key: "inactiveDays",
+        label: "Avisar tras estos días sin usar el bono",
+        unit: "días",
+        min: 7,
+        max: 365,
+        default: 30
+      }
+    ],
     defaults: {
       enabled: true,
       header: "¡No olvides tu tratamiento! 💆‍♀️",
@@ -67,10 +95,20 @@ export const AUTOMATION_CATALOG: readonly AutomationDefinition[] = [
     event: AutomationEvent.REVIEW_REQUEST,
     notificationType: NotificationType.REVIEW_REQUEST,
     label: "Reseña en Google",
-    description: "Pide una valoración en Google tras la segunda visita.",
+    description: "Pide una valoración en Google a partir de la visita que elijas.",
     variables: ["first_name", "clinic_name", "google_maps_link"],
     marketing: true,
     requires: "googleReviewUrl",
+    timing: [
+      {
+        key: "minVisits",
+        label: "Pedir la reseña a partir de la visita nº",
+        unit: "visitas",
+        min: 1,
+        max: 20,
+        default: 2
+      }
+    ],
     defaults: {
       enabled: false,
       header: "¿Qué tal tu experiencia en {clinic_name}? ⭐",
@@ -84,6 +122,16 @@ export const AUTOMATION_CATALOG: readonly AutomationDefinition[] = [
     label: "Programa de referidos",
     description:
       "Cada mes, recuerda a tus clientes activos que pueden compartir su código y el premio que ganarán.",
+    timing: [
+      {
+        key: "activeDays",
+        label: "Cliente activo si ha venido o sumado puntos en los últimos",
+        unit: "días",
+        min: 7,
+        max: 365,
+        default: 90
+      }
+    ],
     // Filled per member from the live programme: the reward their next referral earns.
     variables: ["first_name", "clinic_name", "referral_reward"],
     marketing: true,
@@ -124,3 +172,42 @@ export const automationDefinition = (event: AutomationEvent): AutomationDefiniti
 export const AUTOMATION_NOTIFICATION_TYPES: readonly NotificationType[] = AUTOMATION_CATALOG.map(
   (definition) => definition.notificationType
 );
+
+/** A stored threshold is used only if it is a whole number inside the field's range. */
+export const isValidTiming = (field: TimingField, value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value) && value >= field.min && value <= field.max;
+
+/**
+ * The definition's thresholds: the clinic's stored value per field, or the default when it is
+ * missing or out of range. Always has every key the definition declares and no other.
+ */
+export const resolveTiming = (
+  definition: AutomationDefinition,
+  stored: unknown
+): AutomationTiming => {
+  const raw =
+    stored !== null && typeof stored === "object" && !Array.isArray(stored)
+      ? (stored as Record<string, unknown>)
+      : {};
+
+  return Object.fromEntries(
+    (definition.timing ?? []).map((field) => {
+      const value = raw[field.key];
+
+      return [field.key, isValidTiming(field, value) ? value : field.default];
+    })
+  );
+};
+
+/** One resolved threshold. A key the event does not declare is a programming error. */
+export const timingValue = (
+  event: AutomationEvent,
+  timing: AutomationTiming,
+  key: TimingKey
+): number => {
+  const field = automationDefinition(event).timing?.find((candidate) => candidate.key === key);
+
+  if (!field) throw new Error(`Automation ${event} has no timing field ${key}`);
+
+  return timing[key] ?? field.default;
+};

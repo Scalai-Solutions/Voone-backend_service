@@ -449,7 +449,7 @@ enum NotificationType {
   POINTS
   TIER
   BIRTHDAY
-  /// Reminder to members whose active bono has gone unused for 30 days.
+  /// Reminder to members whose active bono has gone unused (30 days by default, set per clinic).
   BONO_REMINDER
   /// Asks a returning member (2nd visit onwards) for a Google review.
   REVIEW_REQUEST
@@ -592,6 +592,9 @@ model ClinicAutomation {
   body      String
   /// true = a real push (Google TEXT_AND_NOTIFY), false = a silent card message.
   notify    Boolean
+  /// The clinic's timing thresholds, keyed as in the catalog's `timing` fields (e.g.
+  /// {"inactiveDays": 14}). Null or a missing key reads as the catalog default.
+  timing    Json?
   createdAt DateTime        @default(now())
   updatedAt DateTime        @updatedAt
 

@@ -84,7 +84,16 @@ const automationPatchSchema = z
     enabled: z.boolean(),
     header: z.string().trim().min(1).max(60),
     body: z.string().trim().min(1).max(500),
-    notify: z.boolean()
+    notify: z.boolean(),
+    /** Per-event thresholds; which keys an event accepts, and their ranges, come from the catalog. */
+    timing: z
+      .object({
+        inactiveDays: z.number().int(),
+        minVisits: z.number().int(),
+        activeDays: z.number().int()
+      })
+      .partial()
+      .strict()
   })
   .partial()
   .strict();

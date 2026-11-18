@@ -7,7 +7,7 @@ import {
   type ZonedDate
 } from "../../../common/utils/zoned-time";
 import { config } from "../../../config/env";
-import { resolveAutomations } from "./automation-settings.service";
+import { resolveAutomations, type AutomationSetting } from "./automation-settings.service";
 import type { AutomationDispatchService } from "./dispatch.service";
 import type { ScheduledTrigger } from "./triggers/types";
 
@@ -86,7 +86,7 @@ export class NotificationDispatcher {
 
         // Each (clinic, event) fails alone: one broken query must not stop the other sends.
         try {
-          await this.runTrigger(trigger, clinic.id, today, now, summary);
+          await this.runTrigger(trigger, clinic.id, settings[trigger.event], today, now, summary);
         } catch (error) {
           summary.failures += 1;
           console.error("[notifications] automation failed", {
@@ -104,11 +104,12 @@ export class NotificationDispatcher {
   private async runTrigger(
     trigger: ScheduledTrigger,
     clinicId: string,
+    setting: AutomationSetting,
     today: ZonedDate,
     now: Date,
     summary: DispatchTickSummary
   ): Promise<void> {
-    const recipients = await trigger.findRecipients({ clinicId, today, now });
+    const recipients = await trigger.findRecipients({ clinicId, today, now, setting });
     const result = await this.sender.dispatch({
       clinicId,
       event: trigger.event,

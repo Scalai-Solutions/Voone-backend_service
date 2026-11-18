@@ -1,20 +1,23 @@
 import { AutomationEvent, NotificationType, type PrismaClient } from "@prisma/client";
 
+import { resolveAutomations } from "../automation-settings.service";
+import { timingValue } from "../catalog";
 import type { AutomationDispatchService, AutomationRecipient } from "../dispatch.service";
 import { DAY_MS, type ScheduledTrigger, type TriggerContext } from "./types";
 
-/** How recent the visit that made it the member's 2nd (or later) must be. */
+/** How recent the visit that made the member eligible must be for the daily catch-up. */
 export const REVIEW_WINDOW_DAYS = 7;
-export const REVIEW_MIN_VISITS = 2;
 
 /**
- * Of `memberIds`, those with at least REVIEW_MIN_VISITS visits who were never asked for a review.
- * Shared by the instant send after a visit and the daily catch-up, so both apply the same rule.
+ * Of `memberIds`, those with at least `minVisits` visits (the clinic's setting) who were never
+ * asked for a review. Shared by the instant send after a visit and the daily catch-up, so both
+ * apply the same rule.
  */
 export const membersDueForReview = async (
   prisma: PrismaClient,
   clinicId: string,
-  memberIds: readonly string[]
+  memberIds: readonly string[],
+  minVisits: number
 ): Promise<string[]> => {
   if (memberIds.length === 0) return [];
 
@@ -23,7 +26,7 @@ export const membersDueForReview = async (
       by: ["memberId"],
       where: { clinicId, memberId: { in: [...memberIds] } },
       _count: { _all: true },
-      having: { memberId: { _count: { gte: REVIEW_MIN_VISITS } } }
+      having: { memberId: { _count: { gte: minVisits } } }
     }),
     prisma.notificationDelivery.findMany({
       where: {
@@ -40,7 +43,8 @@ export const membersDueForReview = async (
 };
 
 /**
- * EVT-005, sent as soon as the visit that makes it the member's 2nd is recorded, whatever it
+ * EVT-005, sent as soon as the visit that reaches the clinic's `minVisits` (2nd by default) is
+ * recorded, whatever it
  * earned (a 0 € visit queues no points credit). Without this the request waited for the next
  * daily dispatcher run. One request per member, ever: the key is the
  * member, and the eligibility check skips anyone already asked by either path.
@@ -52,7 +56,16 @@ export class ReviewRequestNotifier {
   ) {}
 
   async notifyIfDue(input: { memberId: string; clinicId: string }) {
-    const due = await membersDueForReview(this.prisma, input.clinicId, [input.memberId]);
+    const rows = await this.prisma.clinicAutomation.findMany({
+      where: { clinicId: input.clinicId, event: AutomationEvent.REVIEW_REQUEST }
+    });
+    const { timing } = resolveAutomations(rows).REVIEW_REQUEST;
+    const due = await membersDueForReview(
+      this.prisma,
+      input.clinicId,
+      [input.memberId],
+      timingValue(AutomationEvent.REVIEW_REQUEST, timing, "minVisits")
+    );
 
     if (due.length === 0) return null;
 
@@ -65,7 +78,7 @@ export class ReviewRequestNotifier {
   }
 }
 
-/** EVT-005: ask for a Google review after the 2nd visit, once per member (daily catch-up). */
+/** EVT-005: ask for a Google review from the clinic's `minVisits`, once per member (daily catch-up). */
 export class ReviewRequestTrigger implements ScheduledTrigger {
   readonly event = AutomationEvent.REVIEW_REQUEST;
 
@@ -79,7 +92,7 @@ export class ReviewRequestTrigger implements ScheduledTrigger {
     return `review:${clinicId}:${today.dateKey}`;
   }
 
-  async findRecipients({ clinicId, now }: TriggerContext): Promise<AutomationRecipient[]> {
+  async findRecipients({ clinicId, now, setting }: TriggerContext): Promise<AutomationRecipient[]> {
     const recent = await this.prisma.paidVisit.findMany({
       where: {
         clinicId,
@@ -95,7 +108,8 @@ export class ReviewRequestTrigger implements ScheduledTrigger {
       await membersDueForReview(
         this.prisma,
         clinicId,
-        recent.map((visit) => visit.memberId)
+        recent.map((visit) => visit.memberId),
+        timingValue(this.event, setting.timing, "minVisits")
       )
     ).map((memberId) => ({ memberId }));
   }

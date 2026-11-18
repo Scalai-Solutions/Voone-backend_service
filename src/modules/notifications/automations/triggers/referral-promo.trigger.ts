@@ -2,13 +2,14 @@ import { AutomationEvent, type PrismaClient } from "@prisma/client";
 
 import type { ZonedDate } from "../../../../common/utils/zoned-time";
 import type { AutomationRecipient } from "../dispatch.service";
+import { timingValue } from "../catalog";
 import { loadActiveProgram, nextReferralReward } from "../member-rewards";
 import { DAY_MS, type ScheduledTrigger, type TriggerContext } from "./types";
 
-/** "Active" for the referral nudge: a visit or points movement within this many days. */
-export const REFERRAL_ACTIVE_DAYS = 90;
-
-/** EVT-007: a monthly nudge, on the configured day of the month, to active members. */
+/**
+ * EVT-007: a monthly nudge, on the configured day of the month, to active members: a visit or
+ * points movement within the clinic's `activeDays` (90 by default).
+ */
 export class ReferralPromoTrigger implements ScheduledTrigger {
   readonly event = AutomationEvent.REFERRAL_PROMO;
 
@@ -26,13 +27,14 @@ export class ReferralPromoTrigger implements ScheduledTrigger {
     return `referral:${clinicId}:${today.dateKey.slice(0, 7)}`;
   }
 
-  async findRecipients({ clinicId, now }: TriggerContext): Promise<AutomationRecipient[]> {
+  async findRecipients({ clinicId, now, setting }: TriggerContext): Promise<AutomationRecipient[]> {
     // Referral rewards are issued by the live programme; without one there is nothing to promise.
     const program = await loadActiveProgram(this.prisma, clinicId);
 
     if (!program) return [];
 
-    const since = new Date(now.getTime() - REFERRAL_ACTIVE_DAYS * DAY_MS);
+    const activeDays = timingValue(this.event, setting.timing, "activeDays");
+    const since = new Date(now.getTime() - activeDays * DAY_MS);
     const members = await this.prisma.member.findMany({
       where: {
         clinicId,
