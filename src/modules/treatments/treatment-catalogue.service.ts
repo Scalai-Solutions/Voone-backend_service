@@ -250,7 +250,8 @@ export const listForEditor = async (
     // The form shows the prize choice only at a centre that marks prizes.
     usesPrize: catalogue && (await usesPrize(prisma, clinicId)),
     items: await readTreatments(prisma, clinicId, catalogue),
-    // Listed beside the treatments, never among them: products are not on the scan screen.
+    // Listed beside the treatments, never among them: products are not on the scan screen's
+    // treatment list (a programme centre's visit panel lists them from /catalog, as before).
     products: await listProducts(prisma, clinicId)
   };
 };
