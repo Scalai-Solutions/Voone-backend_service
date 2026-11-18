@@ -37,7 +37,7 @@ const buildApp = () => {
         list: async (clinicId) => {
           calls.push({ list: clinicId });
 
-          return { usesCatalogue: true, items: [row] };
+          return { usesCatalogue: true, items: [row], products: [] };
         },
         create: async (clinicId, input) => {
           calls.push({ create: [clinicId, input] });
@@ -87,7 +87,7 @@ describe("treatments routes", () => {
     const res = await send(app, "GET", "/clinics/aurea/treatments");
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ usesCatalogue: true, items: [row] });
+    expect(res.body).toEqual({ usesCatalogue: true, items: [row], products: [] });
     expect(calls).toEqual([{ list: "clinic-1" }]);
   });
 
@@ -160,7 +160,7 @@ describe("treatments routes", () => {
       createTreatmentsRouter({
         findClinic: async () => ({ id: "c" }),
         catalogue: {
-          list: async () => ({ usesCatalogue: false, items: [] }),
+          list: async () => ({ usesCatalogue: false, items: [], products: [] }),
           create: async () => {
             throw new TreatmentValidationError("Elige una categoría de la lista.");
           },

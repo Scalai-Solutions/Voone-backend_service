@@ -8,9 +8,14 @@ import {
 } from "../../common/errors/treatment.errors";
 import { createPlan, removePlan, updatePlan, type BonoPlanRow } from "../bonos/bono-plan.service";
 import {
+  createProduct,
   createTreatment,
+  isProductRow,
+  listProducts,
   listTreatments,
+  removeProduct,
   removeTreatment,
+  updateProduct,
   updateTreatment,
   usesCatalogue,
   type TreatmentRow
@@ -27,7 +32,7 @@ import type { ChangeRequestDetail } from "./service";
 export type AppliedAction = "created" | "updated" | "removed" | "deleted" | "retired";
 
 export interface AppliedChange {
-  kind: "treatment" | "bono";
+  kind: "treatment" | "product" | "bono";
   action: AppliedAction;
   /** One line, also used as the resolution note when the admin writes none. */
   summary: string;
@@ -152,6 +157,8 @@ export class PrismaCatalogueChanges implements CatalogueChanges {
     }
 
     if (str(fieldsOf(ticket.proposed).categoryId)) return false;
+    // A product's category is always the retail one.
+    if (fieldsOf(ticket.proposed).isProduct === true) return false;
 
     return usesCatalogue(this.db, ticket.clinicId);
   }
@@ -167,11 +174,18 @@ export class PrismaCatalogueChanges implements CatalogueChanges {
     try {
       switch (ticket.type) {
         case "SERVICE_ADD":
-          return await this.addTreatment(db, ticket.clinicId, proposed, options.categoryId);
+          return proposed.isProduct === true
+            ? await this.addProduct(db, ticket.clinicId, proposed)
+            : await this.addTreatment(db, ticket.clinicId, proposed, options.categoryId);
         case "SERVICE_EDIT":
-          return await this.editTreatment(db, ticket.clinicId, str(target.treatmentId), proposed);
+          // Products and treatments share the target key: the row itself says which it is.
+          return (await this.targetsProduct(db, ticket.clinicId, str(target.treatmentId)))
+            ? await this.editProduct(db, ticket.clinicId, str(target.treatmentId), proposed)
+            : await this.editTreatment(db, ticket.clinicId, str(target.treatmentId), proposed);
         case "SERVICE_REMOVE":
-          return await this.removeTreatment(db, ticket.clinicId, str(target.treatmentId));
+          return (await this.targetsProduct(db, ticket.clinicId, str(target.treatmentId)))
+            ? await this.removeProduct(db, ticket.clinicId, str(target.treatmentId))
+            : await this.removeTreatment(db, ticket.clinicId, str(target.treatmentId));
         case "BONO":
           return await this.changeBono(db, ticket.clinicId, str(target.bonoId), proposed);
         default:
@@ -299,6 +313,88 @@ export class PrismaCatalogueChanges implements CatalogueChanges {
       kind: "treatment",
       action: "removed",
       summary: `Removed treatment "${before.name}"`,
+      treatment: before
+    };
+  }
+
+  /* ---- retail products (catalogue rows with isProduct, edited through the same tickets) ---- */
+
+  private async targetsProduct(
+    db: PrismaClient,
+    clinicId: string,
+    id: string | undefined
+  ): Promise<boolean> {
+    return id ? isProductRow(db, clinicId, id) : false;
+  }
+
+  private async addProduct(
+    db: PrismaClient,
+    clinicId: string,
+    proposed: Fields
+  ): Promise<AppliedChange> {
+    const product = await createProduct(db, clinicId, {
+      name: proposed.name as string,
+      priceEuro: proposed.priceEuro as number
+    });
+
+    return {
+      kind: "product",
+      action: "created",
+      summary: `Added product "${product.name}" (${product.priceEuro} EUR)`,
+      treatment: product
+    };
+  }
+
+  private async existingProduct(
+    db: PrismaClient,
+    clinicId: string,
+    id: string | undefined
+  ): Promise<TreatmentRow> {
+    const before = id ? (await listProducts(db, clinicId)).find((row) => row.id === id) : undefined;
+
+    if (!before) throw new TreatmentNotFoundError();
+
+    return before;
+  }
+
+  private async editProduct(
+    db: PrismaClient,
+    clinicId: string,
+    id: string | undefined,
+    proposed: Fields
+  ): Promise<AppliedChange> {
+    const before = await this.existingProduct(db, clinicId, id);
+
+    // Said out loud rather than dropped: a ticket that only changed these would otherwise
+    // resolve as a change that did nothing.
+    if (proposed.categoryId !== undefined || proposed.prize !== undefined) {
+      throw new TreatmentValidationError("Un producto solo tiene nombre y precio.");
+    }
+
+    const patch = only(proposed, ["name", "priceEuro"]);
+    const product = await updateProduct(db, clinicId, before.id, patch);
+
+    return {
+      kind: "product",
+      action: "updated",
+      summary: `Updated product "${before.name}" (${describe(patch, { name: "name", priceEuro: "price" })})`,
+      treatment: product
+    };
+  }
+
+  private async removeProduct(
+    db: PrismaClient,
+    clinicId: string,
+    id: string | undefined
+  ): Promise<AppliedChange> {
+    const before = await this.existingProduct(db, clinicId, id);
+
+    await removeProduct(db, clinicId, before.id);
+
+    return {
+      kind: "product",
+      action: "removed",
+      summary: `Removed product "${before.name}"`,
       treatment: before
     };
   }

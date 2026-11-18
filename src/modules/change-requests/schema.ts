@@ -83,6 +83,7 @@ const bonoPrice = createBonoPlanSchema.shape.priceEuro;
 const bonoSessions = createBonoPlanSchema.shape.totalSessions;
 
 const NOTHING_TO_CHANGE = "Indica al menos un cambio concreto.";
+const PRODUCT_FIELDS_MESSAGE = "Un producto solo tiene nombre y precio.";
 
 const atLeastOneOf = (keys: string[]) => (value: Record<string, unknown>) =>
   keys.some((key) => value[key] !== undefined);
@@ -109,8 +110,14 @@ const serviceAddProposed = strict({
   name: treatmentName,
   priceEuro: treatmentPrice,
   categoryId: categoryId.optional(),
-  prize: z.boolean().optional()
-});
+  prize: z.boolean().optional(),
+  /** A retail product rather than a treatment: a name and a price, nothing else. */
+  isProduct: z.boolean().optional()
+}).refine(
+  (value) =>
+    value.isProduct !== true || (value.categoryId === undefined && value.prize === undefined),
+  PRODUCT_FIELDS_MESSAGE
+);
 const serviceRemoveProposed = strict({ treatmentId: id.optional() });
 
 const bonoTarget = strict({ bonoId: id });
