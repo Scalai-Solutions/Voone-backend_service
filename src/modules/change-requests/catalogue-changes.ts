@@ -103,6 +103,8 @@ const CATALOGUE_TYPES: ReadonlySet<string> = new Set([
   "SERVICE_REMOVE"
 ]);
 
+const PRODUCT_FIELDS_MESSAGE = "Un producto solo tiene nombre y precio.";
+
 const refused = (message: string) =>
   new ChangeRequestConflictError("CHANGE_REQUEST_APPLY_FAILED", message);
 
@@ -332,6 +334,11 @@ export class PrismaCatalogueChanges implements CatalogueChanges {
     clinicId: string,
     proposed: Fields
   ): Promise<AppliedChange> {
+    // The request schema refuses this; said again here so no path can drop the fields silently.
+    if (proposed.categoryId !== undefined || proposed.prize !== undefined) {
+      throw new TreatmentValidationError(PRODUCT_FIELDS_MESSAGE);
+    }
+
     const product = await createProduct(db, clinicId, {
       name: proposed.name as string,
       priceEuro: proposed.priceEuro as number
@@ -368,7 +375,7 @@ export class PrismaCatalogueChanges implements CatalogueChanges {
     // Said out loud rather than dropped: a ticket that only changed these would otherwise
     // resolve as a change that did nothing.
     if (proposed.categoryId !== undefined || proposed.prize !== undefined) {
-      throw new TreatmentValidationError("Un producto solo tiene nombre y precio.");
+      throw new TreatmentValidationError(PRODUCT_FIELDS_MESSAGE);
     }
 
     const patch = only(proposed, ["name", "priceEuro"]);

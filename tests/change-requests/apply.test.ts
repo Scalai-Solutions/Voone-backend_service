@@ -148,13 +148,18 @@ describe("apply: products", () => {
     expect(res.request.status).toBe("RESOLVED");
   });
 
-  it("refuses a product that also asks for a category or a prize", async () => {
-    await expect(
-      file(cat, {
-        type: "SERVICE_ADD",
-        proposed: { name: "Sérum", priceEuro: 24.5, isProduct: true, categoryId: "FAC" }
-      })
-    ).rejects.toThrow(/nombre y precio/);
+  it("will not add a product that also asks for a category, even if the ticket got that far", async () => {
+    // The route's schema refuses this body (see schema.test.ts); the service is called with it
+    // directly here, so only apply stands in the way.
+    const t = await file(cat, {
+      type: "SERVICE_ADD",
+      proposed: { name: "Sérum", priceEuro: 24.5, isProduct: true, categoryId: "FAC" }
+    });
+
+    await expect(service.adminApply(t.id, admin)).rejects.toBeInstanceOf(
+      ChangeRequestConflictError
+    );
+    expect(await db.catalogItem.count({ where: { clinicId: cat.id, name: "Sérum" } })).toBe(0);
   });
 
   it("SERVICE_EDIT and SERVICE_REMOVE on a product's id edit and remove the product", async () => {
