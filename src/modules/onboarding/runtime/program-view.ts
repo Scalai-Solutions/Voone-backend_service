@@ -1,4 +1,4 @@
-import { MIN_TENURE, TIERS, TIER_NAMES, tierBenefitOf } from "../engine.config";
+import { MIN_TENURE, P, TIERS, TIER_NAMES, tierBenefitOf } from "../engine.config";
 import type { PerkKind, Program, TierCode } from "../engine.types";
 import { rewardTitle } from "../reward-title";
 
@@ -182,6 +182,6 @@ export const programView = (output: Program): ProgramView => {
       items: r.o.items.map((i) => ({ id: i.id, name: i.name })),
       value: r.o.value
     })),
-    welcome: output.welcome
+    welcome: P.welcomeProgress
   };
 };

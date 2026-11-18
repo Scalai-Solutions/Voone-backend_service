@@ -94,6 +94,10 @@ describe("club view", () => {
     }
   });
 
+  it("says 15 for a programme stored under the old half-the-first-milestone rule", () => {
+    expect(clubView({ ...fresh(), welcome: 30 }).welcome).toBe(15);
+  });
+
   it("carries the referral rewards, the welcome progress and the recurring reward", () => {
     const program = fresh();
     const club = clubView(program);
@@ -102,7 +106,7 @@ describe("club view", () => {
     expect(club.referrals.map((r) => r.n)).toEqual(
       [...club.referrals.map((r) => r.n)].sort((a, b) => a - b)
     );
-    expect(club.welcome).toBe(program.welcome);
+    expect(club.welcome).toBe(15);
     expect(club.recurring.every).toBeGreaterThan(0);
     expect(club.recurring.name.length).toBeGreaterThan(0);
   });

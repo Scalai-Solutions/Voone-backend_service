@@ -1,5 +1,5 @@
 import { CALC, MEMBER_BUCKETS } from "./calculator.config";
-import { TIERS, tierBenefitOf } from "./engine.config";
+import { P, TIERS, tierBenefitOf } from "./engine.config";
 import type { Program, TierCode } from "./engine.types";
 
 /**
@@ -285,7 +285,7 @@ export const simulate5y = (
         key: "referrals",
         label: "Premios de recomendación y progreso de bienvenida",
         amount:
-          referred * (referralRewardCost * CALC.redemption + program.welcome * program.costPct)
+          referred * (referralRewardCost * CALC.redemption + P.welcomeProgress * program.costPct)
       },
       { key: "fee", label: "Cuota de Voone", amount: fee }
     ];

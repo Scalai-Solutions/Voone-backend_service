@@ -1103,7 +1103,7 @@ export const run = (items: CatalogItem[], ans: Answers): EngineResult => {
     OBJECTIVES[ans.objective].ref * (OCCUPANCY[ans.occupancy] ?? OCCUPANCY.o2).ref,
     newYear
   );
-  const welcome = Math.round((lad.ms[0].th * 0.5) / 5) * 5;
+  const welcome = P.welcomeProgress;
 
   const rx = used.rx;
   const adapt: string[] = [];

@@ -589,6 +589,10 @@ system does not do. Up to 6 per tier, 80 characters each.
   and flagged. This supersedes the "Question for Sergio" in G5.
 - **Referral (G 29): keep the engine's rule.** The referred person starts with a welcome amount
   already earned; no ×1.5. The copy already says this.
+  **Update 2026-11-18: the welcome amount is a flat 15 € for every clinic** (Sergio), `P.welcomeProgress`.
+  It was half the first milestone, rounded to 5, which gave each clinic a different number. It is read
+  wherever it is shown, credited or costed, so a programme stored under the old rule says and pays 15
+  too; members already credited keep what they got.
   **Update 2026-10-29: this is reversed.** The product owner decided that a referred client earns
   ×2 on their FIRST payment visit, on top of the welcome credit (not ×1.5, and not instead of the
   welcome). The rules, as implemented (`runtime/double-points.ts`, the one place that decides):

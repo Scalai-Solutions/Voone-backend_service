@@ -311,7 +311,7 @@ export interface Program {
   tierRules?: Partial<Record<TierCode, TierRule>>;
   perks: { kinds: string[]; pool: Candidate[]; dias: ClassifiedItem[] };
   refLad: ReferralStep[];
-  /** Progress granted to a referred client when they join. */
+  /** Progress granted to a referred client when they join: `P.welcomeProgress`, whatever was stored. */
   welcome: number;
   /** How the programme bent to fit the catalogue. Informational, not errors. */
   adapt: string[];

@@ -475,6 +475,13 @@ export const P = {
   /** A client should never go more than this many visits without something happening. */
   maxVisitsBetween: 1.5,
   discountMaxProducts: 3,
+  /**
+   * Progress, in euros, a referred client starts with. A flat 15 for every clinic (Sergio,
+   * 2026-11-18). It used to be half the first milestone, rounded to 5, which gave each clinic a
+   * different number. Read wherever the number is shown, credited or costed, so a programme stored
+   * under the old rule says and pays 15 too.
+   */
+  welcomeProgress: 15,
   refInv: 0.1,
   refRepeatEvery: 3,
   refSteps: [
