@@ -120,6 +120,87 @@ const file = async (clinic: Clinic, input: Record<string, unknown>) => {
 
 const row = (id: string) => db.changeRequest.findUniqueOrThrow({ where: { id } });
 
+describe("apply: products", () => {
+  const product = (clinicId: string, name: string, priceCents: number) =>
+    db.catalogItem.create({
+      data: {
+        clinicId,
+        externalId: `ext-${name}`,
+        name,
+        priceCents,
+        isProduct: true,
+        categoryId: "COS",
+        position: 9
+      }
+    });
+
+  it("SERVICE_ADD with isProduct adds a product, not a treatment", async () => {
+    const t = await file(cat, {
+      type: "SERVICE_ADD",
+      proposed: { name: "Sérum", priceEuro: 24.5, isProduct: true }
+    });
+    const res = await service.adminApply(t.id, admin);
+    const added = await db.catalogItem.findFirstOrThrow({
+      where: { clinicId: cat.id, name: "Sérum" }
+    });
+
+    expect(added).toMatchObject({ isProduct: true, categoryId: "COS", priceCents: 2450 });
+    expect(res.request.status).toBe("RESOLVED");
+  });
+
+  it("will not add a product that also asks for a category, even if the ticket got that far", async () => {
+    // The route's schema refuses this body (see schema.test.ts); the service is called with it
+    // directly here, so only apply stands in the way.
+    const t = await file(cat, {
+      type: "SERVICE_ADD",
+      proposed: { name: "Sérum", priceEuro: 24.5, isProduct: true, categoryId: "FAC" }
+    });
+
+    await expect(service.adminApply(t.id, admin)).rejects.toBeInstanceOf(
+      ChangeRequestConflictError
+    );
+    expect(await db.catalogItem.count({ where: { clinicId: cat.id, name: "Sérum" } })).toBe(0);
+  });
+
+  it("SERVICE_EDIT and SERVICE_REMOVE on a product's id edit and remove the product", async () => {
+    const crema = await product(cat.id, "Crema", 900);
+
+    await service.adminApply(
+      (
+        await file(cat, {
+          type: "SERVICE_EDIT",
+          targetRef: { treatmentId: crema.id },
+          proposed: { priceEuro: 12 }
+        })
+      ).id,
+      admin
+    );
+    expect(await db.catalogItem.findUniqueOrThrow({ where: { id: crema.id } })).toMatchObject({
+      priceCents: 1200,
+      isProduct: true
+    });
+
+    await service.adminApply(
+      (await file(cat, { type: "SERVICE_REMOVE", targetRef: { treatmentId: crema.id } })).id,
+      admin
+    );
+    expect(await db.catalogItem.findUnique({ where: { id: crema.id } })).toBeNull();
+  });
+
+  it("refuses a category change on a product instead of resolving a change that did nothing", async () => {
+    const crema = await product(cat.id, "Crema", 900);
+    const t = await file(cat, {
+      type: "SERVICE_EDIT",
+      targetRef: { treatmentId: crema.id },
+      proposed: { categoryId: "FAC" }
+    });
+
+    await expect(service.adminApply(t.id, admin)).rejects.toBeInstanceOf(
+      ChangeRequestConflictError
+    );
+  });
+});
+
 describe("apply: services", () => {
   it("SERVICE_EDIT updates the treatment, resolves the ticket and tells the notifier", async () => {
     const t = await file(cat, {

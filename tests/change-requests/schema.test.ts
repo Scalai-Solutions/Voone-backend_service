@@ -189,6 +189,21 @@ describe("createChangeRequestSchema: proposed per type", () => {
     ).toBe(false);
   });
 
+  it("SERVICE_ADD of a product: name and price only", () => {
+    const product = { name: "Sérum", priceEuro: 24.5, isProduct: true };
+
+    expect(parse({ type: "SERVICE_ADD", proposed: product }).success).toBe(true);
+    expect(
+      parse({ type: "SERVICE_ADD", proposed: { ...product, categoryId: "FAC" } }).success
+    ).toBe(false);
+    expect(parse({ type: "SERVICE_ADD", proposed: { ...product, prize: true } }).success).toBe(
+      false
+    );
+    expect(parse({ type: "SERVICE_ADD", proposed: { ...product, isProduct: "yes" } }).success).toBe(
+      false
+    );
+  });
+
   it("SERVICE_REMOVE: treatment target required, no proposed fields", () => {
     expect(parse({ type: "SERVICE_REMOVE", targetRef: { treatmentId: "t-1" } }).success).toBe(true);
     expect(

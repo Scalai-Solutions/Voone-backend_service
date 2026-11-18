@@ -434,7 +434,8 @@ export class AutomationReportService {
       member.walletObjects.some((walletObject) => walletObject.status === WalletSyncStatus.SYNCED)
     );
 
-    // The reminder rides the daily cron but only acts on the 1st of the month.
+    // The reminder runs daily, once a bono passes the clinic's inactivity threshold, so it has
+    // no single next date. This keeps the report's old "1st of next month" as a placeholder.
     const now = new Date();
     const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
 

@@ -97,6 +97,22 @@ Google allows 3 notification-triggering sends per object per rolling 24 hours. M
 
 `notifyOnCredit` is `NEVER`, `MILESTONE_AND_TIER`, or `ALWAYS`.
 
+`PATCH /api/v1/clinics/:clinicId/notification-settings` is the partial update current clients use. Per-automation switch, copy and timing live under `automations`; send only what changed:
+
+```json
+{ "automations": { "BONO_INACTIVE": { "enabled": true, "timing": { "inactiveDays": 14 } } } }
+```
+
+The thresholds each event accepts, with their ranges and defaults, come from the `timing` fields in `GET /api/v1/notification-automations/catalog`:
+
+| Event            | Key                                                | Default | Range |
+| ---------------- | -------------------------------------------------- | ------- | ----- |
+| `BONO_INACTIVE`  | `inactiveDays`: days without using the bono        | 30      | 7–365 |
+| `REVIEW_REQUEST` | `minVisits`: ask from this visit on                | 2       | 1–20  |
+| `REFERRAL_PROMO` | `activeDays`: activity window for "active" members | 90      | 7–365 |
+
+A key the event does not have, or a value out of range, is refused. GET always returns every key the event has (the stored value, or the default).
+
 ## Geo Locations
 
 `GET /api/v1/clinics/:clinicId/geo-locations`

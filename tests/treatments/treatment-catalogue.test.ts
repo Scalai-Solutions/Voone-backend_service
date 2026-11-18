@@ -6,11 +6,15 @@ import {
   TreatmentValidationError
 } from "../../src/common/errors/treatment.errors";
 import {
+  createProduct,
   createTreatment,
   PRIZE_MESSAGE,
   listForEditor,
+  listProducts,
   listTreatments,
+  removeProduct,
   removeTreatment,
+  updateProduct,
   scanScreenTreatments,
   treatmentCategories,
   updateTreatment,
@@ -532,13 +536,76 @@ describe("what the editor is told", () => {
     expect(await listForEditor(db, programme.id)).toEqual({
       usesCatalogue: true,
       usesPrize: false,
-      items: [expect.objectContaining({ id: seedItem.id, name: "Existente", categoryId: "FAC" })]
+      items: [expect.objectContaining({ id: seedItem.id, name: "Existente", categoryId: "FAC" })],
+      products: []
     });
     expect(await listForEditor(db, plain.id)).toEqual({
       usesCatalogue: false,
       usesPrize: false,
-      items: []
+      items: [],
+      products: []
     });
+  });
+
+  it("lists products beside the treatments, never among them", async () => {
+    await db.catalogItem.create({
+      data: {
+        clinicId: programme.id,
+        externalId: "crema",
+        name: "Crema",
+        priceCents: 900,
+        isProduct: true,
+        categoryId: "COS"
+      }
+    });
+
+    const view = await listForEditor(db, programme.id);
+
+    expect(view.items.map((row) => row.name)).toEqual(["Existente"]);
+    expect(view.products).toEqual([
+      expect.objectContaining({ name: "Crema", priceEuro: 9, categoryId: "COS" })
+    ]);
+  });
+});
+
+describe("the owner's products", () => {
+  it("creates a product in the retail category, which the scan screen does not show", async () => {
+    const product = await createProduct(db, programme.id, { name: " Sérum ", priceEuro: 24.5 });
+
+    expect(product).toMatchObject({ name: "Sérum", priceEuro: 24.5, categoryId: "COS" });
+    expect((await listProducts(db, programme.id)).map((row) => row.id)).toEqual([product.id]);
+    expect((await listTreatments(db, programme.id)).map((row) => row.id)).not.toContain(product.id);
+  });
+
+  it("renames and reprices a product, and removes it", async () => {
+    const product = await createProduct(db, programme.id, { name: "Sérum", priceEuro: 20 });
+
+    expect(
+      await updateProduct(db, programme.id, product.id, { name: "Sérum facial", priceEuro: 22 })
+    ).toMatchObject({ name: "Sérum facial", priceEuro: 22 });
+
+    await removeProduct(db, programme.id, product.id);
+    expect(await listProducts(db, programme.id)).toEqual([]);
+  });
+
+  it("never touches a treatment, or another clinic's product", async () => {
+    const theirs = await createProduct(db, other.id, { name: "Ajeno", priceEuro: 10 });
+
+    await expect(
+      updateProduct(db, programme.id, seedItem.id, { name: "No" })
+    ).rejects.toBeInstanceOf(TreatmentNotFoundError);
+    await expect(removeProduct(db, programme.id, theirs.id)).rejects.toBeInstanceOf(
+      TreatmentNotFoundError
+    );
+  });
+
+  it("refuses a product without a name or a valid price", async () => {
+    await expect(
+      createProduct(db, programme.id, { name: " ", priceEuro: 10 })
+    ).rejects.toBeInstanceOf(TreatmentValidationError);
+    await expect(
+      createProduct(db, programme.id, { name: "Crema", priceEuro: 0 })
+    ).rejects.toBeInstanceOf(TreatmentValidationError);
   });
 });
 

@@ -31,6 +31,7 @@ export const CATALOGUE_FULL_MESSAGE = "Has alcanzado el máximo de 300 tratamien
 export const LAST_TREATMENT_MESSAGE =
   "No puedes borrar el último tratamiento del catálogo. Añade otro primero.";
 export const WHOLE_EURO_MESSAGE = "En este centro el precio debe ser un número entero de euros.";
+export const PRODUCT_NAME_MESSAGE = "Escribe el nombre del producto.";
 
 const NAME_MAX = 120;
 /** The admin PUT and CSV import cap the catalogue here, so the editor honours the same limit. */
@@ -98,6 +99,26 @@ export const updateTreatmentSchema = z.object({
 
 export type CreateTreatmentInput = z.input<typeof createTreatmentSchema>;
 export type UpdateTreatmentInput = z.input<typeof updateTreatmentSchema>;
+
+/**
+ * A retail product: a name and a price. Its category is always the retail one and it is never a
+ * prize candidate by flag (the engine decides), so neither is asked for; any other field is
+ * dropped, as for treatments.
+ */
+const productName = z
+  .string({ error: PRODUCT_NAME_MESSAGE })
+  .trim()
+  .min(1, PRODUCT_NAME_MESSAGE)
+  .max(NAME_MAX, `El nombre no puede tener más de ${NAME_MAX} caracteres.`);
+
+export const createProductSchema = z.object({ name: productName, priceEuro: price });
+export const updateProductSchema = z.object({
+  name: productName.optional(),
+  priceEuro: price.optional()
+});
+
+export type CreateProductInput = z.input<typeof createProductSchema>;
+export type UpdateProductInput = z.input<typeof updateProductSchema>;
 
 /** The first problem, as the bare message: it is Spanish copy, not a field path. */
 const parseInput = <T>(schema: z.ZodType<T>, value: unknown): T => {
@@ -216,16 +237,49 @@ export const listTreatments = async (
 export const listForEditor = async (
   prisma: PrismaClient,
   clinicId: string
-): Promise<{ usesCatalogue: boolean; usesPrize: boolean; items: TreatmentRow[] }> => {
+): Promise<{
+  usesCatalogue: boolean;
+  usesPrize: boolean;
+  items: TreatmentRow[];
+  products: TreatmentRow[];
+}> => {
   const catalogue = await usesCatalogue(prisma, clinicId);
 
   return {
     usesCatalogue: catalogue,
     // The form shows the prize choice only at a centre that marks prizes.
     usesPrize: catalogue && (await usesPrize(prisma, clinicId)),
-    items: await readTreatments(prisma, clinicId, catalogue)
+    items: await readTreatments(prisma, clinicId, catalogue),
+    // Listed beside the treatments, never among them: products are not on the scan screen's
+    // treatment list (a programme centre's visit panel lists them from /catalog, as before).
+    products: await listProducts(prisma, clinicId)
   };
 };
+
+/**
+ * The centre's retail products: catalogue rows with `isProduct`. Not treatments: the scan
+ * screen, the spending figures and `usesCatalogue` ignore them, but the programme offers them as
+ * rewards, so the owner keeps their names and prices right here.
+ */
+export const listProducts = async (
+  prisma: PrismaClient,
+  clinicId: string
+): Promise<TreatmentRow[]> =>
+  (
+    await prisma.catalogItem.findMany({
+      where: { clinicId, isProduct: true },
+      orderBy: [{ position: "asc" }, { externalId: "asc" }],
+      select: { id: true, name: true, priceCents: true, categoryId: true, prizeEligible: true }
+    })
+  ).map(catalogRow);
+
+/** Whether `id` is one of this clinic's products (so a ticket on it edits a product). */
+export const isProductRow = async (
+  prisma: PrismaClient,
+  clinicId: string,
+  id: string
+): Promise<boolean> =>
+  (await prisma.catalogItem.count({ where: { id, clinicId, isProduct: true } })) > 0;
 
 /** The scan screen's rows: whole euros and the field names the dashboard already uses. */
 export const scanScreenTreatments = async (
@@ -431,9 +485,84 @@ export const removeTreatment = async (
   }
 };
 
+export const createProduct = async (
+  prisma: PrismaClient,
+  clinicId: string,
+  input: CreateProductInput
+): Promise<TreatmentRow> => {
+  const data = parseInput(createProductSchema, input);
+  const rows = await prisma.catalogItem.count({ where: { clinicId } });
+
+  if (rows >= CATALOGUE_MAX) throw new TreatmentValidationError(CATALOGUE_FULL_MESSAGE);
+
+  const last = await prisma.catalogItem.aggregate({
+    where: { clinicId },
+    _max: { position: true }
+  });
+  const item = await prisma.catalogItem.create({
+    data: {
+      clinicId,
+      externalId: `${OWNER_EXTERNAL_ID_PREFIX}${randomUUID()}`,
+      name: data.name,
+      priceCents: toCents(data.priceEuro),
+      isProduct: true,
+      categoryId: RETAIL_CATEGORY,
+      costPctOverride: null,
+      estimated: false,
+      needsReview: false,
+      classificationSource: "centro",
+      prizeEligible: null,
+      position: (last._max.position ?? -1) + 1
+    }
+  });
+
+  return catalogRow(item);
+};
+
+/** Scoped to the clinic's products in the write itself, as treatments are (see scopedOrNotFound). */
+export const updateProduct = async (
+  prisma: PrismaClient,
+  clinicId: string,
+  id: string,
+  patch: UpdateProductInput
+): Promise<TreatmentRow> => {
+  const data = parseInput(updateProductSchema, patch);
+
+  return catalogRow(
+    await scopedOrNotFound(() =>
+      prisma.catalogItem.update({
+        where: { id, clinicId, isProduct: true },
+        data: {
+          ...(data.name !== undefined && { name: data.name }),
+          // A price the owner typed is no longer Voone's estimate.
+          ...(data.priceEuro !== undefined && {
+            priceCents: toCents(data.priceEuro),
+            estimated: false
+          })
+        }
+      })
+    )
+  );
+};
+
+/** Hard delete, like a treatment: nothing refers to a catalogue row by id. */
+export const removeProduct = async (
+  prisma: PrismaClient,
+  clinicId: string,
+  id: string
+): Promise<void> => {
+  await scopedOrNotFound(() =>
+    prisma.catalogItem.delete({ where: { id, clinicId, isProduct: true } })
+  );
+};
+
 /** The service as the routes consume it, bound to a database. */
 export interface TreatmentCatalogue {
-  list: (clinicId: string) => Promise<{ usesCatalogue: boolean; items: TreatmentRow[] }>;
+  list: (clinicId: string) => Promise<{
+    usesCatalogue: boolean;
+    items: TreatmentRow[];
+    products: TreatmentRow[];
+  }>;
   create: (clinicId: string, input: CreateTreatmentInput) => Promise<TreatmentRow>;
   update: (clinicId: string, id: string, patch: UpdateTreatmentInput) => Promise<TreatmentRow>;
   remove: (clinicId: string, id: string) => Promise<void>;

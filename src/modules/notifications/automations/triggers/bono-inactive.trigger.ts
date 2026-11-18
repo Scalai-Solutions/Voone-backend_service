@@ -5,13 +5,13 @@ import {
   type PrismaClient
 } from "@prisma/client";
 
+import { timingValue } from "../catalog";
 import type { AutomationRecipient } from "../dispatch.service";
 import { DAY_MS, type ScheduledTrigger, type TriggerContext } from "./types";
 
-export const BONO_INACTIVE_DAYS = 30;
-
 /**
- * EVT-003: a member whose active bono has gone 30 days without a session. Once per inactivity
+ * EVT-003: a member whose active bono has gone the clinic's `inactiveDays` (30 by default)
+ * without a session. Once per inactivity
  * streak: a reminder sent after the bono's last activity suppresses further ones until the
  * member uses a session again.
  */
@@ -28,8 +28,9 @@ export class BonoInactiveTrigger implements ScheduledTrigger {
     return `bono-inactive:${clinicId}:${today.dateKey}`;
   }
 
-  async findRecipients({ clinicId, now }: TriggerContext): Promise<AutomationRecipient[]> {
-    const cutoff = new Date(now.getTime() - BONO_INACTIVE_DAYS * DAY_MS);
+  async findRecipients({ clinicId, now, setting }: TriggerContext): Promise<AutomationRecipient[]> {
+    const inactiveDays = timingValue(this.event, setting.timing, "inactiveDays");
+    const cutoff = new Date(now.getTime() - inactiveDays * DAY_MS);
     const bonos = await this.prisma.memberBono.findMany({
       where: { clinicId, status: MemberBonoStatus.ACTIVE, startedAt: { lte: cutoff } },
       select: { id: true, memberId: true, startedAt: true }

@@ -85,6 +85,32 @@ describe("NotificationDispatcher", () => {
     expect(birthday.findRecipients).not.toHaveBeenCalled();
   });
 
+  it("hands each trigger the clinic's own timing for its event", async () => {
+    const bono = trigger(AutomationEvent.BONO_INACTIVE);
+    const { dispatcher } = build({
+      automations: [
+        {
+          event: "BONO_INACTIVE",
+          enabled: true,
+          header: "h",
+          body: "b",
+          notify: true,
+          timing: { inactiveDays: 14 }
+        }
+      ],
+      triggers: [bono]
+    });
+
+    await dispatcher.runOnce();
+
+    expect(bono.findRecipients).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clinicId: "c1",
+        setting: expect.objectContaining({ timing: { inactiveDays: 14 } })
+      })
+    );
+  });
+
   it("keeps going when one event fails", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const broken = trigger(AutomationEvent.BIRTHDAY, {

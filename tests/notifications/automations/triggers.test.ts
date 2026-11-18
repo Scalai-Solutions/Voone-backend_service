@@ -4,6 +4,8 @@ import { run } from "../../../src/modules/onboarding/engine";
 import type { Answers, CatalogItem, Program } from "../../../src/modules/onboarding/engine.types";
 import { isEngineError } from "../../../src/modules/onboarding/engine.types";
 import { itemsTitle } from "../../../src/modules/onboarding/reward-title";
+import { resolveAutomations } from "../../../src/modules/notifications/automations/automation-settings.service";
+import type { AutomationTiming } from "../../../src/modules/notifications/automations/catalog";
 import { BirthdayTrigger } from "../../../src/modules/notifications/automations/triggers/birthday.trigger";
 import { BonoInactiveTrigger } from "../../../src/modules/notifications/automations/triggers/bono-inactive.trigger";
 import { ReferralPromoTrigger } from "../../../src/modules/notifications/automations/triggers/referral-promo.trigger";
@@ -22,7 +24,14 @@ const today = (day: number) => ({
   month: 11,
   day
 });
-const ctx = { clinicId: "c1", today: today(1), now };
+const DEFAULTS = resolveAutomations([]);
+/** The trigger context with the event's catalog defaults, or the given timing over them. */
+const ctxFor = (event: keyof typeof DEFAULTS, timing: AutomationTiming = {}) => ({
+  clinicId: "c1",
+  today: today(1),
+  now,
+  setting: { ...DEFAULTS[event], timing: { ...DEFAULTS[event].timing, ...timing } }
+});
 
 const ANSWERS: Answers = {
   ticket: null,
@@ -53,7 +62,9 @@ describe("BirthdayTrigger", () => {
       onboardingProgram: program
     };
 
-    const recipients = await new BirthdayTrigger(prisma as never).findRecipients(ctx);
+    const recipients = await new BirthdayTrigger(prisma as never).findRecipients(
+      ctxFor("BIRTHDAY")
+    );
 
     expect(recipients.map((r) => r.memberId)).toEqual(["today"]);
   });
@@ -70,7 +81,9 @@ describe("BirthdayTrigger", () => {
       onboardingProgram: live
     };
 
-    const recipients = await new BirthdayTrigger(prisma as never).findRecipients(ctx);
+    const recipients = await new BirthdayTrigger(prisma as never).findRecipients(
+      ctxFor("BIRTHDAY")
+    );
     const gift = (tier: "oro" | "bronce") => itemsTitle(program.gifts[tier].birthday!.items);
 
     expect(recipients).toEqual([
@@ -82,6 +95,7 @@ describe("BirthdayTrigger", () => {
 });
 
 describe("BonoInactiveTrigger", () => {
+  const ctx = ctxFor("BONO_INACTIVE");
   const build = (opts: {
     bonos: Array<{ id: string; memberId: string; startedAt: Date }>;
     lastVisit?: Record<string, Date>;
@@ -117,6 +131,22 @@ describe("BonoInactiveTrigger", () => {
     expect((await trigger.findRecipients(ctx)).map((r) => r.memberId)).toEqual(["m30"]);
   });
 
+  it("uses the clinic's own inactivity threshold", async () => {
+    const trigger = build({
+      bonos: [
+        { id: "b14", memberId: "m14", startedAt: daysAgo(100) },
+        { id: "b13", memberId: "m13", startedAt: daysAgo(100) }
+      ],
+      lastVisit: { b14: daysAgo(14), b13: daysAgo(13) }
+    });
+
+    expect(
+      (await trigger.findRecipients(ctxFor("BONO_INACTIVE", { inactiveDays: 14 }))).map(
+        (r) => r.memberId
+      )
+    ).toEqual(["m14"]);
+  });
+
   it("counts a never-used bono from the day it started", async () => {
     const trigger = build({ bonos: [{ id: "b", memberId: "m", startedAt: daysAgo(31) }] });
 
@@ -145,15 +175,21 @@ describe("BonoInactiveTrigger", () => {
   });
 });
 
+/** paidVisit.groupBy as Postgres would answer it: only members at the HAVING threshold. */
+const visitCounts =
+  (counts: Record<string, number>) =>
+  async ({ having }: { having: { memberId: { _count: { gte: number } } } }) =>
+    Object.entries(counts)
+      .filter(([, count]) => count >= having.memberId._count.gte)
+      .map(([memberId, count]) => ({ memberId, _count: { _all: count } }));
+
 describe("ReviewRequestTrigger", () => {
+  const ctx = ctxFor("REVIEW_REQUEST");
   const build = (opts: { recent: string[]; counts: Record<string, number>; asked?: string[] }) =>
     new ReviewRequestTrigger({
       paidVisit: {
         findMany: async () => opts.recent.map((memberId) => ({ memberId })),
-        groupBy: async () =>
-          Object.entries(opts.counts)
-            .filter(([, count]) => count >= 2)
-            .map(([memberId, count]) => ({ memberId, _count: { _all: count } }))
+        groupBy: visitCounts(opts.counts)
       },
       notificationDelivery: {
         findMany: async () => (opts.asked ?? []).map((memberId) => ({ memberId }))
@@ -170,19 +206,31 @@ describe("ReviewRequestTrigger", () => {
     expect((await trigger.findRecipients(ctx)).map((r) => r.memberId)).toEqual(["second"]);
   });
 
+  it("uses the clinic's own visit number", async () => {
+    const trigger = build({ recent: ["second", "third"], counts: { second: 2, third: 3 } });
+
+    expect(
+      (await trigger.findRecipients(ctxFor("REVIEW_REQUEST", { minVisits: 3 }))).map(
+        (r) => r.memberId
+      )
+    ).toEqual(["third"]);
+  });
+
   it("does nothing when nobody visited this week", async () => {
     expect(await build({ recent: [], counts: {} }).findRecipients(ctx)).toEqual([]);
   });
 });
 
 describe("ReviewRequestNotifier (sent when the 2nd visit is credited)", () => {
-  const build = (visits: number, asked = false) => {
+  const build = (visits: number, asked = false, timing: AutomationTiming | null = null) => {
     const sent: unknown[] = [];
     const notifier = new ReviewRequestNotifier(
       {
-        paidVisit: {
-          groupBy: async () => (visits >= 2 ? [{ memberId: "m1", _count: { _all: visits } }] : [])
+        clinicAutomation: {
+          findMany: async () =>
+            timing ? [{ ...DEFAULTS.REVIEW_REQUEST, event: "REVIEW_REQUEST", timing }] : []
         },
+        paidVisit: { groupBy: visitCounts({ m1: visits }) },
         notificationDelivery: { findMany: async () => (asked ? [{ memberId: "m1" }] : []) }
       } as never,
       {
@@ -211,6 +259,18 @@ describe("ReviewRequestNotifier (sent when the 2nd visit is credited)", () => {
     ]);
   });
 
+  it("follows the clinic's own visit number", async () => {
+    const afterFirst = build(1, false, { minVisits: 1 });
+    const notYet = build(2, false, { minVisits: 3 });
+
+    expect(
+      await afterFirst.notifier.notifyIfDue({ memberId: "m1", clinicId: "c1" })
+    ).not.toBeNull();
+    expect(await notYet.notifier.notifyIfDue({ memberId: "m1", clinicId: "c1" })).toBeNull();
+    expect(afterFirst.sent).toHaveLength(1);
+    expect(notYet.sent).toEqual([]);
+  });
+
   it("sends nothing after the 1st visit, or to a member already asked", async () => {
     const first = build(1);
     const asked = build(3, true);
@@ -222,6 +282,7 @@ describe("ReviewRequestNotifier (sent when the 2nd visit is credited)", () => {
 });
 
 describe("ReferralPromoTrigger", () => {
+  const ctx = ctxFor("REFERRAL_PROMO");
   it("is due only on the configured day of the month", () => {
     const first = new ReferralPromoTrigger({} as never, 1);
     const fifteenth = new ReferralPromoTrigger({} as never, 15);
@@ -263,6 +324,27 @@ describe("ReferralPromoTrigger", () => {
     };
 
     expect(where.OR[0].paidVisits.some.occurredAt.gte.getTime()).toBe(daysAgo(90).getTime());
+  });
+
+  it("uses the clinic's own activity window", async () => {
+    const wheres: Array<Record<string, unknown>> = [];
+    const { prisma: live } = livePrograms();
+    const prisma = {
+      member: {
+        findMany: async ({ where }: { where: Record<string, unknown> }) => (wheres.push(where), [])
+      },
+      onboardingProgram: live,
+      referral: { groupBy: async () => [] }
+    };
+
+    await new ReferralPromoTrigger(prisma as never, 1).findRecipients(
+      ctxFor("REFERRAL_PROMO", { activeDays: 30 })
+    );
+    const where = wheres[0] as {
+      OR: Array<{ paidVisits: { some: { occurredAt: { gte: Date } } } }>;
+    };
+
+    expect(where.OR[0].paidVisits.some.occurredAt.gte.getTime()).toBe(daysAgo(30).getTime());
   });
 
   it("names the reward of each member's own next referral", async () => {

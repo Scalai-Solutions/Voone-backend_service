@@ -1,6 +1,7 @@
 import type { AutomationEvent } from "@prisma/client";
 
 import type { ZonedDate } from "../../../../common/utils/zoned-time";
+import type { AutomationSetting } from "../automation-settings.service";
 import type { AutomationRecipient } from "../dispatch.service";
 
 export interface TriggerContext {
@@ -8,6 +9,8 @@ export interface TriggerContext {
   /** Today in the dispatcher's time zone. */
   today: ZonedDate;
   now: Date;
+  /** The clinic's resolved setting for this trigger's event; triggers read `timing` from it. */
+  setting: AutomationSetting;
 }
 
 /**
