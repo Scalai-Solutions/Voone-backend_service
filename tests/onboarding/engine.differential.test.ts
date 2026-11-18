@@ -119,6 +119,11 @@ const PORT_TENURE_NOTE = "Se sube de nivel solo por puntos, sin antigüedad mín
 const asPort = (text: string): string =>
   text.startsWith(REFERENCE_TENURE_NOTE) ? PORT_TENURE_NOTE : text;
 
+/**
+ * The third deliberate deviation: the referred client's welcome progress is a flat
+ * `P.welcomeProgress` (15 EUR, Sergio 2026-11-18) where the reference takes half the first milestone,
+ * rounded to 5. It is left out of the comparison and pinned on its own below.
+ */
 const shape = (r: ComparableResult) => ({
   segment: r.est.segment,
   ticket: r.est.ticket,
@@ -156,7 +161,6 @@ const shape = (r: ComparableResult) => ({
     ids: x.o.items.map((i) => i.id),
     value: x.o.value
   })),
-  welcome: r.welcome,
   costPct: +r.costPct.toFixed(10),
   totalCost: +r.totalCost.toFixed(8),
   perkCost: +r.perkCost.toFixed(8),
@@ -337,6 +341,19 @@ describe("the one place the port deliberately differs from the reference", () =>
     expect(holds(theirs, REPEAT), "the reference no longer has this defect").toBe(false);
     expect(holds(mine, REPEAT)).toBe(true);
     expect(holds(mine, BRONCE_FIRST)).toBe(true);
+  });
+});
+
+describe("the welcome progress of a referred client", () => {
+  it.each(OBJECTIVES)("is a flat 15 whatever the first milestone costs (%s)", (objective) => {
+    for (const investment of INVESTMENTS) {
+      const mine = run(
+        items,
+        answersFor(objective, investment, OCCUPANCIES[0])
+      ) as unknown as ComparableResult;
+
+      expect(mine.welcome, `${objective}/${investment}`).toBe(15);
+    }
   });
 });
 

@@ -1,6 +1,6 @@
 import { benefitLinesFor, visibleBenefits, type PresentedBenefitLine } from "./benefit-lines";
 import { blockingReview, informationalNotes } from "./engine";
-import { MIN_TENURE, TIERS, TIER_NAMES, tierBenefitOf } from "./engine.config";
+import { MIN_TENURE, P, TIERS, TIER_NAMES, tierBenefitOf } from "./engine.config";
 import type { ChosenReward, Program, TierCode } from "./engine.types";
 import { birthdayTitle, itemsTitle, rewardTitle } from "./reward-title";
 import { bandRange } from "./ladder-edit";
@@ -288,7 +288,7 @@ export const presentProgram = (
       minRevenue: r.n * program.est.ticket
     })),
 
-    welcomeProgress: program.welcome,
+    welcomeProgress: P.welcomeProgress,
 
     familyAndFriends: {
       title: "Family & Friends",
