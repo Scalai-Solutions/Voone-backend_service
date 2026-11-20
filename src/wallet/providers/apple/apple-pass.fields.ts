@@ -72,17 +72,6 @@ export const buildStoreCardFields = (data: LoyaltyCard): StoreCardFields => {
     });
   }
 
-  if (data.credit) {
-    secondaryFields.push({
-      key: "credit",
-      label: PASS_LABELS.credit,
-      // Apple renders currency from a unit amount, not cents.
-      value: data.credit.cents / 100,
-      currencyCode: data.credit.currency,
-      textAlignment: "PKTextAlignmentRight"
-    });
-  }
-
   // What the programme has saved the member, on the front beside the name and number. Absent until
   // the first saving, so a new member's card has no cell that reads zero. No changeMessage: a total
   // that only ever grows is not worth a lock-screen alert on its own.
@@ -92,6 +81,17 @@ export const buildStoreCardFields = (data: LoyaltyCard): StoreCardFields => {
       label: PASS_LABELS.savings,
       value: data.savings.cents / 100,
       currencyCode: data.savings.currency,
+      textAlignment: "PKTextAlignmentRight"
+    });
+  }
+
+  if (data.credit) {
+    secondaryFields.push({
+      key: "credit",
+      label: PASS_LABELS.credit,
+      // Apple renders currency from a unit amount, not cents.
+      value: data.credit.cents / 100,
+      currencyCode: data.credit.currency,
       textAlignment: "PKTextAlignmentRight"
     });
   }

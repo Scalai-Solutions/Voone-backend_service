@@ -57,11 +57,26 @@ describe("the savings on the card", () => {
     expect(fingerprintOf(saved(12000))).not.toBe(fingerprintOf(saved(12100)));
   });
 
-  it("has a cell on the front of the Google card beside the rewards count", () => {
+  it("has a cell on the front of the Google card, above the rewards row", () => {
     const rows = buildClassTemplateInfo()?.cardTemplateOverride?.cardRowTemplateInfos ?? [];
-    const paths = JSON.stringify(rows);
+    const rowWith = (path: string): number =>
+      rows.findIndex((row) => JSON.stringify(row).includes(path));
 
-    expect(paths).toContain("object.textModulesData['rewards_count']");
-    expect(paths).toContain("object.textModulesData['savings']");
+    expect(rowWith("object.textModulesData['savings']")).toBeGreaterThan(
+      rowWith("object.accountName")
+    );
+    expect(rowWith("object.textModulesData['savings']")).toBeLessThan(
+      rowWith("object.textModulesData['next_reward']")
+    );
+    expect(rowWith("object.textModulesData['rewards_count']")).toBeGreaterThan(-1);
+  });
+
+  it("puts the savings before the credit on the Apple pass, after the name and number", () => {
+    const keys = buildStoreCardFields({
+      ...saved(12345),
+      credit: { cents: 24000, currency: "EUR" }
+    }).secondaryFields.map((f) => f.key);
+
+    expect(keys).toEqual(["member", "memberNo", "savings", "credit"]);
   });
 });

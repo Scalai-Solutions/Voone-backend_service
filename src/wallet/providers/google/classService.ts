@@ -452,25 +452,27 @@ export const buildClassTemplateInfo = (
           endItem: toTemplateItem("object.textModulesData['points']")
         }
       },
-      // The member number is not a cell here: it is the label under the QR, as on Apple. Beside the
-      // tier, the next reward and the distance to it; Google shows the first non-empty field, so a
-      // member with none (no programme, or nothing left to earn) sees "Ver beneficios" instead.
+      // The member number is not a cell here: it is the label under the QR, as on Apple. Under the
+      // name come the tier and what the programme has saved the member, then the reward. The
+      // savings are absent from the object of a member who has saved nothing, where its cell simply
+      // stays empty.
       {
         twoItems: {
           startItem: toTemplateItem("object.textModulesData['tier']"),
-          endItem: toTemplateItem(
-            "object.textModulesData['next_reward']",
-            "class.textModulesData['benefit_cta']"
-          )
+          endItem: toTemplateItem("object.textModulesData['savings']")
         }
       },
-      // How many rewards are waiting: the stamp-card count, on the front of the card, and beside it
-      // what the programme has saved the member. Each is absent from objects that do not carry it (a
-      // clinic with no programme, a member who has saved nothing), where its cell simply stays empty.
+      // Last: the next reward and the distance to it (Google shows the first non-empty field, so a
+      // member with none, no programme or nothing left to earn, sees "Ver beneficios" instead),
+      // and how many rewards are waiting, the stamp-card count. Absent from objects that do not
+      // carry it (a clinic with no programme), where its cell stays empty.
       {
         twoItems: {
-          startItem: toTemplateItem("object.textModulesData['rewards_count']"),
-          endItem: toTemplateItem("object.textModulesData['savings']")
+          startItem: toTemplateItem(
+            "object.textModulesData['next_reward']",
+            "class.textModulesData['benefit_cta']"
+          ),
+          endItem: toTemplateItem("object.textModulesData['rewards_count']")
         }
       }
     ]
