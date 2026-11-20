@@ -118,6 +118,14 @@ describe("member directory at a programme centre", () => {
           createdAt: new Date("2026-10-19")
         },
         {
+          id: "l2",
+          points: -60,
+          kind: "ADJUSTMENT",
+          reason: "Visita anulada",
+          sourceRef: "visit-9",
+          createdAt: new Date("2026-10-19")
+        },
+        {
           id: "l0",
           points: 50,
           kind: "EARN",
@@ -129,7 +137,13 @@ describe("member directory at a programme centre", () => {
     }).get("m-1");
 
     expect(member.history.find((item) => item.id === "l1")).toMatchObject({ visitId: "visit-9" });
+    expect(member.history.find((item) => item.id === "l1")).not.toHaveProperty("voided");
     expect(member.history.find((item) => item.id === "l0")).not.toHaveProperty("visitId");
+    // The correction names the same visit and says it is voided, so the screen stops offering it.
+    expect(member.history.find((item) => item.id === "l2")).toMatchObject({
+      visitId: "visit-9",
+      voided: true
+    });
   });
 
   it("records a redeemed reward in the history, newest first, but not a spent double-points perk", async () => {

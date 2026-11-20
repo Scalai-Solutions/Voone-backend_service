@@ -12,6 +12,7 @@ import { listTreatments } from "../treatments/treatment-catalogue.service";
 import type { CardRef } from "../../wallet/engine/wallet-pass-provider.interface";
 import { tierLabelFor } from "./member-tier";
 import { isDoublePointsPerk } from "../onboarding/runtime/rules";
+import { VOID_REASON } from "../onboarding/runtime/visit-reason";
 import { activeProgramView } from "../onboarding/runtime/program-tier.port";
 import {
   appleUpdatesRegisteredFor,
@@ -70,6 +71,8 @@ export interface MemberSummary {
     date: string;
     /** The visit this row records, for a row the dashboard may offer to void. */
     visitId?: string;
+    /** True on the row that took a voided visit's progress back: that visit is no longer valid. */
+    voided?: boolean;
   }>;
   /**
    * Their recommendations, on the detail view of a member of a clinic with a live programme.
@@ -560,7 +563,11 @@ export class MemberDirectoryService {
           points: row.points,
           at: row.createdAt,
           // A visit's credit points back at the visit, which reception may void.
-          ...(row.kind === "EARN" && row.sourceRef ? { visitId: row.sourceRef } : {})
+          ...(row.kind === "EARN" && row.sourceRef ? { visitId: row.sourceRef } : {}),
+          // The correction written when a visit is voided points at the same visit.
+          ...(row.kind === "ADJUSTMENT" && row.sourceRef && row.reason === VOID_REASON
+            ? { visitId: row.sourceRef, voided: true }
+            : {})
         })),
         ...(member.paidVisits ?? []).map((visit) => ({
           id: visit.id,

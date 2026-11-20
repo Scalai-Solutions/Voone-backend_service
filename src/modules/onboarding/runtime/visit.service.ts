@@ -25,7 +25,7 @@ import { OnboardingError } from "../onboarding.service";
 import { activeProgramView } from "./program-tier.port";
 import type { ProgramView } from "./program-view";
 import { discountSaving, recordSaving } from "./savings";
-import { BONO_REASON_PREFIX, PAYMENT_REASON_PREFIX } from "./visit-reason";
+import { BONO_REASON_PREFIX, PAYMENT_REASON_PREFIX, VOID_REASON } from "./visit-reason";
 import {
   bonoSessionCents,
   discountAllowance,
@@ -408,7 +408,7 @@ export class VisitService {
             memberId: visit.memberId,
             clinicId: visit.clinicId,
             points: visit.progressAwarded as number,
-            reason: "Visita anulada",
+            reason: VOID_REASON,
             sourceRef: visit.id,
             idempotencyKey: `void:${visit.id}`,
             createdBy: input.voidedBy
@@ -538,7 +538,7 @@ export class VisitService {
             kind: MemberSavingKind.ADJUSTMENT,
             cents: -saving.cents,
             sourceKey: `void:visit:${visit.id}`,
-            reason: "Visita anulada",
+            reason: VOID_REASON,
             createdBy: input.voidedBy
           });
         }
