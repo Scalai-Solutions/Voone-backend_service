@@ -268,22 +268,27 @@ describe("the Spanish, neutral words on a Google card", () => {
     );
   });
 
-  it("shows the next reward beside the tier, and Ver beneficios when there is none", async () => {
+  it("shows the next reward on the row below the savings, and Ver beneficios when there is none", async () => {
     const body = (await classWithLinks()) as unknown as {
       classTemplateInfo: {
         cardTemplateOverride: {
           cardRowTemplateInfos: Array<{
-            twoItems?: { endItem: { firstValue: { fields: Array<{ fieldPath: string }> } } };
+            twoItems?: {
+              startItem: { firstValue: { fields: Array<{ fieldPath: string }> } };
+              endItem: { firstValue: { fields: Array<{ fieldPath: string }> } };
+            };
           }>;
         };
       };
     };
-    const tierRow = body.classTemplateInfo.cardTemplateOverride.cardRowTemplateInfos[1];
+    const rewardRow = body.classTemplateInfo.cardTemplateOverride.cardRowTemplateInfos[2];
 
     // Google shows the first of these that is not empty on the pass.
-    expect(tierRow.twoItems?.endItem.firstValue.fields.map((field) => field.fieldPath)).toEqual([
-      "object.textModulesData['next_reward']",
-      "class.textModulesData['benefit_cta']"
+    expect(rewardRow.twoItems?.startItem.firstValue.fields.map((field) => field.fieldPath)).toEqual(
+      ["object.textModulesData['next_reward']", "class.textModulesData['benefit_cta']"]
+    );
+    expect(rewardRow.twoItems?.endItem.firstValue.fields.map((field) => field.fieldPath)).toEqual([
+      "object.textModulesData['rewards_count']"
     ]);
   });
 
