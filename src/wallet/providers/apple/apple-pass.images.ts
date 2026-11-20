@@ -106,7 +106,9 @@ export const renderSizes = async (
       height,
       {
         fit,
-        position: name === "strip" ? "attention" : "centre",
+        // The middle for both. A strip used to follow whatever stood out in the photo, which moved
+        // the clinic's subject off-centre; Apple's own crop is centred, and so is the preview.
+        position: "centre",
         background: { r: 0, g: 0, b: 0, alpha: 0 }
       }
     );
