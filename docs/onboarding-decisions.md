@@ -636,7 +636,7 @@ marked (`PaidVisit.voidedAt`, `voidedBy`, `voidReason`); `POST /clinics/:slug/vi
   reopens), and the rewards its progress issued are closed (`expiresAt = now`) with their key
   renamed `voided:<visitId>:<key>` so earning the same step again issues it again.
 - **Refused (409, in Spanish) when undoing it would be wrong, not merely untidy:** more than 24 h
-  since it was *recorded* (`createdAt`, not the date entered, which can be back-dated); not the
+  since it was _recorded_ (`createdAt`, not the date entered, which can be back-dated); not the
   client's latest visit (the next one's thresholds were worked out from this one); a reward it
   issued was redeemed, or it redeemed something; it made a referral count for the referrer; the
   points it gave were already spent. These are defaults, each a single check in `markVoided`.
