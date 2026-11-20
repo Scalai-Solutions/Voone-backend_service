@@ -40,7 +40,7 @@ export class ReferralPromoTrigger implements ScheduledTrigger {
         clinicId,
         erasedAt: null,
         OR: [
-          { paidVisits: { some: { occurredAt: { gte: since } } } },
+          { paidVisits: { some: { occurredAt: { gte: since }, voidedAt: null } } },
           { pointsLedger: { some: { createdAt: { gte: since } } } }
         ]
       },

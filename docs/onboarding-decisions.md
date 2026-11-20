@@ -624,3 +624,25 @@ system does not do. Up to 6 per tier, 80 characters each.
   treatment, so 60 € treatment + 40 € product = 100 € = 1000 points (a test pins it). Only
   pharmacological medicine and medical acts earn nothing, a legal constraint in Spain, so "money
   spent" excludes just those. G1's open question is closed and no new column is needed.
+
+## Part H: voiding a visit recorded by mistake (20 November 2026)
+
+Any staff member can take back a wrongly recorded visit within 24 hours. The row is kept and
+marked (`PaidVisit.voidedAt`, `voidedBy`, `voidReason`); `POST /clinics/:slug/visits/:visitId/void`.
+
+- **Taken back with new rows, nothing edited:** a negative `ADJUSTMENT` in the ledger
+  (`void:<visitId>`, which also lowers the tier like any correction), a negative `MemberSaving`
+  `ADJUSTMENT` for the discount, the bono session handed back (its number is freed, the bono
+  reopens), and the rewards its progress issued are closed (`expiresAt = now`) with their key
+  renamed `voided:<visitId>:<key>` so earning the same step again issues it again.
+- **Refused (409, in Spanish) when undoing it would be wrong, not merely untidy:** more than 24 h
+  since it was _recorded_ (`createdAt`, not the date entered, which can be back-dated); not the
+  client's latest visit (the next one's thresholds were worked out from this one); a reward it
+  issued was redeemed, or it redeemed something; it made a referral count for the referrer; the
+  points it gave were already spent. These are defaults, each a single check in `markVoided`.
+- **Every read of a client's visits skips a voided one:** revenue, top clients, the discount
+  allowance, the referral's first-treatment test, the history on the card and in the dashboard, and
+  the review-request, bono-inactive and referral-promo automations. The dashboard's "points
+  credited this month" subtracts the month's `void:` rows, because the original `EARN` row stays.
+- A retry with the voided visit's own idempotency key is refused (409): reception records the
+  corrected visit under a new key.

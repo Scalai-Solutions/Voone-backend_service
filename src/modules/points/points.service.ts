@@ -156,7 +156,15 @@ export class PointsService {
    * never does. Collapsing them would silently make every refund a demotion, or every
    * redemption fail to undo a mistake.
    */
-  async clawBack(request: Omit<CreditRequest, "kind">): Promise<PointsOutcome> {
+  async clawBack(
+    request: Omit<CreditRequest, "kind"> & {
+      /**
+       * Take the points back without telling the member. For a correction the member did not
+       * ask for and has no reason to be buzzed about: a visit reception recorded by mistake.
+       */
+      silent?: boolean;
+    }
+  ): Promise<PointsOutcome> {
     assertPositive(request.points);
 
     const { applied } = await this.ledger.append({
@@ -172,7 +180,7 @@ export class PointsService {
 
     // A correction is the one thing allowed to take a tier away: the guide says tiers are
     // not lost, but a wrong credit must be undoable for tier as well as for balance.
-    return this.settle(request.memberId, request.clinicId, applied, true);
+    return this.settle(request.memberId, request.clinicId, applied, true, !request.silent);
   }
 
   async redeem(request: RedeemRequest): Promise<PointsOutcome> {
@@ -214,7 +222,8 @@ export class PointsService {
     memberId: string,
     clinicId: string,
     applied: boolean,
-    allowDemotion = false
+    allowDemotion = false,
+    notifyMember = true
   ): Promise<PointsOutcome> {
     const [balance, scale] = await Promise.all([
       this.ledger.balanceFor(memberId),
@@ -243,7 +252,7 @@ export class PointsService {
     // reception, and a wallet outage must not look like a failed transaction.
     await this.wallets.enqueueMemberSync(memberId);
 
-    if (applied && this.notifications) {
+    if (applied && notifyMember && this.notifications) {
       this.notifications
         .onPointsCredited(memberId, balance.spendable, {
           milestoneReached: previous

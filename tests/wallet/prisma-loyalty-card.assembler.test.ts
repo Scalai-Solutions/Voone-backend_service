@@ -533,6 +533,21 @@ describe("PrismaLoyaltyCardAssembler: redeemable rewards", () => {
     );
   });
 
+  it("leaves a voided visit out of the history's visits that earned nothing", async () => {
+    const findUnique = vi.fn(async () => programmeMember([]));
+    const prisma = { member: { findUnique }, ...NO_REFERRAL } as unknown as PrismaClient;
+
+    await new PrismaLoyaltyCardAssembler(prisma, SECRET, () => NOW).assemble(member.id);
+
+    expect(findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          paidVisits: expect.objectContaining({ where: { progressAwarded: 0, voidedAt: null } })
+        })
+      })
+    );
+  });
+
   it("breaks an expiry tie by issue time and then id, so two builds are byte-equal", async () => {
     const same = "2026-12-01T10:00:00Z";
     const rows = [
@@ -871,7 +886,7 @@ describe("PrismaLoyaltyCardAssembler: the pending boost (x2)", () => {
     expect(JSON.stringify(query)).not.toMatch(/referredBy/);
     // The only visits read are the history's zero-point ones, never a first-visit check.
     expect(query.include.paidVisits).toEqual(
-      expect.objectContaining({ where: { progressAwarded: 0 } })
+      expect.objectContaining({ where: { progressAwarded: 0, voidedAt: null } })
     );
 
     await build(programmeMember({ referredBy: { id: "r1" } }));

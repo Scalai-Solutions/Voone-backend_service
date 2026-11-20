@@ -106,6 +106,46 @@ describe("member directory at a programme centre", () => {
     expect(member.history[1].points).toBe(600);
   });
 
+  it("names the visit behind a visit's credit, so the dashboard can offer to void it", async () => {
+    const member = await serviceFor(true, [], [], row.tier, {
+      pointsLedger: [
+        {
+          id: "l1",
+          points: 60,
+          kind: "EARN",
+          reason: "Visita de pago",
+          sourceRef: "visit-9",
+          createdAt: new Date("2026-10-19")
+        },
+        {
+          id: "l2",
+          points: -60,
+          kind: "ADJUSTMENT",
+          reason: "Visita anulada",
+          sourceRef: "visit-9",
+          createdAt: new Date("2026-10-19")
+        },
+        {
+          id: "l0",
+          points: 50,
+          kind: "EARN",
+          reason: null,
+          sourceRef: null,
+          createdAt: new Date("2026-10-18")
+        }
+      ]
+    }).get("m-1");
+
+    expect(member.history.find((item) => item.id === "l1")).toMatchObject({ visitId: "visit-9" });
+    expect(member.history.find((item) => item.id === "l1")).not.toHaveProperty("voided");
+    expect(member.history.find((item) => item.id === "l0")).not.toHaveProperty("visitId");
+    // The correction names the same visit and says it is voided, so the screen stops offering it.
+    expect(member.history.find((item) => item.id === "l2")).toMatchObject({
+      visitId: "visit-9",
+      voided: true
+    });
+  });
+
   it("records a redeemed reward in the history, newest first, but not a spent double-points perk", async () => {
     const member = await serviceFor(true).get("m-1");
 
@@ -136,7 +176,8 @@ describe("member directory at a programme centre", () => {
         /^Visita de pago: Hiperhidrosis · 650,00\s€ \(no suma puntos\)$/
       ),
       points: 0,
-      date: "2026-10-22"
+      date: "2026-10-22",
+      visitId: "v-med"
     });
   });
 

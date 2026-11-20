@@ -321,7 +321,7 @@ describe("PrismaLoyaltyCardAssembler: the history", () => {
       expect.objectContaining({
         include: expect.objectContaining({
           paidVisits: {
-            where: { progressAwarded: 0 },
+            where: { progressAwarded: 0, voidedAt: null },
             orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
             take: 5,
             select: { reason: true, occurredAt: true }

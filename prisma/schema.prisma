@@ -1008,6 +1008,13 @@ model PaidVisit {
   /// visit because one that earns nothing (medicine) has no ledger row to carry it.
   reason String?
 
+  /// Set when reception voided the visit as wrongly recorded. The row is never deleted: it stays as
+  /// the record of what was entered and who took it back. Every read of "what the client did" skips
+  /// a voided visit; the points, savings and bono session it gave are taken back with new rows.
+  voidedAt   DateTime?
+  voidedBy   String?
+  voidReason String?
+
   redemptions MemberReward[] @relation("RedeemedAt")
 
   @@unique([clinicId, idempotencyKey])

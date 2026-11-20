@@ -69,7 +69,9 @@ export class ReferralService {
 
     // A referral is for someone NEW. Attaching one to a member who has already paid would let
     // a regular client be "recommended" retroactively by a friend.
-    const paid = await this.prisma.paidVisit.count({ where: { memberId: referred.id } });
+    const paid = await this.prisma.paidVisit.count({
+      where: { memberId: referred.id, voidedAt: null }
+    });
 
     if (paid > 0) return { registered: false, reason: "too_late" };
 

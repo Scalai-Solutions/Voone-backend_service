@@ -893,13 +893,18 @@ export class OnboardingService {
     const daysOfData = Math.floor((Date.now() - live.publishedAt.getTime()) / 86_400_000);
 
     const payments = await this.prisma.paidVisit.aggregate({
-      where: { clinicId, kind: VisitKind.PAYMENT, occurredAt: { gte: live.publishedAt } },
+      where: {
+        clinicId,
+        kind: VisitKind.PAYMENT,
+        voidedAt: null,
+        occurredAt: { gte: live.publishedAt }
+      },
       _avg: { amountCents: true },
       _count: { _all: true }
     });
     const members = await this.prisma.paidVisit.groupBy({
       by: ["memberId"],
-      where: { clinicId, occurredAt: { gte: live.publishedAt } }
+      where: { clinicId, voidedAt: null, occurredAt: { gte: live.publishedAt } }
     });
 
     const used = { ticket: output.est.ticket, visitsPerYear: output.est.visits };

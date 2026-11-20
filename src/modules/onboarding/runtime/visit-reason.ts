@@ -8,6 +8,8 @@
  */
 export const PAYMENT_REASON_PREFIX = "Visita de pago: ";
 export const BONO_REASON_PREFIX = "Sesión de bono: ";
+/** The reason on the ledger row that takes a voided visit's progress back (a staff note, never a name). */
+export const VOID_REASON = "Visita anulada";
 
 /** What reception recorded for a visit credit, or undefined when it recorded no name. */
 export const treatmentNameOf = (reason: string | null | undefined): string | undefined => {
