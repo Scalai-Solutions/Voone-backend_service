@@ -63,7 +63,14 @@ export interface MemberSummary {
    * Additive: walletStatus.apple is unchanged.
    */
   appleUpdatesRegistered: boolean | null;
-  history: Array<{ id: string; label: string; points: number; date: string }>;
+  history: Array<{
+    id: string;
+    label: string;
+    points: number;
+    date: string;
+    /** The visit this row records, for a row the dashboard may offer to void. */
+    visitId?: string;
+  }>;
   /**
    * Their recommendations, on the detail view of a member of a clinic with a live programme.
    * Absent everywhere else: a clinic with no programme has no referral rewards to count.
@@ -409,11 +416,18 @@ export class MemberDirectoryService {
       pointsLedger: {
         orderBy: { createdAt: "desc" as const },
         take: historyTake,
-        select: { id: true, points: true, kind: true, reason: true, createdAt: true }
+        select: {
+          id: true,
+          points: true,
+          kind: true,
+          reason: true,
+          sourceRef: true,
+          createdAt: true
+        }
       },
       // A visit that earned nothing (medicine) has no ledger row, so the history reads it here.
       paidVisits: {
-        where: { progressAwarded: 0 },
+        where: { progressAwarded: 0, voidedAt: null },
         orderBy: { occurredAt: "desc" as const },
         take: historyTake,
         select: { id: true, reason: true, paidCents: true, occurredAt: true }
@@ -481,6 +495,8 @@ export class MemberDirectoryService {
         points: number;
         kind: string;
         reason: string | null;
+        /** For a visit's credit, the visit's id. */
+        sourceRef?: string | null;
         createdAt: Date;
       }>;
       rewards: Array<{
@@ -542,13 +558,16 @@ export class MemberDirectoryService {
           // never a treatment name.
           label: row.reason ?? row.kind,
           points: row.points,
-          at: row.createdAt
+          at: row.createdAt,
+          // A visit's credit points back at the visit, which reception may void.
+          ...(row.kind === "EARN" && row.sourceRef ? { visitId: row.sourceRef } : {})
         })),
         ...(member.paidVisits ?? []).map((visit) => ({
           id: visit.id,
           label: zeroPointVisitLabel(visit.reason, visit.paidCents),
           points: 0,
-          at: visit.occurredAt
+          at: visit.occurredAt,
+          visitId: visit.id
         })),
         // A double-points perk is spent by the next visit, not handed over, so it is not a
         // redemption (the dashboard and the card make the same distinction).
@@ -643,7 +662,7 @@ export class MemberDirectoryService {
 
     const rows = await this.prisma.paidVisit.groupBy({
       by: ["memberId"],
-      where: { clinicId, memberId: { in: memberIds } },
+      where: { clinicId, memberId: { in: memberIds }, voidedAt: null },
       _sum: { paidCents: true },
       _max: { occurredAt: true }
     });

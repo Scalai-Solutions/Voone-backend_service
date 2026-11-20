@@ -319,7 +319,7 @@ export class PrismaLoyaltyCardAssembler implements LoyaltyCardAssembler {
         // Visits that earned no points have no ledger row; read here so the history still lists
         // them. Uses the (memberId, occurredAt) index.
         paidVisits: {
-          where: { progressAwarded: 0 },
+          where: { progressAwarded: 0, voidedAt: null },
           orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
           take: CARD_HISTORY_MAX,
           select: { reason: true, occurredAt: true }

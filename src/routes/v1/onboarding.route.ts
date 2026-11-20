@@ -34,7 +34,8 @@ import {
   benefitOverridesSchema,
   tierRulesSchema,
   tierBenefitsSchema,
-  visitSchema
+  visitSchema,
+  voidVisitSchema
 } from "../../modules/onboarding/onboarding.schema";
 import {
   OnboardingError,
@@ -729,6 +730,29 @@ export const createOnboardingRouter = (deps: OnboardingRouterDeps): Router => {
       // 200 for a retry as well as a first call, as the points routes do: a caller that
       // retries is not doing anything wrong and should not see an error.
       res.status(200).json(outcome);
+    })
+  );
+
+  /**
+   * Takes back a visit recorded by mistake (see VisitService.voidVisit for what is undone and when
+   * it is refused). 200 for a retry as well as a first call, like recording one.
+   */
+  router.post(
+    "/clinics/:slug/visits/:visitId/void",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const clinic = await deps.findClinic(req.params.slug);
+      const body = parse(voidVisitSchema, req.body ?? {});
+      const actor = req.header("x-actor")?.trim().slice(0, 254);
+
+      res.status(200).json(
+        await requireVisits().voidVisit({
+          clinicId: clinic.id,
+          visitId: req.params.visitId,
+          ...(body.reason ? { reason: body.reason } : {}),
+          ...(actor ? { voidedBy: actor } : {})
+        })
+      );
     })
   );
 

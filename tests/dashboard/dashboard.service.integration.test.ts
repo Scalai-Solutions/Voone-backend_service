@@ -204,6 +204,34 @@ describe("clinicOverview: money", () => {
     expect(overview.revenueAllTimeCents).toBe(24000);
   });
 
+  it("leaves a voided visit out of the revenue, the top clients and the points credited", async () => {
+    const ana = await makeMember(programme.id, "Ana");
+    const bea = await makeMember(programme.id, "Bea");
+
+    await visit(programme.id, ana.id, 10000, "2026-10-05T10:00:00Z");
+    const mistake = await visit(programme.id, bea.id, 40000, "2026-10-06T10:00:00Z");
+
+    // What the void does to the books: the visit is marked, its progress taken back by a row.
+    await db.paidVisit.update({ where: { id: mistake.id }, data: { voidedAt: new Date() } });
+    await ledger(programme.id, bea.id, 400, PointsTransactionKind.EARN, "2026-10-06T10:00:01Z");
+    await ledger(
+      programme.id,
+      bea.id,
+      -400,
+      PointsTransactionKind.ADJUSTMENT,
+      "2026-10-06T10:05:00Z",
+      `void:${mistake.id}`
+    );
+
+    const overview = await serviceAt("2026-10-15T10:00:00Z").clinicOverview(programme.id);
+
+    expect(overview.revenueThisMonthCents).toBe(10000);
+    expect(overview.revenueAllTimeCents).toBe(10000);
+    expect(overview.moneySpentTotalCents).toBe(10000);
+    expect(overview.topClientsThisMonth.map((client) => client.name)).toEqual(["Ana"]);
+    expect(overview.pointsIssuedThisMonth).toBe(0);
+  });
+
   it("applies the winter offset to a January month", async () => {
     const ana = await makeMember(programme.id, "Ana");
 

@@ -152,6 +152,7 @@ export class DashboardService {
       walletAdds,
       recent,
       credited,
+      voidedCredits,
       redeemedProgramme,
       ledgerRedeemed,
       topSpenders,
@@ -161,13 +162,13 @@ export class DashboardService {
 
       () =>
         this.prisma.paidVisit.aggregate({
-          where: { clinicId },
+          where: { clinicId, voidedAt: null },
           _sum: { amountCents: true, paidCents: true }
         }),
 
       () =>
         this.prisma.paidVisit.aggregate({
-          where: { clinicId, occurredAt: inMonth },
+          where: { clinicId, occurredAt: inMonth, voidedAt: null },
           _sum: { paidCents: true }
         }),
 
@@ -205,6 +206,20 @@ export class DashboardService {
           _sum: { points: true }
         }),
 
+      // What voiding visits this month took back. The visit's own EARN row stays in the ledger (it is
+      // append-only), so the voided points are subtracted from the figure above rather than counted.
+      () =>
+        this.prisma.pointsTransaction.aggregate({
+          where: {
+            clinicId,
+            kind: PointsTransactionKind.ADJUSTMENT,
+            points: { lt: 0 },
+            createdAt: inMonth,
+            idempotencyKey: { startsWith: "void:" }
+          },
+          _sum: { points: true }
+        }),
+
       // A double-points perk gets a redeemedAt too, when the next visit uses it up. That is the
       // visit spending it, not a reward handed over at the desk, so it is not counted (the card
       // makes the same distinction: it is "not a gift"). Filtered here, with the same predicate
@@ -224,7 +239,7 @@ export class DashboardService {
       () =>
         this.prisma.paidVisit.groupBy({
           by: ["memberId"],
-          where: { clinicId, occurredAt: inMonth, member: { erasedAt: null } },
+          where: { clinicId, occurredAt: inMonth, voidedAt: null, member: { erasedAt: null } },
           // paidCents, not amountCents: a client who only bought medicine earns nothing but still paid.
           _sum: { paidCents: true },
           having: { paidCents: { _sum: { gt: 0 } } },
@@ -247,7 +262,10 @@ export class DashboardService {
     const programmeRedeemed = redeemedProgramme.filter(
       (row) => !isDoublePointsPerk(row.kind, row.detail)
     ).length;
-    const creditedProgress = credited._sum.points ?? 0;
+    const creditedProgress = Math.max(
+      0,
+      (credited._sum.points ?? 0) + (voidedCredits._sum.points ?? 0)
+    );
     const allTimeCents = revenueAllTime._sum.amountCents ?? 0;
 
     return {

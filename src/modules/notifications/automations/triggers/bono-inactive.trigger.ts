@@ -41,7 +41,7 @@ export class BonoInactiveTrigger implements ScheduledTrigger {
     // Last session per bono in one query; a bono never used counts from the day it started.
     const lastVisits = await this.prisma.paidVisit.groupBy({
       by: ["memberBonoId"],
-      where: { memberBonoId: { in: bonos.map((bono) => bono.id) } },
+      where: { memberBonoId: { in: bonos.map((bono) => bono.id) }, voidedAt: null },
       _max: { occurredAt: true }
     });
     const lastVisitByBono = new Map(

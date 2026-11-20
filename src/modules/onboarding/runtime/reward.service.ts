@@ -174,7 +174,7 @@ export class RewardService {
 
     const visit = input.visitId
       ? await this.prisma.paidVisit.findFirst({
-          where: { id: input.visitId, clinicId: input.clinicId }
+          where: { id: input.visitId, clinicId: input.clinicId, voidedAt: null }
         })
       : null;
 

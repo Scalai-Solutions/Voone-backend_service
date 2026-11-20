@@ -178,6 +178,29 @@ export const paymentReason = (lines: VisitLine[] | undefined): string => {
     : "Visita de pago";
 };
 
+/** How long after recording a visit it can still be voided. Counted from when it was recorded. */
+export const VOID_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+export interface VoidVisitInput {
+  clinicId: string;
+  visitId: string;
+  /** Why it is being voided, kept on the row. */
+  reason?: string;
+  /** The staff user taking it back. */
+  voidedBy?: string;
+}
+
+export interface VoidVisitOutcome {
+  visitId: string;
+  /** True when this call found the visit already voided. Not an error: same result. */
+  duplicate: boolean;
+  /** The member's spendable balance now, in points, as the card shows it. */
+  pointsTotal: number;
+}
+
+/** The sourceKey shape of a reward issued by crossing a ladder step or a recurring interval. */
+const VISIT_REWARD_KEY = /^v\d+:(m|rec):\d+$/;
+
 export class VisitService {
   constructor(
     private readonly prisma: PrismaClient,
@@ -220,6 +243,16 @@ export class VisitService {
       : await this.open(input, active.view);
 
     const visit = opened.visit;
+
+    // A voided visit stays in the table for its key. Answering a retry with it would hand back a
+    // success for a visit that no longer counts, so reception is told to record a new one.
+    if (visit.voidedAt) {
+      throw new OnboardingError(
+        "Esa visita se anuló. Registra una visita nueva para que cuente.",
+        409
+      );
+    }
+
     // A first call answers from the decision it just took in open(), which is also what was
     // credited. Only a replay reads it back from the rows (see doubleOfVisit).
     const doubleReason: DoubleReason | null =
@@ -304,6 +337,7 @@ export class VisitService {
     const used = await this.prisma.paidVisit.aggregate({
       where: {
         memberId: input.memberId,
+        voidedAt: null,
         occurredAt: { gte: discountWindowStart(now), lt: discountWindowEnd(now) }
       },
       _sum: { discountedProducts: true }
@@ -333,6 +367,214 @@ export class VisitService {
       bono,
       bonusPoints: toPoints(visit.bonusProgress ?? 0)
     };
+  }
+
+  /**
+   * Takes back a visit recorded by mistake.
+   *
+   * The row is kept and marked; what it gave is taken back with new rows rather than by editing or
+   * deleting anything: a negative ledger row for its progress, a negative saving for its discount,
+   * the bono session handed back, and the rewards its progress issued closed. It is refused when
+   * undoing it would be wrong rather than merely untidy: too late, not the client's latest visit
+   * (the next one's thresholds were worked out from this one), something redeemed against it or
+   * issued by it already used, a referral it made count, or points already spent.
+   *
+   * Retry-safe like `record`: the marking and the books commit together, then the ledger row is
+   * written under its own key, so a crash between the two is finished by repeating the call.
+   */
+  async voidVisit(input: VoidVisitInput): Promise<VoidVisitOutcome> {
+    const found = await this.prisma.paidVisit.findFirst({
+      where: { id: input.visitId, clinicId: input.clinicId }
+    });
+
+    if (!found) throw new OnboardingError("No existe esa visita en este centro.", 404);
+
+    const now = this.now();
+    let duplicate = true;
+
+    if (!found.voidedAt) {
+      duplicate = !(await this.markVoided(found.id, found.memberId, input, now));
+    }
+
+    // Second half, idempotent on its own key: a retry after a crash simply finishes it.
+    const visit = await this.prisma.paidVisit.findUniqueOrThrow({ where: { id: found.id } });
+
+    if ((visit.progressAwarded ?? 0) > 0) {
+      await this.prisma.$transaction(
+        async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`visit-credit:${visit.memberId}`}))`;
+
+          return this.points.clawBack({
+            memberId: visit.memberId,
+            clinicId: visit.clinicId,
+            points: visit.progressAwarded as number,
+            reason: "Visita anulada",
+            sourceRef: visit.id,
+            idempotencyKey: `void:${visit.id}`,
+            createdBy: input.voidedBy
+          });
+        },
+        { timeout: 15_000, maxWait: 15_000 }
+      );
+    }
+
+    await this.requestCardSync(visit.memberId);
+
+    const balance = await this.prisma.member.findUnique({
+      where: { id: visit.memberId },
+      select: { pointsBalance: true }
+    });
+
+    return {
+      visitId: visit.id,
+      duplicate,
+      pointsTotal: toPoints(balance?.pointsBalance ?? 0)
+    };
+  }
+
+  /**
+   * The checks and the books of a void, in one commit behind the member's lock. False when the
+   * visit turned out to be voided already by a call that raced past the first look.
+   */
+  private async markVoided(
+    visitId: string,
+    memberId: string,
+    input: VoidVisitInput,
+    now: Date
+  ): Promise<boolean> {
+    // The balance is read before the lock: the ledger port reads outside a transaction, and what
+    // matters is only that it has not been spent below what this visit gave.
+    const spendable = (await this.points.balanceFor(memberId)).spendable;
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "Member" WHERE id = ${memberId} FOR UPDATE`;
+
+        const visit = await tx.paidVisit.findUniqueOrThrow({ where: { id: visitId } });
+
+        if (visit.voidedAt) return false;
+
+        if (now.getTime() - visit.createdAt.getTime() > VOID_WINDOW_MS) {
+          throw new OnboardingError(
+            "Solo se puede anular una visita durante las 24 horas siguientes a registrarla.",
+            409
+          );
+        }
+
+        const later = await tx.paidVisit.findFirst({
+          where: {
+            memberId,
+            voidedAt: null,
+            id: { not: visit.id },
+            OR: [
+              { createdAt: { gt: visit.createdAt } },
+              { createdAt: visit.createdAt, id: { gt: visit.id } }
+            ]
+          },
+          select: { id: true }
+        });
+
+        if (later) {
+          throw new OnboardingError(
+            "Solo se puede anular la última visita del cliente. Anula primero las posteriores.",
+            409
+          );
+        }
+
+        const redeemed = await tx.memberReward.count({ where: { redeemedVisitId: visit.id } });
+
+        if (redeemed > 0) {
+          throw new OnboardingError(
+            "En esta visita se canjeó una recompensa o ventaja, así que no se puede anular.",
+            409
+          );
+        }
+
+        // What this visit's progress issued: the rewards written at the visit's own moment under a
+        // ladder or recurring key. Read from the rows, not recomputed, so a programme replaced since
+        // cannot change which ones they are.
+        const issued = (
+          await tx.memberReward.findMany({
+            where: { memberId, issuedAt: visit.occurredAt, sourceKey: { startsWith: "v" } }
+          })
+        ).filter((reward) => VISIT_REWARD_KEY.test(reward.sourceKey));
+
+        if (issued.some((reward) => reward.redeemedAt !== null)) {
+          throw new OnboardingError(
+            "Esta visita dio una recompensa que ya se canjeó, así que no se puede anular.",
+            409
+          );
+        }
+
+        if (visit.kind === VisitKind.PAYMENT && visit.hasTreatment) {
+          const referral = await tx.referral.findUnique({ where: { referredId: memberId } });
+
+          if (referral?.countedAt && referral.countedAt.getTime() === visit.occurredAt.getTime()) {
+            throw new OnboardingError(
+              "Esta visita hizo que la recomendación de otra persona contara, así que no se puede anular.",
+              409
+            );
+          }
+        }
+
+        const given = visit.progressAwarded ?? 0;
+
+        if (given > 0 && spendable - given < 0) {
+          throw new OnboardingError(
+            "El cliente ya ha gastado los puntos de esta visita, así que no se puede anular.",
+            409
+          );
+        }
+
+        // The saving the discount gave, taken back with its own row.
+        const saving = await tx.memberSaving.findUnique({
+          where: { memberId_sourceKey: { memberId, sourceKey: `visit:${visit.id}` } }
+        });
+
+        if (saving && saving.cents > 0) {
+          await recordSaving(tx, {
+            clinicId: visit.clinicId,
+            memberId,
+            kind: MemberSavingKind.ADJUSTMENT,
+            cents: -saving.cents,
+            sourceKey: `void:visit:${visit.id}`,
+            reason: "Visita anulada",
+            createdBy: input.voidedBy
+          });
+        }
+
+        // The session goes back to the bono, and the number is freed: it is unique per bono, so the
+        // next session recorded would otherwise collide with this voided one.
+        if (visit.memberBonoId && visit.bonoSessionNumber !== null) {
+          await tx.memberBono.update({
+            where: { id: visit.memberBonoId },
+            data: { sessionsUsed: visit.bonoSessionNumber - 1, status: MemberBonoStatus.ACTIVE }
+          });
+        }
+
+        // Closed, not deleted, and their keys freed: a reward the member earns again by crossing the
+        // same step later must be issued again, which the old key would swallow.
+        for (const reward of issued) {
+          await tx.memberReward.update({
+            where: { id: reward.id },
+            data: { sourceKey: `voided:${visit.id}:${reward.sourceKey}`, expiresAt: now }
+          });
+        }
+
+        await tx.paidVisit.update({
+          where: { id: visit.id },
+          data: {
+            voidedAt: now,
+            voidedBy: input.voidedBy ?? null,
+            voidReason: input.reason ?? null,
+            bonoSessionNumber: null
+          }
+        });
+
+        return true;
+      },
+      { timeout: 30_000, maxWait: 15_000 }
+    );
   }
 
   /** Never throws: a wallet outage must not fail a visit that is already recorded. */
@@ -444,6 +686,7 @@ export class VisitService {
           const used = await tx.paidVisit.aggregate({
             where: {
               memberId: input.memberId,
+              voidedAt: null,
               occurredAt: {
                 gte: discountWindowStart(occurredAt),
                 lt: discountWindowEnd(occurredAt)
@@ -471,7 +714,7 @@ export class VisitService {
         // visit's number is exactly what the ledger is about to say.
         const ledger = await this.points.balanceFor(input.memberId);
         const last = await tx.paidVisit.findFirst({
-          where: { memberId: input.memberId, lifetimeAfter: { not: null } },
+          where: { memberId: input.memberId, lifetimeAfter: { not: null }, voidedAt: null },
           orderBy: { createdAt: "desc" },
           select: { lifetimeAfter: true }
         });
@@ -821,7 +1064,12 @@ export class VisitService {
     if (!referral) return;
 
     const first = await this.prisma.paidVisit.findFirst({
-      where: { memberId: visit.memberId, kind: VisitKind.PAYMENT, hasTreatment: true },
+      where: {
+        memberId: visit.memberId,
+        kind: VisitKind.PAYMENT,
+        hasTreatment: true,
+        voidedAt: null
+      },
       orderBy: [{ occurredAt: "asc" }, { createdAt: "asc" }, { id: "asc" }],
       select: { id: true }
     });

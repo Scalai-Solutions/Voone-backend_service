@@ -24,7 +24,7 @@ export const membersDueForReview = async (
   const [totals, alreadyAsked] = await Promise.all([
     prisma.paidVisit.groupBy({
       by: ["memberId"],
-      where: { clinicId, memberId: { in: [...memberIds] } },
+      where: { clinicId, memberId: { in: [...memberIds] }, voidedAt: null },
       _count: { _all: true },
       having: { memberId: { _count: { gte: minVisits } } }
     }),
@@ -96,6 +96,7 @@ export class ReviewRequestTrigger implements ScheduledTrigger {
     const recent = await this.prisma.paidVisit.findMany({
       where: {
         clinicId,
+        voidedAt: null,
         occurredAt: { gte: new Date(now.getTime() - REVIEW_WINDOW_DAYS * DAY_MS) }
       },
       select: { memberId: true },

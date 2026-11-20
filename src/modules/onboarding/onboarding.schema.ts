@@ -183,6 +183,11 @@ export const redeemSchema = z.object({
   surpriseItem: z.string().min(1).max(64).optional()
 });
 
+/** Taking back a visit recorded by mistake. The reason is optional and only kept on the row. */
+export const voidVisitSchema = z.object({
+  reason: z.string().trim().max(200).optional()
+});
+
 /** Both optional: an absent figure means "the default for this programme". */
 export const calculatorSchema = z.object({
   clients: z.number({ message: "Los clientes tienen que ser un número" }).optional(),
