@@ -106,6 +106,42 @@ describe("renderSizes", () => {
       format: "png"
     });
   });
+
+  it("crops the strip around the middle of the image, not around whatever stands out", async () => {
+    // A grey square with a vivid red band along its top edge: a saliency crop would chase the band
+    // and leave the clinic's subject (the middle) out of the strip.
+    const source = await sharp({
+      create: { width: 1000, height: 1000, channels: 3, background: { r: 128, g: 128, b: 128 } }
+    })
+      .composite([
+        {
+          input: await sharp({
+            create: { width: 1000, height: 200, channels: 3, background: { r: 255, g: 0, b: 0 } }
+          })
+            .png()
+            .toBuffer(),
+          top: 0,
+          left: 0
+        }
+      ])
+      .png()
+      .toBuffer();
+
+    const set = await renderSizes(source, PASS_IMAGE_SIZES.strip, "strip", "cover");
+    const { data, info } = await sharp(set.files["strip.png"])
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    // Every row of the strip, at its left edge and at its centre, is still grey: no red was cropped in.
+    for (let y = 0; y < info.height; y += 1) {
+      for (const x of [0, Math.floor(info.width / 2), info.width - 1]) {
+        const at = (y * info.width + x) * info.channels;
+
+        expect(Math.abs(data[at] - data[at + 1])).toBeLessThan(12);
+        expect(Math.abs(data[at + 1] - data[at + 2])).toBeLessThan(12);
+      }
+    }
+  });
 });
 
 describe("the sizes the pass images are rendered at", () => {
