@@ -33,6 +33,7 @@ import {
   discountWindowStart,
   earnsProgress,
   earningCents,
+  isDoublePointsPerk,
   includesTreatment,
   milestonesCrossed,
   purchaseProgress,
@@ -410,6 +411,7 @@ export class VisitService {
             points: visit.progressAwarded as number,
             reason: VOID_REASON,
             sourceRef: visit.id,
+            silent: true,
             idempotencyKey: `void:${visit.id}`,
             createdBy: input.voidedBy
           });
@@ -481,9 +483,14 @@ export class VisitService {
           );
         }
 
-        const redeemed = await tx.memberReward.count({ where: { redeemedVisitId: visit.id } });
+        // What was redeemed against this visit. A double-points perk is not a redemption: the visit
+        // used it up by itself, so voiding hands it back. Anything else was given to the client.
+        const usedHere = await tx.memberReward.findMany({ where: { redeemedVisitId: visit.id } });
+        const perksSpent = usedHere.filter((reward) =>
+          isDoublePointsPerk(reward.kind, reward.detail)
+        );
 
-        if (redeemed > 0) {
+        if (usedHere.length > perksSpent.length) {
           throw new OnboardingError(
             "En esta visita se canjeó una recompensa o ventaja, así que no se puede anular.",
             409
@@ -549,6 +556,14 @@ export class VisitService {
           await tx.memberBono.update({
             where: { id: visit.memberBonoId },
             data: { sessionsUsed: visit.bonoSessionNumber - 1, status: MemberBonoStatus.ACTIVE }
+          });
+        }
+
+        // The perk this visit used up is waiting again, for the corrected visit.
+        for (const perk of perksSpent) {
+          await tx.memberReward.update({
+            where: { id: perk.id },
+            data: { redeemedAt: null, redeemedVisitId: null, redeemedBy: null }
           });
         }
 

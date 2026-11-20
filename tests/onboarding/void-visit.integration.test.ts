@@ -349,6 +349,40 @@ describe("voiding a visit", () => {
     });
   });
 
+  describe("a waiting double-points perk", () => {
+    it("is handed back when the visit that used it is voided, not counted as a redemption", async () => {
+      const m = await makeMember();
+      const program = await db.onboardingProgram.findFirstOrThrow({
+        where: { clinicId: clinic.id, status: "ACTIVO" }
+      });
+      const perk = await db.memberReward.create({
+        data: {
+          clinicId: clinic.id,
+          memberId: m.id,
+          programId: program.id,
+          kind: MemberRewardKind.VENTAJA,
+          sourceKey: "m:99",
+          title: "Puntos dobles en tu próxima visita",
+          detail: { perk: "doble" },
+          expiresAt: new Date("2026-12-12T10:00:00Z")
+        }
+      });
+
+      const wrong = await pay(m.id, 20, "wrong");
+
+      expect(wrong).toMatchObject({ progress: 40, doubled: true });
+
+      await expect(voidIt(wrong.visitId)).resolves.toMatchObject({ duplicate: false });
+
+      const back = await db.memberReward.findUniqueOrThrow({ where: { id: perk.id } });
+
+      expect(back).toMatchObject({ redeemedAt: null, redeemedVisitId: null, redeemedBy: null });
+
+      // The corrected visit gets the double the client was owed.
+      expect(await pay(m.id, 20, "right")).toMatchObject({ progress: 40, doubled: true });
+    });
+  });
+
   describe("when it is refused", () => {
     it("refuses after 24 hours, counted from when it was recorded", async () => {
       const m = await makeMember();
@@ -462,9 +496,12 @@ describe("voiding a visit", () => {
 
       expect(reached).not.toBe("Plata");
 
+      notices.length = 0;
       await voidIt(big.visitId);
 
       expect((await memberRow(m.id)).tier).toBe("Plata");
+      // The client is not told: a correction is not news, and a demotion is not a promotion.
+      expect(notices).toEqual([]);
     });
   });
 
