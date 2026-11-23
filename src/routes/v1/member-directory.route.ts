@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import { z } from "zod";
 
 import {
@@ -36,6 +36,8 @@ export interface MemberDirectoryRouterDeps {
 const listQuery = z.object({
   clinicId: z.string().min(1, "clinicId is required"),
   q: z.string().trim().min(1).max(100).optional(),
+  /** A tier label as the list shows it; see MemberDirectoryService.tiers. */
+  tier: z.string().trim().min(1).max(100).optional(),
   // Bounded so one request cannot ask for a whole database.
   limit: z.coerce.number().int().positive().max(200).default(50),
   offset: z.coerce.number().int().nonnegative().default(0)
@@ -56,6 +58,26 @@ const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
 };
 
 /**
+ * One page of members, with the number matching the same filter in X-Total-Count.
+ *
+ * A header rather than a wrapped body: the body stays the array every existing caller reads,
+ * and a screen that pages by number reads the total alongside it.
+ */
+const sendMemberPage = async (
+  res: Response,
+  directory: MemberDirectoryService,
+  options: { clinicId: string; query?: string; tier?: string; limit: number; offset: number }
+) => {
+  const [members, total] = await Promise.all([
+    directory.list(options),
+    directory.count({ clinicId: options.clinicId, query: options.query, tier: options.tier })
+  ]);
+
+  res.setHeader("X-Total-Count", String(total));
+  res.json(members);
+};
+
+/**
  * The reads the clinic dashboard already makes and the backend has never served.
  *
  * Until now every one of these 404s, and the frontend's withMockFallback quietly
@@ -70,9 +92,9 @@ export const createMemberDirectoryRouter = (deps: MemberDirectoryRouterDeps): Ro
     "/members",
     requireStaff,
     asyncHandler(async (req, res) => {
-      const { clinicId, q, limit, offset } = parse(listQuery, req.query);
+      const { clinicId, q, tier, limit, offset } = parse(listQuery, req.query);
 
-      res.json(await deps.directory.list({ clinicId, query: q, limit, offset }));
+      await sendMemberPage(res, deps.directory, { clinicId, query: q, tier, limit, offset });
     })
   );
 
@@ -109,9 +131,25 @@ export const createMemberDirectoryRouter = (deps: MemberDirectoryRouterDeps): Ro
       // clinic with no members, and conflating them hides a misconfigured dashboard.
       if (!clinicId) throw new ClinicNotFoundError(req.params.slug);
 
-      const { q, limit, offset } = parse(listQuery.omit({ clinicId: true }), req.query);
+      const { q, tier, limit, offset } = parse(listQuery.omit({ clinicId: true }), req.query);
 
-      res.json(await deps.directory.list({ clinicId, query: q, limit, offset }));
+      await sendMemberPage(res, deps.directory, { clinicId, query: q, tier, limit, offset });
+    })
+  );
+
+  /**
+   * The tiers the clinic's members are shown under, with a count each, for the members
+   * screen's filter. Registered before /:memberId so "tiers" is not read as a member id.
+   */
+  router.get(
+    "/clinics/:slug/members/tiers",
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const clinicId = await deps.clinicIdForSlug(req.params.slug);
+
+      if (!clinicId) throw new ClinicNotFoundError(req.params.slug);
+
+      res.json(await deps.directory.tiers(clinicId));
     })
   );
 

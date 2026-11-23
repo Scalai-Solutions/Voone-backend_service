@@ -25,12 +25,26 @@ const summary = {
 
 const buildApp = () => {
   const calls: unknown[] = [];
+  const counts: unknown[] = [];
 
   const directory = {
     list: async (options: unknown) => {
       calls.push(options);
 
       return [summary];
+    },
+    count: async (options: unknown) => {
+      counts.push(options);
+
+      return 37;
+    },
+    tiers: async (clinicId: string) => {
+      calls.push({ tiers: clinicId });
+
+      return [
+        { tier: "Bronce", count: 30 },
+        { tier: "Oro", count: 7 }
+      ];
     },
     get: async (memberId: string, clinicId?: string) => {
       calls.push(clinicId ? { get: memberId, clinicId } : { get: memberId });
@@ -68,7 +82,7 @@ const buildApp = () => {
   );
   app.use(errorHandler);
 
-  return { app, calls };
+  return { app, calls, counts };
 };
 
 const request = async (app: Express, path: string, init?: RequestInit) => {
@@ -80,7 +94,11 @@ const request = async (app: Express, path: string, init?: RequestInit) => {
     const response = await fetch(`http://127.0.0.1:${port}${path}`, init);
     const text = await response.text();
 
-    return { status: response.status, body: text ? JSON.parse(text) : null };
+    return {
+      status: response.status,
+      body: text ? JSON.parse(text) : null,
+      total: response.headers.get("X-Total-Count")
+    };
   } finally {
     server.close();
   }
@@ -115,6 +133,7 @@ describe("GET /members", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual([summary]);
+    expect(res.total).toBe("37");
   });
 
   it("passes the search term through", async () => {
@@ -203,6 +222,49 @@ describe("GET /clinics/:slug/members", () => {
     await get(app, "/api/v1/clinics/aurea/members?q=nav&limit=10&offset=5");
 
     expect(calls[0]).toMatchObject({ query: "nav", limit: 10, offset: 5 });
+  });
+
+  it("reports how many members match the search in X-Total-Count, body unchanged", async () => {
+    // A screen that pages by number needs the total; existing callers keep reading the array.
+    const { app, counts } = buildApp();
+
+    const res = await get(app, "/api/v1/clinics/aurea/members?q=nav&limit=10&offset=10");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([summary]);
+    expect(res.total).toBe("37");
+    // The count uses the same clinic and search as the page, never the page window.
+    expect(counts).toEqual([{ clinicId: CLINIC, query: "nav" }]);
+  });
+
+  it("filters the page and the total by the same tier", async () => {
+    const { app, calls, counts } = buildApp();
+
+    await get(app, "/api/v1/clinics/aurea/members?tier=Oro&limit=10&offset=0");
+
+    expect(calls[0]).toMatchObject({ clinicId: CLINIC, tier: "Oro", limit: 10, offset: 0 });
+    expect(counts).toEqual([{ clinicId: CLINIC, tier: "Oro" }]);
+  });
+});
+
+describe("GET /clinics/:slug/members/tiers", () => {
+  it("lists the clinic's tiers with counts, not a member called 'tiers'", async () => {
+    const { app, calls } = buildApp();
+
+    const res = await get(app, "/api/v1/clinics/aurea/members/tiers");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      { tier: "Bronce", count: 30 },
+      { tier: "Oro", count: 7 }
+    ]);
+    expect(calls).toEqual([{ tiers: CLINIC }]);
+  });
+
+  it("404s an unknown slug", async () => {
+    const { app } = buildApp();
+
+    expect((await get(app, "/api/v1/clinics/nope/members/tiers")).status).toBe(404);
   });
 });
 

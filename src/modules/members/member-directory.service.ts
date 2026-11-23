@@ -2,6 +2,7 @@ import {
   OnboardingProgramStatus,
   WalletProviderType,
   WalletSyncStatus,
+  type Prisma,
   type PrismaClient
 } from "@prisma/client";
 
@@ -97,6 +98,11 @@ export interface ListMembersOptions {
   clinicId: string;
   /** Matches name, phone or email. */
   query?: string;
+  /**
+   * The tier label the list shows (see tierLabelFor), so filtering by the clinic's base tier
+   * also finds the members who hold no tier yet and are shown under it.
+   */
+  tier?: string;
   limit: number;
   offset: number;
 }
@@ -163,30 +169,8 @@ export class MemberDirectoryService {
   ) {}
 
   async list(options: ListMembersOptions): Promise<MemberSummary[]> {
-    const q = options.query?.trim();
-
     const members = await this.prisma.member.findMany({
-      where: {
-        clinicId: options.clinicId,
-        // An erased member is not a member. The row survives only to keep the ledger's
-        // foreign keys intact.
-        erasedAt: null,
-        ...(q
-          ? {
-              OR: [
-                { name: { contains: q, mode: "insensitive" as const } },
-                // The number on the member's card. Matched exactly rather than by
-                // substring, and case-insensitively because the code is printed
-                // uppercase and nobody types it that way: five characters are short
-                // enough that `contains` would make "K7M2Q" match on fragments of
-                // unrelated codes, which is the opposite of what a reception desk needs.
-                { code: { equals: q, mode: "insensitive" as const } },
-                { phone: { contains: q } },
-                { email: { contains: q, mode: "insensitive" as const } }
-              ]
-            }
-          : {})
-      },
+      where: await this.listWhere(options),
       orderBy: { createdAt: "desc" },
       take: options.limit,
       skip: options.offset,
@@ -203,6 +187,109 @@ export class MemberDirectoryService {
     ]);
 
     return this.withAppleUpdates(summaries, appleUpdates);
+  }
+
+  /**
+   * How many members match, for the same clinic and search as list(), so a paged screen can
+   * say "page 2 of 7" and show the clinic's total without loading every row.
+   */
+  async count(options: Omit<ListMembersOptions, "limit" | "offset">): Promise<number> {
+    return this.prisma.member.count({ where: await this.listWhere(options) });
+  }
+
+  /**
+   * Every tier label the clinic's members are shown under, with how many hold each, for the
+   * members screen's filter. Read from the members themselves rather than the template, so a
+   * tier a member still holds after the ladder was renamed stays findable.
+   */
+  async tiers(clinicId: string): Promise<Array<{ tier: string; count: number }>> {
+    const [groups, fallback] = await Promise.all([
+      this.prisma.member.groupBy({
+        by: ["tier"],
+        where: { clinicId, erasedAt: null },
+        _count: { _all: true }
+      }),
+      this.fallbackTier(clinicId)
+    ]);
+    const counts = new Map<string, number>();
+
+    for (const group of groups) {
+      const label = group.tier || fallback;
+
+      counts.set(label, (counts.get(label) ?? 0) + group._count._all);
+    }
+
+    return [...counts]
+      .map(([tier, count]) => ({ tier, count }))
+      .sort((a, b) => b.count - a.count || a.tier.localeCompare(b.tier, "es"));
+  }
+
+  /** What a member of this clinic with no stored tier is shown as; the same rule as toSummary. */
+  private async fallbackTier(clinicId: string): Promise<string> {
+    const clinic = await this.prisma.clinic.findUnique({
+      where: { id: clinicId },
+      select: {
+        template: { select: { tierRewards: true } },
+        onboardingPrograms: {
+          where: { status: OnboardingProgramStatus.ACTIVO },
+          take: 1,
+          select: { id: true }
+        }
+      }
+    });
+
+    return tierLabelFor(
+      null,
+      clinic?.template?.tierRewards,
+      (clinic?.onboardingPrograms.length ?? 0) > 0
+    );
+  }
+
+  /** The filter list() and count() share, so the total always matches the rows paged through. */
+  private async listWhere(
+    options: Pick<ListMembersOptions, "clinicId" | "query" | "tier">
+  ): Promise<Prisma.MemberWhereInput> {
+    const search = this.searchWhere(options);
+
+    if (!options.tier) return search;
+
+    // A member with no stored tier is listed under the clinic's base tier, so that filter
+    // must find them too, or the count under a tier would disagree with the rows shown.
+    const fallback = await this.fallbackTier(options.clinicId);
+    const tier: Prisma.MemberWhereInput =
+      options.tier === fallback
+        ? { OR: [{ tier: options.tier }, { tier: null }, { tier: "" }] }
+        : { tier: options.tier };
+
+    return { AND: [search, tier] };
+  }
+
+  private searchWhere(
+    options: Pick<ListMembersOptions, "clinicId" | "query">
+  ): Prisma.MemberWhereInput {
+    const q = options.query?.trim();
+
+    return {
+      clinicId: options.clinicId,
+      // An erased member is not a member. The row survives only to keep the ledger's
+      // foreign keys intact.
+      erasedAt: null,
+      ...(q
+        ? {
+            OR: [
+              { name: { contains: q, mode: "insensitive" as const } },
+              // The number on the member's card. Matched exactly rather than by
+              // substring, and case-insensitively because the code is printed
+              // uppercase and nobody types it that way: five characters are short
+              // enough that `contains` would make "K7M2Q" match on fragments of
+              // unrelated codes, which is the opposite of what a reception desk needs.
+              { code: { equals: q, mode: "insensitive" as const } },
+              { phone: { contains: q } },
+              { email: { contains: q, mode: "insensitive" as const } }
+            ]
+          }
+        : {})
+    };
   }
 
   /** With a clinicId, a member of another clinic is not found, as if it did not exist. */
