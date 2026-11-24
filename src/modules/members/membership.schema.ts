@@ -30,8 +30,8 @@ export const clinicSlugSchema = z
  * A slug being CREATED for a new clinic. Exactly five characters, and the authority.
  *
  * It is printed on a QR poster and typed off that poster by hand, so length is the whole
- * point: `voone.ai/alta/k7m2q` can be read across a reception desk and
- * `voone.ai/alta/clinica-aurea` cannot.
+ * point: `voone.es/alta/k7m2q` can be read across a reception desk and
+ * `voone.es/alta/clinica-aurea` cannot.
  *
  * No hyphens, because a separator inside five characters only costs legibility. The
  * alphabet is wider than the generator's — the generator avoids i/l/o/0/1 so its output

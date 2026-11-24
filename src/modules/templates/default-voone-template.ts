@@ -22,7 +22,7 @@ export const DEFAULT_WALLET_INFO_TEXT =
 export const DEFAULT_WALLET_BUTTONS = [
   {
     label: "Web",
-    url: "https://voone.ai",
+    url: "https://voone.es",
     description: "Web",
     primary: false
   },
